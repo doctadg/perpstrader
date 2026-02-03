@@ -1,0 +1,15 @@
+[Unit]
+Description=PerpsTrader Research Engine
+After=network.target
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/research.js
+Restart=always
+RestartSec=30
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

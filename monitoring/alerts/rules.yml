@@ -1,0 +1,99 @@
+groups:
+  - name: clustering_enhancements
+    interval: 30s
+    rules:
+      - alert: HighAnomalyRate
+        expr: rate(anomaly_detection_count[1h]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          team: perps
+        annotations:
+          summary: "Unusually high anomaly detection rate"
+          description: "Anomaly detection rate is {{ $value }} per hour, which is above the threshold of 10/hour"
+
+      - alert: PredictionAccuracyDrop
+        expr: heat_prediction_accuracy < 0.5
+        for: 10m
+        labels:
+          severity: critical
+          team: perps
+        annotations:
+          summary: "Heat prediction accuracy dropped"
+          description: "Current prediction accuracy is {{ $value | humanizePercentage }}, below the 50% threshold"
+
+      - alert: ClusteringSlowdown
+        expr: rate(clustering_duration_seconds_sum[5m]) / rate(clustering_duration_seconds_count[5m]) > 30
+        for: 5m
+        labels:
+          severity: warning
+          team: perps
+        annotations:
+          summary: "Enhanced clustering running slowly"
+          description: "Average clustering duration is {{ $value }}s, above the 30s threshold"
+
+      - alert: CriticalAnomalySpike
+        expr: rate(anomaly_detection_count{severity="critical"}[5m]) > 5
+        for: 2m
+        labels:
+          severity: critical
+          team: perps
+        annotations:
+          summary: "Critical anomaly spike detected"
+          description: "Critical anomalies are being detected at {{ $value }} per second"
+
+      - alert: TooManyActiveAnomalies
+        expr: sum(anomalies_active) > 100
+        for: 10m
+        labels:
+          severity: warning
+          team: perps
+        annotations:
+          summary: "High number of active anomalies"
+          description: "{{ $value }} anomalies are currently active"
+
+  - name: system_health
+    interval: 30s
+    rules:
+      - alert: MetricsExporterDown
+        expr: up{job="perps-metrics"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: devops
+        annotations:
+          summary: "Metrics exporter is down"
+          description: "The metrics exporter instance {{ $labels.instance }} has been down for more than 2 minutes"
+
+      - alert: HighPredictionErrorRate
+        expr: rate(prediction_error_count[5m]) / rate(prediction_generation_count[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: perps
+        annotations:
+          summary: "High prediction error rate"
+          description: "Prediction error rate is {{ $value | humanizePercentage }}"
+
+  - name: entity_monitoring
+    interval: 1m
+    rules:
+      - alert: LowEntityExtractionRate
+        expr: rate(entity_extraction_count[1h]) < 10
+        for: 15m
+        labels:
+          severity: info
+          team: perps
+        annotations:
+          summary: "Low entity extraction rate"
+          description: "Entity extraction rate is {{ $value }} per hour, below expected baseline"
+
+      - alert: EntityHeatVelocityAlert
+        expr: abs(rate(entity_heat_value[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: perps
+        annotations:
+          summary: "Rapid entity heat change detected"
+          description: "Entity {{ $labels.entity }} heat is changing rapidly at {{ $value }} per second"

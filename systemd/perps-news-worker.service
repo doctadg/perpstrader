@@ -1,0 +1,29 @@
+[Unit]
+Description=PerpsTrader News Processing Worker (BullMQ)
+After=network.target perps-redis.service
+Wants=perps-redis.service
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/workers/news-worker.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=SERVICE_NAME=news-worker
+Environment=REDIS_HOST=127.0.0.1
+Environment=REDIS_PORT=6380
+Environment=NEWS_WORKER_CONCURRENCY=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perps-news-worker
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,31 @@
+[Unit]
+Description=PerpsTrader Prediction Markets Agent
+After=network.target
+
+[Service]
+Type=simple
+User=d
+Group=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/prediction-agent.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=PREDICTION_DB_PATH=/home/d/PerpsTrader/data/predictions.db
+Environment=POLYMARKET_API_BASE=https://gamma-api.polymarket.com
+Environment=PREDICTION_MARKET_MAX_AGE_DAYS=30
+Environment=POLYMARKET_MARKETS_ORDER=volume24hr
+Environment=PREDICTION_MIN_VOLUME=10000
+Environment=PATH=/usr/bin:/home/d/.local/bin
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perps-predictions
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

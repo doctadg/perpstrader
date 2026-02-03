@@ -1,0 +1,21 @@
+[Unit]
+Description=PerpsTrader Isolated Redis Message Bus
+After=network.target
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/redis-server /home/d/PerpsTrader/config/redis.conf
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perps-redis
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

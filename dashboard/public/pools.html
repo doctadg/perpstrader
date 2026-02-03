@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERPS_TRADER // SAFEKEEPING_POOLS</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
+
+        :root {
+            --bg-obsidian: #050507;
+            --bg-panel: rgba(12, 12, 18, 0.85);
+            --terminal-green: #00ff9d;
+            --terminal-cyan: #00f2ff;
+            --terminal-amber: #ffb300;
+            --terminal-red: #ff3e3e;
+            --terminal-purple: #b967ff;
+            --border-low: rgba(0, 242, 255, 0.15);
+            --border-med: rgba(0, 242, 255, 0.4);
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Inter', sans-serif;
+            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
+            --glow-green: 0 0 15px rgba(0, 255, 157, 0.3);
+            --glow-purple: 0 0 15px rgba(185, 103, 255, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: var(--terminal-cyan) transparent;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-obsidian);
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* CRT Scanline Effect */
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 1000;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+
+        .container {
+            max-width: 2000px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            border-left: 4px solid var(--terminal-green);
+            backdrop-filter: blur(8px);
+        }
+
+        .system-id {
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            letter-spacing: 2px;
+            color: var(--terminal-green);
+            text-transform: uppercase;
+        }
+
+        .system-title {
+            font-weight: 800;
+            font-size: 1.4em;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .system-title span {
+            color: var(--terminal-green);
+            text-shadow: var(--glow-green);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            margin-left: 20px;
+        }
+
+        .nav-link {
+            color: var(--terminal-cyan);
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            text-decoration: none;
+            border: 1px solid var(--border-low);
+            padding: 4px 10px;
+            transition: all 0.2s;
+        }
+
+        .nav-link:hover {
+            border-color: var(--terminal-green);
+            color: var(--terminal-green);
+            box-shadow: var(--glow-green);
+        }
+
+        .status-module {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+        }
+
+        .connection-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px;
+            background: rgba(0, 255, 157, 0.1);
+            border: 1px solid var(--terminal-green);
+            color: var(--terminal-green);
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--terminal-green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--terminal-green);
+            animation: flicker 1.5s infinite;
+        }
+
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Data Strip */
+        .data-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1px;
+            background: var(--border-low);
+            border: 1px solid var(--border-low);
+        }
+
+        .data-module {
+            background: var(--bg-panel);
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .module-label {
+            font-family: var(--font-mono);
+            font-size: 0.6em;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .module-value {
+            font-family: var(--font-mono);
+            font-size: 1.3em;
+            font-weight: 700;
+        }
+
+        .module-value.green { color: var(--terminal-green); }
+        .module-value.cyan { color: var(--terminal-cyan); }
+        .module-value.red { color: var(--terminal-red); }
+        .module-value.purple { color: var(--terminal-purple); }
+        .module-value.amber { color: var(--terminal-amber); }
+
+        /* Chain Status Bar */
+        .chain-status-bar {
+            display: flex;
+            gap: 1px;
+            background: var(--border-low);
+            border: 1px solid var(--border-low);
+        }
+
+        .chain-status {
+            flex: 1;
+            background: var(--bg-panel);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.3s;
+        }
+
+        .chain-status.connected {
+            border-top: 2px solid var(--terminal-green);
+        }
+
+        .chain-status.disconnected {
+            border-top: 2px solid var(--terminal-red);
+            opacity: 0.5;
+        }
+
+        .chain-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .chain-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2em;
+        }
+
+        .chain-icon.ethereum { background: rgba(107, 71, 255, 0.2); }
+        .chain-icon.bsc { background: rgba(240, 185, 11, 0.2); }
+        .chain-icon.solana { background: rgba(15, 188, 138, 0.2); }
+
+        .chain-name {
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .chain-metrics {
+            text-align: right;
+        }
+
+        .chain-apr {
+            font-family: var(--font-mono);
+            font-size: 1.1em;
+            font-weight: 700;
+            color: var(--terminal-green);
+        }
+
+        .chain-positions {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: #888;
+        }
+
+        /* Main Grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+
+        /* Tech Panel */
+        .tech-panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-title-bar {
+            background: rgba(0, 255, 157, 0.05);
+            border-bottom: 1px solid var(--border-low);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-label {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--terminal-green);
+        }
+
+        .panel-meta {
+            font-family: var(--font-mono);
+            font-size: 0.6em;
+            color: var(--terminal-cyan);
+        }
+
+        .panel-body {
+            padding: 0;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        /* Tables */
+        .terminal-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+        }
+
+        .terminal-table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 0.65em;
+            color: #666;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border-low);
+            background: rgba(0, 0, 0, 0.2);
+            position: sticky;
+            top: 0;
+        }
+
+        .terminal-table td {
+            padding: 12px 16px;
+            font-size: 0.8em;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .terminal-table tr:hover {
+            background: rgba(0, 255, 157, 0.03);
+        }
+
+        /* APR Badge */
+        .apr-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 0.9em;
+        }
+
+        .apr-badge.high {
+            background: rgba(0, 255, 157, 0.15);
+            color: var(--terminal-green);
+            border: 1px solid rgba(0, 255, 157, 0.3);
+        }
+
+        .apr-badge.medium {
+            background: rgba(0, 242, 255, 0.15);
+            color: var(--terminal-cyan);
+            border: 1px solid rgba(0, 242, 255, 0.3);
+        }
+
+        .apr-badge.low {
+            background: rgba(255, 179, 0, 0.15);
+            color: var(--terminal-amber);
+            border: 1px solid rgba(255, 179, 0, 0.3);
+        }
+
+        /* Chain Tags */
+        .chain-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.7em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .chain-tag.ethereum {
+            background: rgba(107, 71, 255, 0.2);
+            color: #8b5cf6;
+        }
+
+        .chain-tag.bsc {
+            background: rgba(240, 185, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .chain-tag.solana {
+            background: rgba(15, 188, 138, 0.2);
+            color: #10b981;
+        }
+
+        /* AI Analysis Panel */
+        .ai-analysis {
+            background: rgba(185, 103, 255, 0.05);
+            border-left: 3px solid var(--terminal-purple);
+            padding: 16px;
+            margin: 16px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .ai-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: var(--terminal-purple);
+            text-transform: uppercase;
+        }
+
+        .ai-summary {
+            font-size: 0.9em;
+            color: #ccc;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .ai-recommendations {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .ai-rec {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 0.8em;
+            color: #aaa;
+        }
+
+        .ai-rec::before {
+            content: "▸";
+            color: var(--terminal-purple);
+        }
+
+        /* Activity Console */
+        .activity-console {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 16px;
+            height: 100%;
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+            line-height: 1.6;
+        }
+
+        .console-line {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 6px;
+            padding-bottom: 6px;
+            border-bottom: 1px hidden rgba(255, 255, 255, 0.05);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-10px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .timestamp {
+            color: #555;
+            min-width: 80px;
+        }
+
+        .log-tag {
+            min-width: 70px;
+            text-transform: uppercase;
+        }
+
+        .log-msg {
+            color: #ccc;
+        }
+
+        .tag-info { color: var(--terminal-cyan); }
+        .tag-success { color: var(--terminal-green); }
+        .tag-warn { color: var(--terminal-amber); }
+        .tag-error { color: var(--terminal-red); }
+        .tag-ai { color: var(--terminal-purple); }
+        .tag-rebalance { color: var(--terminal-green); }
+
+        /* Rebalance Status */
+        .rebalance-status {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+        }
+
+        .status-label {
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .status-value {
+            font-weight: 700;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--terminal-green), var(--terminal-cyan));
+            transition: width 0.5s ease;
+        }
+
+        /* Risk Indicator */
+        .risk-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .risk-low {
+            background: rgba(0, 255, 157, 0.15);
+            color: var(--terminal-green);
+        }
+
+        .risk-medium {
+            background: rgba(255, 179, 0, 0.15);
+            color: var(--terminal-amber);
+        }
+
+        .risk-high {
+            background: rgba(255, 62, 62, 0.15);
+            color: var(--terminal-red);
+        }
+
+        /* Action Buttons */
+        .action-bar {
+            display: flex;
+            gap: 10px;
+            padding: 16px;
+            border-top: 1px solid var(--border-low);
+        }
+
+        .action-btn {
+            flex: 1;
+            padding: 10px 16px;
+            background: rgba(0, 255, 157, 0.1);
+            border: 1px solid var(--terminal-green);
+            color: var(--terminal-green);
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 4px;
+        }
+
+        .action-btn:hover {
+            background: rgba(0, 255, 157, 0.2);
+            box-shadow: var(--glow-green);
+        }
+
+        .action-btn.danger {
+            background: rgba(255, 62, 62, 0.1);
+            border-color: var(--terminal-red);
+            color: var(--terminal-red);
+        }
+
+        .action-btn.danger:hover {
+            background: rgba(255, 62, 62, 0.2);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-low);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--terminal-cyan);
+        }
+
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Top Status Bar -->
+        <header class="top-bar">
+            <div class="system-id">[ SAFEKEEPING_NODE.007 ]</div>
+            <div class="system-title">
+                <span>PERPS</span>_TRADER.ai / POOLS
+            </div>
+            <div class="nav-links">
+                <a href="/index.html" class="nav-link">← MAIN_DASHBOARD</a>
+                <a href="/trace" class="nav-link">TRACE</a>
+                <a href="/predictions" class="nav-link">PREDICTIONS</a>
+            </div>
+            <div class="status-module">
+                <div class="connection-indicator">
+                    <span class="live-dot"></span>
+                    <span id="connection-status">INITIALIZING...</span>
+                </div>
+                <div id="system-time">00:00:00</div>
+            </div>
+        </header>
+
+        <!-- Global Data Strip -->
+        <div class="data-strip">
+            <div class="data-module">
+                <span class="module-label">TOTAL_VALUE_LOCKED</span>
+                <span class="module-value green" id="tvl">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">WEIGHTED_APR</span>
+                <span class="module-value cyan" id="weighted-apr">0.00%</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">ACTIVE_POSITIONS</span>
+                <span class="module-value" id="active-positions">0</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">TOTAL_REBALANCES</span>
+                <span class="module-value purple" id="total-rebalances">0</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">SUCCESS_RATE</span>
+                <span class="module-value" id="success-rate">100%</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">GAS_SPENT_24H</span>
+                <span class="module-value amber" id="gas-spent">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">AI_RISK_LEVEL</span>
+                <span class="module-value" id="ai-risk">MEDIUM</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">MARKET_REGIME</span>
+                <span class="module-value" id="market-regime">SIDEWAYS</span>
+            </div>
+        </div>
+
+        <!-- Chain Status Bar -->
+        <div class="chain-status-bar" id="chain-status-bar">
+            <div class="chain-status" id="chain-ethereum">
+                <div class="chain-info">
+                    <span class="chain-icon ethereum">⟠</span>
+                    <div>
+                        <div class="chain-name">ETHEREUM</div>
+                        <div class="chain-positions" id="eth-positions">0 positions</div>
+                    </div>
+                </div>
+                <div class="chain-metrics">
+                    <div class="chain-apr" id="eth-apr">0.00%</div>
+                    <div style="font-size: 0.7em; color: #666;" id="eth-value">$0</div>
+                </div>
+            </div>
+            <div class="chain-status" id="chain-bsc">
+                <div class="chain-info">
+                    <span class="chain-icon bsc">◆</span>
+                    <div>
+                        <div class="chain-name">BSC</div>
+                        <div class="chain-positions" id="bsc-positions">0 positions</div>
+                    </div>
+                </div>
+                <div class="chain-metrics">
+                    <div class="chain-apr" id="bsc-apr">0.00%</div>
+                    <div style="font-size: 0.7em; color: #666;" id="bsc-value">$0</div>
+                </div>
+            </div>
+            <div class="chain-status" id="chain-solana">
+                <div class="chain-info">
+                    <span class="chain-icon solana">◎</span>
+                    <div>
+                        <div class="chain-name">SOLANA</div>
+                        <div class="chain-positions" id="sol-positions">0 positions</div>
+                    </div>
+                </div>
+                <div class="chain-metrics">
+                    <div class="chain-apr" id="sol-apr">0.00%</div>
+                    <div style="font-size: 0.7em; color: #666;" id="sol-value">$0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Left Column -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <!-- Pool Opportunities -->
+                <div class="tech-panel">
+                    <div class="panel-title-bar">
+                        <span class="panel-label">● POOL_OPPORTUNITIES</span>
+                        <span class="panel-meta">LIVE_APR_FEED</span>
+                    </div>
+                    <div class="panel-body">
+                        <table class="terminal-table">
+                            <thead>
+                                <tr>
+                                    <th>POOL</th>
+                                    <th>CHAIN</th>
+                                    <th>TVL</th>
+                                    <th>FEE_APR</th>
+                                    <th>EFFECTIVE_APR</th>
+                                    <th>RISK</th>
+                                </tr>
+                            </thead>
+                            <tbody id="opportunities-tbody">
+                                <tr class="empty-state">
+                                    <td colspan="6" style="text-align: center; color: #555; padding: 40px;">
+                                        // SCANNING_FOR_OPPORTUNITIES...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Current Positions -->
+                <div class="tech-panel">
+                    <div class="panel-title-bar">
+                        <span class="panel-label">● ACTIVE_POSITIONS</span>
+                        <span class="panel-meta">CURRENT_ALLOCATION</span>
+                    </div>
+                    <div class="panel-body">
+                        <table class="terminal-table">
+                            <thead>
+                                <tr>
+                                    <th>POOL</th>
+                                    <th>CHAIN</th>
+                                    <th>VALUE</th>
+                                    <th>APR</th>
+                                    <th>IL_RISK</th>
+                                    <th>ENTRY</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-tbody">
+                                <tr class="empty-state">
+                                    <td colspan="6" style="text-align: center; color: #555; padding: 40px;">
+                                        // NO_ACTIVE_POSITIONS
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Rebalance History -->
+                <div class="tech-panel">
+                    <div class="panel-title-bar">
+                        <span class="panel-label">● REBALANCE_HISTORY</span>
+                        <span class="panel-meta">RECENT_TX</span>
+                    </div>
+                    <div class="panel-body">
+                        <table class="terminal-table">
+                            <thead>
+                                <tr>
+                                    <th>TIMESTAMP</th>
+                                    <th>TYPE</th>
+                                    <th>FROM</th>
+                                    <th>TO</th>
+                                    <th>AMOUNT</th>
+                                    <th>GAS</th>
+                                    <th>STATUS</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rebalance-tbody">
+                                <tr class="empty-state">
+                                    <td colspan="7" style="text-align: center; color: #555; padding: 20px;">
+                                        // NO_REBALANCE_HISTORY
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <!-- AI Analysis Panel -->
+                <div class="tech-panel">
+                    <div class="panel-title-bar">
+                        <span class="panel-label">● AI_ANALYSIS</span>
+                        <span class="panel-meta">OPENROUTER_POWERED</span>
+                    </div>
+                    <div class="panel-body" style="padding: 0;">
+                        <div class="ai-analysis" id="ai-analysis">
+                            <div class="ai-header">
+                                <span>◈</span>
+                                <span>AI_MARKET_INSIGHTS</span>
+                            </div>
+                            <div class="ai-summary" id="ai-summary">
+                                Analyzing market conditions...
+                            </div>
+                            <div class="ai-recommendations" id="ai-recommendations">
+                                <div class="ai-rec">Scanning cross-chain opportunities...</div>
+                                <div class="ai-rec">Evaluating risk factors...</div>
+                                <div class="ai-rec">Preparing rebalancing strategy...</div>
+                            </div>
+                        </div>
+                        <div class="rebalance-status">
+                            <div class="status-row">
+                                <span class="status-label">Current Cycle</span>
+                                <span class="status-value" id="current-cycle">0</span>
+                            </div>
+                            <div class="status-row">
+                                <span class="status-label">Cycle Progress</span>
+                                <span class="status-value" id="cycle-step">IDLE</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="cycle-progress" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="action-bar">
+                            <button class="action-btn" onclick="triggerRebalance()">
+                                ⟳ FORCE_REBALANCE
+                            </button>
+                            <button class="action-btn danger" onclick="emergencyHalt()">
+                                ⚠ EMERGENCY_HALT
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Anomalies & Alerts -->
+                <div class="tech-panel">
+                    <div class="panel-title-bar">
+                        <span class="panel-label">● ANOMALY_DETECTOR</span>
+                        <span class="panel-meta">AI_MONITORED</span>
+                    </div>
+                    <div class="panel-body">
+                        <div id="anomalies-container" style="padding: 16px;">
+                            <div style="text-align: center; color: #555; padding: 20px; font-family: var(--font-mono); font-size: 0.8em;">
+                                // NO_ANOMALIES_DETECTED
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="tech-panel">
+                    <div class="panel-title-bar">
+                        <span class="panel-label">● ACTIVITY_LOG</span>
+                        <span class="panel-meta">REALTIME</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="activity-console" id="activity-log">
+                            <div class="console-line">
+                                <span class="timestamp">[--:--:--]</span>
+                                <span class="log-tag tag-info">[INIT]</span>
+                                <span class="log-msg">Safekeeping Fund monitor initialized</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let safekeepingData = {
+            positions: [],
+            opportunities: [],
+            rebalances: [],
+            chainStatus: {},
+            aiAnalysis: null
+        };
+
+        function initSocket() {
+            socket = io();
+
+            socket.on('connect', () => {
+                addActivityLog('UPLINK_ESTABLISHED', 'success');
+                document.getElementById('connection-status').textContent = 'ONLINE';
+            });
+
+            socket.on('disconnect', () => {
+                addActivityLog('UPLINK_LOST', 'error');
+                document.getElementById('connection-status').textContent = 'OFFLINE';
+            });
+
+            // Safekeeping specific events
+            socket.on('safekeeping:cycle:start', (data) => {
+                addActivityLog(`CYCLE_${data.cycleId}_STARTED`, 'info');
+                updateCycleProgress('MARKET_SCAN', 10);
+            });
+
+            socket.on('safekeeping:cycle:complete', (data) => {
+                addActivityLog(`CYCLE_COMPLETE // REBALANCES: ${data.rebalances}`, 'success');
+                updateCycleProgress('COMPLETE', 100);
+                fetchData();
+            });
+
+            socket.on('safekeeping:execution:submit', (data) => {
+                addActivityLog(`REBALANCE_SUBMITTED // ${data.type}`, 'rebalance');
+            });
+
+            socket.on('safekeeping:execution:complete', (data) => {
+                addActivityLog(`REBALANCE_COMPLETE // TX: ${data.txHash?.slice(0, 10)}...`, 'success');
+            });
+
+            socket.on('safekeeping:emergency:halt', (data) => {
+                addActivityLog(`EMERGENCY_HALT // ${data.reason}`, 'error');
+            });
+
+            socket.on('safekeeping:position:opened', (data) => {
+                addActivityLog(`POSITION_OPENED // ${data.pool}`, 'success');
+            });
+
+            socket.on('safekeeping:position:closed', (data) => {
+                addActivityLog(`POSITION_CLOSED // ${data.pool}`, 'warn');
+            });
+        }
+
+        function updateCycleProgress(step, progress) {
+            document.getElementById('cycle-step').textContent = step;
+            document.getElementById('cycle-progress').style.width = progress + '%';
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/api/safekeeping');
+                if (!response.ok) {
+                    throw new Error('API not available');
+                }
+                const data = await response.json();
+                safekeepingData = data;
+
+                updateDashboard(data);
+            } catch (error) {
+                console.log('Safekeeping API not yet implemented, using mock data');
+                // Use mock data for demo
+                updateDashboard(getMockData());
+            }
+        }
+
+        function getMockData() {
+            return {
+                tvl: 125000,
+                weightedAPR: 18.5,
+                activePositions: 5,
+                totalRebalances: 23,
+                successRate: 95.7,
+                gasSpent: 127.50,
+                aiRiskLevel: 'MEDIUM',
+                marketRegime: 'BULL',
+                positions: [
+                    { pool: 'USDC/USDT', chain: 'ethereum', value: 50000, apr: 8.5, ilRisk: 0.01, entry: '2024-01-10' },
+                    { pool: 'USDC/ETH', chain: 'ethereum', value: 35000, apr: 22.3, ilRisk: 0.08, entry: '2024-01-12' },
+                    { pool: 'USDT/BNB', chain: 'bsc', value: 25000, apr: 15.2, ilRisk: 0.05, entry: '2024-01-14' },
+                    { pool: 'USDC/SOL', chain: 'solana', value: 15000, apr: 28.7, ilRisk: 0.12, entry: '2024-01-15' },
+                ],
+                opportunities: [
+                    { pool: 'USDC/USDT', chain: 'ethereum', tvl: 5200000, feeAPR: 6.5, effectiveAPR: 7.8, risk: 'LOW' },
+                    { pool: 'WBTC/ETH', chain: 'ethereum', tvl: 12500000, feeAPR: 18.2, effectiveAPR: 15.5, risk: 'MEDIUM' },
+                    { pool: 'USDC/SOL', chain: 'solana', tvl: 8500000, feeAPR: 35.2, effectiveAPR: 28.7, risk: 'HIGH' },
+                    { pool: 'ETH/USDT', chain: 'bsc', tvl: 3200000, feeAPR: 12.8, effectiveAPR: 11.2, risk: 'MEDIUM' },
+                ],
+                chainStatus: {
+                    ethereum: { connected: true, positions: 2, apr: 15.4, value: 85000 },
+                    bsc: { connected: true, positions: 1, apr: 15.2, value: 25000 },
+                    solana: { connected: true, positions: 2, apr: 24.5, value: 15000 },
+                },
+                rebalances: [
+                    { timestamp: '2024-01-17T10:30:00', type: 'REALLOCATE', from: 'USDC/USDT', to: 'WBTC/ETH', amount: 10000, gas: 12.50, status: 'SUCCESS' },
+                    { timestamp: '2024-01-17T08:15:00', type: 'MINT', from: null, to: 'USDC/SOL', amount: 5000, gas: 0.25, status: 'SUCCESS' },
+                    { timestamp: '2024-01-16T22:45:00', type: 'BURN', from: 'ETH/USDT', to: null, amount: 8000, gas: 8.30, status: 'SUCCESS' },
+                ],
+                aiAnalysis: {
+                    summary: 'Market showing bullish momentum with elevated volatility. Cross-chain opportunities favor Solana for higher yields while Ethereum provides stability.',
+                    recommendations: [
+                        'Consider increasing Solana allocation by 10-15%',
+                        'Monitor Ethereum gas prices before large rebalances',
+                        'USDC/USDT stable pool offers safe yield during volatility'
+                    ],
+                    anomalies: []
+                },
+                cycleNumber: 127
+            };
+        }
+
+        function updateDashboard(data) {
+            // Update data strip
+            document.getElementById('tvl').textContent = '$' + (data.tvl || 0).toLocaleString();
+            document.getElementById('weighted-apr').textContent = (data.weightedAPR || 0).toFixed(2) + '%';
+            document.getElementById('active-positions').textContent = data.activePositions || 0;
+            document.getElementById('total-rebalances').textContent = data.totalRebalances || 0;
+            document.getElementById('success-rate').textContent = (data.successRate || 0).toFixed(1) + '%';
+            document.getElementById('gas-spent').textContent = '$' + (data.gasSpent || 0).toFixed(2);
+
+            const riskEl = document.getElementById('ai-risk');
+            riskEl.textContent = data.aiRiskLevel || 'MEDIUM';
+            riskEl.className = 'module-value ' + getRiskClass(data.aiRiskLevel);
+
+            document.getElementById('market-regime').textContent = data.marketRegime || 'SIDEWAYS';
+            document.getElementById('current-cycle').textContent = data.cycleNumber || 0;
+
+            // Update chain status
+            updateChainStatus(data.chainStatus || {});
+
+            // Update opportunities
+            updateOpportunities(data.opportunities || []);
+
+            // Update positions
+            updatePositions(data.positions || []);
+
+            // Update rebalance history
+            updateRebalances(data.rebalances || []);
+
+            // Update AI analysis
+            updateAIAnalysis(data.aiAnalysis);
+        }
+
+        function getRiskClass(risk) {
+            switch(risk) {
+                case 'LOW': return 'green';
+                case 'MEDIUM': return 'amber';
+                case 'HIGH': return 'red';
+                case 'CRITICAL': return 'red';
+                default: return 'cyan';
+            }
+        }
+
+        function updateChainStatus(chainStatus) {
+            ['ethereum', 'bsc', 'solana'].forEach(chain => {
+                const status = chainStatus[chain];
+                const el = document.getElementById('chain-' + chain);
+                if (el) {
+                    if (status?.connected) {
+                        el.classList.add('connected');
+                        el.classList.remove('disconnected');
+                    } else {
+                        el.classList.add('disconnected');
+                        el.classList.remove('connected');
+                    }
+
+                    if (status) {
+                        document.getElementById(`${chain.slice(0, 3)}-positions`).textContent = `${status.positions} positions`;
+                        document.getElementById(`${chain.slice(0, 3)}-apr`).textContent = (status.apr || 0).toFixed(2) + '%';
+                        document.getElementById(`${chain.slice(0, 3)}-value`).textContent = '$' + (status.value || 0).toLocaleString();
+                    }
+                }
+            });
+        }
+
+        function updateOpportunities(opportunities) {
+            const tbody = document.getElementById('opportunities-tbody');
+            if (!opportunities.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #555; padding: 40px;">// NO_OPPORTUNITIES_FOUND</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = opportunities.map(opp => `
+                <tr>
+                    <td style="font-weight: 600; color: var(--terminal-cyan);">${opp.pool}</td>
+                    <td><span class="chain-tag ${opp.chain}">${opp.chain}</span></td>
+                    <td>$${(opp.tvl / 1000000).toFixed(2)}M</td>
+                    <td>${opp.feeAPR.toFixed(2)}%</td>
+                    <td><span class="apr-badge ${getAPRBadgeClass(opp.effectiveAPR)}">${opp.effectiveAPR.toFixed(2)}%</span></td>
+                    <td><span class="risk-indicator risk-${opp.risk.toLowerCase()}">${opp.risk}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function getAPRBadgeClass(apr) {
+            if (apr >= 20) return 'high';
+            if (apr >= 10) return 'medium';
+            return 'low';
+        }
+
+        function updatePositions(positions) {
+            const tbody = document.getElementById('positions-tbody');
+            if (!positions.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #555; padding: 40px;">// NO_ACTIVE_POSITIONS</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = positions.map(pos => `
+                <tr>
+                    <td style="font-weight: 600; color: var(--terminal-green);">${pos.pool}</td>
+                    <td><span class="chain-tag ${pos.chain}">${pos.chain}</span></td>
+                    <td>$${pos.value.toLocaleString()}</td>
+                    <td><span class="apr-badge ${getAPRBadgeClass(pos.apr)}">${pos.apr.toFixed(2)}%</span></td>
+                    <td>${(pos.ilRisk * 100).toFixed(1)}%</td>
+                    <td style="color: #666;">${pos.entry}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateRebalances(rebalances) {
+            const tbody = document.getElementById('rebalance-tbody');
+            if (!rebalances.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #555; padding: 20px;">// NO_REBALANCE_HISTORY</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = rebalances.slice().reverse().slice(0, 10).map(r => `
+                <tr>
+                    <td style="color: #666;">${new Date(r.timestamp).toLocaleString()}</td>
+                    <td style="color: ${getTypeColor(r.type)}">${r.type}</td>
+                    <td>${r.from || '-'}</td>
+                    <td>${r.to || '-'}</td>
+                    <td>$${r.amount.toLocaleString()}</td>
+                    <td>$${r.gas.toFixed(2)}</td>
+                    <td><span style="color: ${r.status === 'SUCCESS' ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${r.status}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function getTypeColor(type) {
+            switch(type) {
+                case 'MINT': return 'var(--terminal-green)';
+                case 'BURN': return 'var(--terminal-red)';
+                case 'REALLOCATE': return 'var(--terminal-cyan)';
+                case 'COLLECT': return 'var(--terminal-purple)';
+                default: return '#888';
+            }
+        }
+
+        function updateAIAnalysis(analysis) {
+            if (!analysis) return;
+
+            document.getElementById('ai-summary').textContent = analysis.summary;
+
+            const recsContainer = document.getElementById('ai-recommendations');
+            if (analysis.recommendations && analysis.recommendations.length) {
+                recsContainer.innerHTML = analysis.recommendations.map(rec =>
+                    `<div class="ai-rec">${rec}</div>`
+                ).join('');
+            }
+
+            // Update anomalies
+            const anomaliesContainer = document.getElementById('anomalies-container');
+            if (analysis.anomalies && analysis.anomalies.length) {
+                anomaliesContainer.innerHTML = analysis.anomalies.map(anom => `
+                    <div style="padding: 10px; margin-bottom: 8px; background: rgba(255, 62, 62, 0.1); border-left: 3px solid var(--terminal-red); border-radius: 0 4px 4px 0;">
+                        <div style="font-family: var(--font-mono); font-size: 0.7em; color: var(--terminal-red); margin-bottom: 4px;">${anom.type}</div>
+                        <div style="font-size: 0.8em; color: #ccc;">${anom.description}</div>
+                    </div>
+                `).join('');
+            } else {
+                anomaliesContainer.innerHTML = '<div style="text-align: center; color: #555; padding: 20px; font-family: var(--font-mono); font-size: 0.8em;">// NO_ANOMALIES_DETECTED</div>';
+            }
+        }
+
+        function addActivityLog(message, type = 'info') {
+            const log = document.getElementById('activity-log');
+            const line = document.createElement('div');
+            line.className = 'console-line';
+            line.innerHTML = `
+                <span class="timestamp">[${new Date().toLocaleTimeString()}]</span>
+                <span class="log-tag tag-${type}">[${type.toUpperCase()}]</span>
+                <span class="log-msg">${message}</span>
+            `;
+            log.insertBefore(line, log.firstChild);
+            if (log.children.length > 50) log.removeChild(log.lastChild);
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('system-time').textContent = now.toLocaleTimeString('en-GB');
+        }
+
+        async function triggerRebalance() {
+            try {
+                addActivityLog('MANUAL_REBALANCE_TRIGGERED', 'info');
+                const response = await fetch('/api/safekeeping/rebalance', { method: 'POST' });
+                if (response.ok) {
+                    addActivityLog('REBALANCE_REQUEST_SUBMITTED', 'success');
+                } else {
+                    addActivityLog('REBALANCE_REQUEST_FAILED', 'error');
+                }
+            } catch (error) {
+                addActivityLog('REBALANCE_REQUEST_ERROR: ' + error.message, 'error');
+            }
+        }
+
+        async function emergencyHalt() {
+            if (!confirm('Are you sure you want to trigger an emergency halt? This will stop all rebalancing operations.')) {
+                return;
+            }
+
+            try {
+                addActivityLog('EMERGENCY_HALT_TRIGGERED', 'error');
+                const response = await fetch('/api/safekeeping/halt', { method: 'POST' });
+                if (response.ok) {
+                    addActivityLog('SYSTEM_HALTED_SUCCESSFULLY', 'warn');
+                } else {
+                    addActivityLog('HALT_REQUEST_FAILED', 'error');
+                }
+            } catch (error) {
+                addActivityLog('HALT_REQUEST_ERROR: ' + error.message, 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initSocket();
+            fetchData();
+            setInterval(fetchData, 10000);
+            setInterval(updateClock, 1000);
+            updateClock();
+
+            // Initial mock data display
+            setTimeout(() => {
+                if (safekeepingData.positions.length === 0) {
+                    updateDashboard(getMockData());
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+
+</html>

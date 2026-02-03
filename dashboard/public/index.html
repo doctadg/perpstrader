@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERPS_TRADER // CONTROL_TERMINAL</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
+
+        :root {
+            --bg-obsidian: #050507;
+            --bg-panel: rgba(12, 12, 18, 0.85);
+            --terminal-green: #00ff9d;
+            --terminal-cyan: #00f2ff;
+            --terminal-amber: #ffb300;
+            --terminal-red: #ff3e3e;
+            --border-low: rgba(0, 242, 255, 0.15);
+            --border-med: rgba(0, 242, 255, 0.4);
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Inter', sans-serif;
+            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: var(--terminal-cyan) transparent;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-obsidian);
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* CRT Scanline Effect */
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 1000;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            border-left: 4px solid var(--terminal-cyan);
+            backdrop-filter: blur(8px);
+        }
+
+        .system-id {
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            letter-spacing: 2px;
+            color: var(--terminal-cyan);
+            text-transform: uppercase;
+        }
+
+        .system-title {
+            font-weight: 800;
+            font-size: 1.4em;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .system-title span {
+            color: var(--terminal-cyan);
+            text-shadow: var(--glow-cyan);
+        }
+
+        .status-module {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+        }
+
+        .connection-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px;
+            background: rgba(0, 255, 157, 0.1);
+            border: 1px solid var(--terminal-green);
+            color: var(--terminal-green);
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--terminal-green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--terminal-green);
+            animation: flicker 1.5s infinite;
+        }
+
+        @keyframes flicker {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        /* Data Strip */
+        .data-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1px;
+            background: var(--border-low);
+            border: 1px solid var(--border-low);
+        }
+
+        .data-module {
+            background: var(--bg-panel);
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .module-label {
+            font-family: var(--font-mono);
+            font-size: 0.65em;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .module-value {
+            font-family: var(--font-mono);
+            font-size: 1.4em;
+            font-weight: 700;
+        }
+
+        .module-value.green {
+            color: var(--terminal-green);
+        }
+
+        .module-value.cyan {
+            color: var(--terminal-cyan);
+        }
+
+        .module-value.red {
+            color: var(--terminal-red);
+        }
+
+        /* Pipeline HUD */
+        .pipeline-hud {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .pipeline-hud::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: radial-gradient(var(--border-low) 1px, transparent 1px);
+            background-size: 30px 30px;
+            opacity: 0.1;
+            pointer-events: none;
+        }
+
+        .hud-header {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: var(--terminal-cyan);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .pipeline-visual {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hud-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-low);
+            min-width: 110px;
+            transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+            filter: grayscale(0.8);
+            opacity: 0.6;
+        }
+
+        .hud-node.active {
+            filter: grayscale(0);
+            opacity: 1;
+            border-color: var(--terminal-cyan);
+            box-shadow: var(--glow-cyan);
+            transform: translateY(-4px);
+            background: rgba(0, 242, 255, 0.05);
+        }
+
+        .hud-node.completed {
+            filter: grayscale(0);
+            opacity: 0.9;
+            border-color: var(--terminal-green);
+        }
+
+        .node-icon {
+            font-size: 1.5em;
+        }
+
+        .node-name {
+            font-family: var(--font-mono);
+            font-size: 0.65em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .hud-connector {
+            flex-grow: 1;
+            height: 2px;
+            background: var(--border-low);
+            position: relative;
+        }
+
+        .hud-connector::after {
+            content: "";
+            position: absolute;
+            top: -2px;
+            left: 0;
+            width: 0%;
+            height: 100%;
+            background: var(--terminal-cyan);
+            box-shadow: var(--glow-cyan);
+            transition: width 0.5s ease;
+        }
+
+        .hud-connector.active::after {
+            width: 100%;
+        }
+
+        /* Main Grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 20px;
+        }
+
+        /* Tech Panel */
+        .tech-panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-title-bar {
+            background: rgba(0, 242, 255, 0.05);
+            border-bottom: 1px solid var(--border-low);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-label {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #aaa;
+        }
+
+        .panel-meta {
+            font-family: var(--font-mono);
+            font-size: 0.6em;
+            color: var(--terminal-cyan);
+        }
+
+        .panel-body {
+            padding: 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* Tables & Lists */
+        .terminal-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+        }
+
+        .terminal-table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 0.65em;
+            color: #666;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border-low);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .terminal-table td {
+            padding: 12px 16px;
+            font-size: 0.8em;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .terminal-table tr:hover {
+            background: rgba(0, 242, 255, 0.03);
+        }
+
+        /* Activity Console */
+        .activity-console {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 16px;
+            height: 100%;
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+            line-height: 1.6;
+        }
+
+        .console-line {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 6px;
+            padding-bottom: 6px;
+            border-bottom: 1px hidden rgba(255, 255, 255, 0.05);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(-10px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .timestamp {
+            color: #555;
+            min-width: 80px;
+        }
+
+        .log-tag {
+            min-width: 60px;
+            color: var(--terminal-cyan);
+        }
+
+        .log-msg {
+            color: #ccc;
+        }
+
+        .tag-info {
+            color: var(--terminal-cyan);
+        }
+
+        .tag-success {
+            color: var(--terminal-green);
+        }
+
+        .tag-warn {
+            color: var(--terminal-amber);
+        }
+
+        .tag-error {
+            color: var(--terminal-red);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-low);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--terminal-cyan);
+        }
+
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    <!-- Conversational Agent Widget -->
+    <link rel="stylesheet" href="/agent-widget.css">
+    <meta name="agent-widget" content="true">
+</head>
+
+
+<body>
+    <div class="container">
+        <!-- Top Status Bar -->
+        <header class="top-bar">
+            <div class="system-id">[ SYS_NODE.012 ]</div>
+            <div class="system-title"><span>PERPS</span>_TRADER.ai</div>
+            <div style="flex: 1; margin-left: 20px; display: flex; gap: 10px;">
+                <a href="/trace"
+                    style="color: var(--terminal-cyan); font-family: var(--font-mono); font-size: 0.7em; text-decoration: none; border: 1px solid var(--border-low); padding: 4px 10px;">➔
+                    OPEN_TRACE_INVESTIGATOR</a>
+                <a href="/predictions"
+                    style="color: var(--terminal-cyan); font-family: var(--font-mono); font-size: 0.7em; text-decoration: none; border: 1px solid var(--border-low); padding: 4px 10px;">➔
+                    OPEN_PREDICTIONS_NODE</a>
+                <a href="/pools.html"
+                    style="color: var(--terminal-green); font-family: var(--font-mono); font-size: 0.7em; text-decoration: none; border: 1px solid var(--border-low); padding: 4px 10px;">➔
+                    OPEN_SAFEKEEPING_POOLS</a>
+            </div>
+            <div class="status-module">
+                <div class="connection-indicator">
+                    <span class="live-dot"></span>
+                    <span id="connection-status">INITIALIZING...</span>
+                </div>
+                <div id="system-time">00:00:00</div>
+            </div>
+        </header>
+
+        <!-- Global Data Strip -->
+        <div class="data-strip">
+            <div class="data-module">
+                <span class="module-label">NAV_EQUITY</span>
+                <span class="module-value cyan" id="portfolio-value">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">AVBL_LIQUIDITY</span>
+                <span class="module-value" id="available-balance">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">REALIZED_PNL</span>
+                <span class="module-value" id="realized-pnl">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">UNREALIZED_PNL</span>
+                <span class="module-value" id="unrealized-pnl">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">24H_PERF</span>
+                <span class="module-value" id="daily-pnl">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">CYCLE_COUNT</span>
+                <span class="module-value cyan" id="total-trades">0</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">PRED_AGENT</span>
+                <span class="module-value" id="predictions-status">UNKNOWN</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">PRED_POSITIONS</span>
+                <span class="module-value cyan" id="predictions-open">0</span>
+            </div>
+        </div>
+
+        <!-- Pipeline HUD -->
+        <section class="pipeline-hud">
+            <div class="hud-header">
+                <div class="hud-label">// TRADING_PIPELINE_FLOW</div>
+                <div class="hud-stats">MOD_LATENCY: 42ms</div>
+            </div>
+            <div class="pipeline-visual" id="pipeline">
+                <div class="hud-node" id="node-market">
+                    <span class="node-icon">📊</span>
+                    <span class="node-name">MARKET</span>
+                </div>
+                <div class="hud-connector" id="conn-1"></div>
+                <div class="hud-node" id="node-pattern">
+                    <span class="node-icon">🧠</span>
+                    <span class="node-name">PATTERN</span>
+                </div>
+                <div class="hud-connector" id="conn-2"></div>
+                <div class="hud-node" id="node-strategy">
+                    <span class="node-icon">💡</span>
+                    <span class="node-name">STRATEGY</span>
+                </div>
+                <div class="hud-connector" id="conn-3"></div>
+                <div class="hud-node" id="node-backtest">
+                    <span class="node-icon">📈</span>
+                    <span class="node-name">BACKTEST</span>
+                </div>
+                <div class="hud-connector" id="conn-4"></div>
+                <div class="hud-node" id="node-select">
+                    <span class="node-icon">🎯</span>
+                    <span class="node-name">SELECT</span>
+                </div>
+                <div class="hud-connector" id="conn-5"></div>
+                <div class="hud-node" id="node-risk">
+                    <span class="node-icon">🛡️</span>
+                    <span class="node-name">RISK</span>
+                </div>
+                <div class="hud-connector" id="conn-6"></div>
+                <div class="hud-node" id="node-execute">
+                    <span class="node-icon">🚀</span>
+                    <span class="node-name">EXECUTE</span>
+                </div>
+                <div class="hud-connector" id="conn-7"></div>
+                <div class="hud-node" id="node-learn">
+                    <span class="node-icon">📚</span>
+                    <span class="node-name">LEARN</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Workspace -->
+        <div class="main-grid">
+            <!-- Table Panel -->
+            <div class="tech-panel">
+                <div class="panel-title-bar">
+                    <span class="panel-label">ACTIVE_EXPOSURE</span>
+                    <span class="panel-meta">LIVE_ORACLE_FEED</span>
+                </div>
+                <div class="panel-body">
+                    <table class="terminal-table">
+                        <thead>
+                            <tr>
+                                <th>ASSET</th>
+                                <th>DIRECTION</th>
+                                <th>MAGNITUDE</th>
+                                <th>ENTRY_PX</th>
+                                <th>MKT_PNL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positions-tbody">
+                            <tr class="empty-state">
+                                <td colspan="5" style="text-align: center; color: #555; padding: 40px;">//
+                                    NO_ACTIVE_POSITIONS_DETECTED</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Log Panel -->
+            <div class="tech-panel">
+                <div class="panel-title-bar">
+                    <span class="panel-label">SYSTEM_LOG</span>
+                    <span class="panel-meta">SECURE_CHANNEL_v4</span>
+                </div>
+                <div class="panel-body">
+                    <div class="activity-console" id="activity-log">
+                        <!-- Logs inject here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Executions (Span width) -->
+            <div class="tech-panel" style="grid-column: 1 / -1;">
+                <div class="panel-title-bar">
+                    <span class="panel-label">EXECUTION_HISTORY</span>
+                    <span class="panel-meta">LATENCY_STAMPED</span>
+                </div>
+                <div class="panel-body">
+                    <table class="terminal-table" id="trades-table">
+                        <thead>
+                            <tr>
+                                <th>SIG_TIME</th>
+                                <th>EXEC_TYPE</th>
+                                <th>ASSET</th>
+                                <th>SIZE</th>
+                                <th>EXIT_PNL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-tbody">
+                            <!-- Trades inject here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+
+        function initSocket() {
+            socket = io();
+            socket.on('connect', () => {
+                addActivityLog('UPLINK_ESTABLISHED', 'success');
+            });
+            socket.on('disconnect', () => {
+                addActivityLog('UPLINK_LOST', 'error');
+                document.getElementById('connection-status').textContent = 'OFFLINE';
+            });
+            socket.on('cycle_update', (data) => {
+                updatePipeline(data.step);
+                addActivityLog(`PROCESS: ${data.step}`, 'info');
+            });
+            socket.on('cycle_complete', (data) => {
+                resetPipeline();
+                const type = data.success ? (data.tradeExecuted ? 'success' : 'info') : 'warn';
+                addActivityLog(`CYCLE_COMPLETE // EXEC: ${data.tradeExecuted ? 'YES' : 'NO'}`, type);
+                fetchData();
+            });
+        }
+
+        function updatePipeline(step) {
+            document.querySelectorAll('.hud-node').forEach(n => n.classList.remove('active', 'completed'));
+            document.querySelectorAll('.hud-connector').forEach(c => c.classList.remove('active'));
+
+            const stepMap = {
+                'MARKET_DATA': 'node-market', 'MARKET_DATA_READY': 'node-market',
+                'PATTERN_RECALL': 'node-pattern', 'PATTERN_RECALL_COMPLETE': 'node-pattern',
+                'STRATEGY_IDEATION': 'node-strategy', 'STRATEGY_IDEATION_COMPLETE': 'node-strategy',
+                'BACKTEST': 'node-backtest', 'BACKTEST_COMPLETE': 'node-backtest',
+                'STRATEGY_SELECTED': 'node-select', 'STRATEGY_SELECTION': 'node-select',
+                'RISK_GATE': 'node-risk', 'RISK_GATE_APPROVED': 'node-risk',
+                'EXECUTION': 'node-execute', 'EXECUTION_COMPLETE': 'node-execute',
+                'LEARNING': 'node-learn', 'LEARNING_COMPLETE': 'node-learn',
+            };
+
+            const nodeId = stepMap[step];
+            if (nodeId) {
+                const node = document.getElementById(nodeId);
+                if (node) {
+                    node.classList.add('active');
+                    const nodes = Array.from(document.querySelectorAll('.hud-node'));
+                    const connectors = Array.from(document.querySelectorAll('.hud-connector'));
+                    const idx = nodes.indexOf(node);
+
+                    nodes.slice(0, idx).forEach(n => n.classList.add('completed'));
+                    connectors.slice(0, idx).forEach(c => c.classList.add('active'));
+                }
+            }
+        }
+
+        function resetPipeline() {
+            document.querySelectorAll('.hud-node').forEach(n => n.classList.remove('active', 'completed'));
+            document.querySelectorAll('.hud-connector').forEach(c => c.classList.remove('active'));
+        }
+
+        function formatMoney(val, showSign = false) {
+            const num = parseFloat(val) || 0;
+            const formatted = '$' + Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            if (showSign && num !== 0) return (num >= 0 ? '+' : '-') + formatted;
+            return num < 0 ? '-' + formatted : formatted;
+        }
+
+        function updateValueStyle(element, value) {
+            element.classList.remove('cyan', 'green', 'red');
+            const num = parseFloat(value) || 0;
+            if (num > 0) element.classList.add('green');
+            else if (num < 0) element.classList.add('red');
+            else element.classList.add('cyan');
+        }
+
+        async function fetchData() {
+            try {
+                const [portfolioData, status, predictionStatus] = await Promise.all([
+                    fetch('/api/portfolio').then(r => r.json()),
+                    fetch('/api/status').then(r => r.json()),
+                    fetch('/api/predictions/status').then(r => r.json()),
+                ]);
+
+                const p = portfolioData.portfolio || {};
+                const valEl = document.getElementById('portfolio-value');
+                valEl.textContent = formatMoney(p.totalValue);
+
+                document.getElementById('available-balance').textContent = formatMoney(p.availableBalance);
+
+                const realizedEl = document.getElementById('realized-pnl');
+                realizedEl.textContent = formatMoney(portfolioData.realizedPnL, true);
+                updateValueStyle(realizedEl, portfolioData.realizedPnL);
+
+                const unrealizedEl = document.getElementById('unrealized-pnl');
+                unrealizedEl.textContent = formatMoney(p.unrealizedPnL, true);
+                updateValueStyle(unrealizedEl, p.unrealizedPnL);
+
+                const dailyEl = document.getElementById('daily-pnl');
+                dailyEl.textContent = formatMoney(p.dailyPnL, true);
+                updateValueStyle(dailyEl, p.dailyPnL);
+
+                document.getElementById('total-trades').textContent = portfolioData.recentTrades?.length || 0;
+                document.getElementById('connection-status').textContent = (portfolioData.environment || 'PAPER').toUpperCase();
+
+                updatePositions(portfolioData.positions || []);
+                updateTrades(portfolioData.recentTrades || []);
+
+                const predStatusEl = document.getElementById('predictions-status');
+                if (predStatusEl && predictionStatus) {
+                    const statusText = (predictionStatus.status || 'UNKNOWN').toUpperCase();
+                    predStatusEl.textContent = statusText;
+                    predStatusEl.classList.remove('cyan', 'green', 'red');
+                    if (statusText === 'RUNNING') predStatusEl.classList.add('green');
+                    else if (statusText === 'ERROR') predStatusEl.classList.add('red');
+                    else predStatusEl.classList.add('cyan');
+                }
+
+                const predOpenEl = document.getElementById('predictions-open');
+                if (predOpenEl) {
+                    predOpenEl.textContent = predictionStatus?.openPositions ?? 0;
+                }
+
+            } catch (error) {
+                console.error('FETCH_FAILURE:', error);
+            }
+        }
+
+        function updatePositions(positions) {
+            const tbody = document.getElementById('positions-tbody');
+            if (!positions.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #555; padding: 40px;">// NO_ACTIVE_POSITIONS_DETECTED</td></tr>';
+                return;
+            }
+            tbody.innerHTML = positions.map(p => `
+                <tr>
+                    <td><span style="color:var(--terminal-cyan)">${p.symbol}</span></td>
+                    <td style="color:${p.side === 'LONG' ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${p.side}</td>
+                    <td>${parseFloat(p.size).toFixed(4)}</td>
+                    <td>$${parseFloat(p.entryPrice).toLocaleString()}</td>
+                    <td style="color:${p.unrealizedPnL >= 0 ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${formatMoney(p.unrealizedPnL, true)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateTrades(trades) {
+            const tbody = document.getElementById('trades-tbody');
+            if (!trades.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #555; padding: 20px;">// HISTORY_EMPTY</td></tr>';
+                return;
+            }
+            tbody.innerHTML = trades.slice().reverse().slice(0, 10).map(t => `
+                <tr>
+                    <td class="timestamp">${new Date(t.timestamp).toLocaleTimeString()}</td>
+                    <td style="color:${t.side === 'BUY' ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${t.side}</td>
+                    <td>${t.symbol}</td>
+                    <td>${parseFloat(t.size).toFixed(4)}</td>
+                    <td style="color:${(t.pnl || 0) >= 0 ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${formatMoney(t.pnl || 0, true)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function addActivityLog(message, type = 'info') {
+            const log = document.getElementById('activity-log');
+            const line = document.createElement('div');
+            line.className = 'console-line';
+            line.innerHTML = `
+                <span class="timestamp">[${new Date().toLocaleTimeString()}]</span>
+                <span class="log-tag tag-${type}">[${type.toUpperCase()}]</span>
+                <span class="log-msg">${message}</span>
+            `;
+            log.insertBefore(line, log.firstChild);
+            if (log.children.length > 50) log.removeChild(log.lastChild);
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('system-time').textContent = now.toLocaleTimeString('en-GB');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initSocket();
+            fetchData();
+            setInterval(fetchData, 5000);
+            setInterval(updateClock, 1000);
+            updateClock();
+        });
+    </script>
+    <!-- Conversational Agent Widget -->
+    <script src="/agent-widget.js"></script>
+</body>
+
+
+</html>

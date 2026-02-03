@@ -1,0 +1,29 @@
+[Unit]
+Description=PerpsTrader LangGraph Agent
+After=network.target chromadb.service perps-redis.service
+Wants=chromadb.service perps-redis.service
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/main.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=CONFIG_PATH=/home/d/PerpsTrader/config/config.json
+Environment=PAPER_TRADING=true
+Environment=CHROMA_HOST=127.0.0.1
+Environment=CHROMA_PORT=8001
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perps-agent
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
