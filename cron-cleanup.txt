@@ -1,0 +1,19 @@
+# PerpsTrader Database Cleanup - Runs weekly on Sundays at 02:00 UTC
+# Uses simple node-sqlite3 with prepared statements
+# Archives old data (90 days for trading, 30 days for market/ai_insights, 7 days for news/predictions)
+# Vacuums database to reclaim space
+
+# Trading database cleanup (keep last 90 days of trades, 30 days of market data, 30 days of AI insights)
+0 2 * * * cd /home/d/PerpsTrader && node scripts/cleanup.js trading >> /home/d/PerpsTrader/data/cleanup.log 2>&1
+
+# Market data cleanup (keep last 30 days)
+0 2 * * * cd /home/d/PerpsTrader && node scripts/cleanup.js market_data >> /home/d/PerpsTrader/data/cleanup.log 2>&1
+
+# AI insights cleanup (keep last 30 days)
+0 2 * * * cd /home/d/PerpsTrader && node scripts/cleanup.js ai_insights >> /home/d/PerpsTrader/data/cleanup.log 2>&1
+
+# News database cleanup (keep last 7 days)
+0 2 * * * cd /home/d/PerpsTrader && node scripts/cleanup.js news >> /home/d/PerpsTrader/data/cleanup.log 2>&1
+
+# Predictions database cleanup (keep last 7 days)
+0 2 * * * cd /home/d/PerpsTrader && node scripts/cleanup.js predictions >> /home/d/PerpsTrader/data/cleanup.log 2>&1

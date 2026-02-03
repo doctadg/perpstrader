@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERPS_TRADER // ENHANCED_EVENT_HEATMAP</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/css/enhanced-heatmap.css">
+    <!-- Conversational Agent Widget -->
+    <link rel="stylesheet" href="/agent-widget.css">
+    <meta name="agent-widget" content="true">
+</head>
+
+<body>
+    <div class="top-bar">
+        <div class="system-id">OBSIDIAN_HEATMAP // V.2.0 // ENHANCED</div>
+        <div class="nav-links">
+            <a href="/news" class="nav-link">FEED</a>
+            <a href="/heatmap" class="nav-link">HEATMAP</a>
+            <a href="/enhanced-heatmap" class="nav-link active">ENHANCED</a>
+            <a href="/trace" class="nav-link">TRACE</a>
+        </div>
+        <div class="system-id" id="clock">00:00 UTC</div>
+    </div>
+
+    <!-- Anomaly Alerts Section -->
+    <div class="alerts-section" id="alertsSection">
+        <div class="alerts-header">
+            <span class="alerts-title">🚨 ANOMALY ALERTS</span>
+            <button class="alerts-dismiss-all" onclick="dismissAllAlerts()">Dismiss All</button>
+        </div>
+        <div class="alerts-container" id="alertsContainer"></div>
+    </div>
+
+    <!-- Heat Timeline View -->
+    <div class="timeline-section">
+        <div class="timeline-header">
+            <span class="timeline-title">📈 HEAT TIMELINE</span>
+            <div class="timeline-controls">
+                <button class="timeline-btn active" data-range="1h" onclick="setTimelineRange('1h', this)">1H</button>
+                <button class="timeline-btn" data-range="6h" onclick="setTimelineRange('6h', this)">6H</button>
+                <button class="timeline-btn" data-range="24h" onclick="setTimelineRange('24h', this)">24H</button>
+                <button class="timeline-btn" data-range="7d" onclick="setTimelineRange('7d', this)">7D</button>
+            </div>
+        </div>
+        <div class="timeline-chart-container">
+            <canvas id="heatTimelineChart"></canvas>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <span class="control-label">TIMEFRAME:</span>
+            <button class="filter-btn active" onclick="setHours(24, this)">24H</button>
+            <button class="filter-btn" onclick="setHours(12, this)">12H</button>
+            <button class="filter-btn" onclick="setHours(6, this)">6H</button>
+            <button class="filter-btn" onclick="setHours(1, this)">1H</button>
+        </div>
+        <div class="control-group">
+            <span class="control-label">SORT:</span>
+            <button class="filter-btn active" data-sort="heat" onclick="setSort('heat', this)">HEAT</button>
+            <button class="filter-btn" data-sort="count" onclick="setSort('count', this)">COUNT</button>
+            <button class="filter-btn" data-sort="composite" onclick="setSort('composite', this)">COMPOSITE</button>
+        </div>
+        <div class="control-group" id="entityFilterGroup" style="display: none;">
+            <span class="control-label">ENTITY:</span>
+            <span class="entity-filter-tag" id="entityFilterTag"></span>
+            <button class="filter-btn" onclick="clearEntityFilter()">✕</button>
+        </div>
+    </div>
+
+    <div class="heatmap-container" id="heatmapGrid">
+        <div class="loading">INITIALIZING ENHANCED VISUAL MATRIX...</div>
+    </div>
+
+    <!-- Cluster Detail Modal -->
+    <div class="modal-overlay" id="clusterModal" onclick="closeModal(event)">
+        <div class="cluster-modal">
+            <div class="modal-header">
+                <div>
+                    <div
+                        style="font-family: var(--font-mono); font-size: 0.7em; color: var(--terminal-cyan); margin-bottom: 5px;">
+                        EVENT_CLUSTER</div>
+                    <h2 style="color: #fff; font-size: 1.5em;" id="modalTopic">Topic</h2>
+                    <div id="modalMeta" style="font-family: var(--font-mono); font-size: 0.7em; color: #666; margin-top: 5px;"></div>
+                </div>
+                <button onclick="closeModal()"
+                    style="background:none; border:none; color: #666; font-size: 1.5em; cursor: pointer;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="modalPredictionBadge" style="margin-bottom: 20px;"></div>
+                <div id="modalEntityTags" style="margin-bottom: 20px;"></div>
+                <div style="color: #ccc; margin-bottom: 25px; line-height: 1.6;" id="modalSummary"></div>
+
+                <h3 style="font-family: var(--font-mono); font-size: 0.8em; color: #888; text-transform: uppercase;">
+                    Related Coverage</h3>
+                <div class="article-list" id="modalArticles"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cross-Category Modal -->
+    <div class="modal-overlay" id="crossCategoryModal" onclick="closeCrossCategoryModal(event)">
+        <div class="cross-category-modal">
+            <div class="modal-header">
+                <div>
+                    <div
+                        style="font-family: var(--font-mono); font-size: 0.7em; color: var(--terminal-cyan); margin-bottom: 5px;">
+                        CROSS_CATEGORY_CLUSTERS</div>
+                    <h2 style="color: #fff; font-size: 1.3em;" id="crossCategoryTitle">Related Clusters</h2>
+                </div>
+                <button onclick="closeCrossCategoryModal()"
+                    style="background:none; border:none; color: #666; font-size: 1.5em; cursor: pointer;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="cross-category-list" id="crossCategoryList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/enhanced-heatmap.js"></script>
+    <!-- Conversational Agent Widget -->
+    <script src="/agent-widget.js"></script>
+</body>
+
+</html>

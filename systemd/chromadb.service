@@ -1,0 +1,15 @@
+[Unit]
+Description=ChromaDB Vector Store
+After=network.target
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/home/d/PerpsTrader/node_modules/.bin/chroma run --path /home/d/PerpsTrader/data/chroma --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

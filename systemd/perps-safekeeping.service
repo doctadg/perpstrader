@@ -1,0 +1,51 @@
+[Unit]
+Description=PerpsTrader Safekeeping Fund Agent
+Documentation=https://github.com/anthropics/perps-trader
+After=network.target perps-redis.service
+Wants=perps-redis.service
+
+[Service]
+Type=simple
+User=d
+Group=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/dist/safekeeping-fund/main.js
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitInterval=60
+
+# Environment
+Environment=NODE_ENV=production
+Environment=SERVICE_NAME=safekeeping-fund
+Environment=CONFIG_PATH=/home/d/PerpsTrader/config/config.json
+Environment=REDIS_HOST=127.0.0.1
+Environment=REDIS_PORT=6380
+
+# Optional: Chain configurations (set these or use config file)
+# Environment=ETH_PRIVATE_KEY=
+# Environment=BSC_PRIVATE_KEY=
+# Environment=SOLANA_SECRET_KEY=
+# Environment=SAFEKEEPING_CYCLE_INTERVAL=300000
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perps-safekeeping
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/d/PerpsTrader /home/d/PerpsTrader/data /home/d/PerpsTrader/logs /home/d/PerpsTrader/dist
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+# PerpsTrader Database Cleanup - Runs weekly on Sundays at 02:00 UTC
+# Uses Node.js DataManager for safe database operations
+
+# Trading database cleanup (keep last 90 days of trades, 30 days of market data, 30 days of AI insights)
+0 2 * * 0 /home/d/PerpsTrader/scripts/cleanup.js trading >> /home/d/PerpsTrader/data/cleanup.log 2>&1
+
+# News database cleanup (keep last 7 days)
+0 2 * * 0 /home/d/PerpsTrader/scripts/cleanup.js news >> /home/d/PerpsTrader/data/cleanup.log 2>&1
+
+# Predictions database cleanup (keep last 7 days)
+0 2 * * 0 /home/d/PerpsTrader/scripts/cleanup.js predictions >> /home/d/PerpsTrader/data/cleanup.log 2>&1

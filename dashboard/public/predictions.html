@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERPS_TRADER // PREDICTIONS_NODE</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
+
+        :root {
+            --bg-obsidian: #050507;
+            --bg-panel: rgba(12, 12, 18, 0.85);
+            --terminal-green: #00ff9d;
+            --terminal-cyan: #00f2ff;
+            --terminal-amber: #ffb300;
+            --terminal-red: #ff3e3e;
+            --border-low: rgba(0, 242, 255, 0.15);
+            --border-med: rgba(0, 242, 255, 0.4);
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Inter', sans-serif;
+            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-obsidian);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 1000;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.12;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            border-left: 4px solid var(--terminal-cyan);
+            backdrop-filter: blur(8px);
+        }
+
+        .system-id {
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            letter-spacing: 2px;
+            color: var(--terminal-cyan);
+            text-transform: uppercase;
+        }
+
+        .system-title {
+            font-weight: 800;
+            font-size: 1.4em;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .system-title span {
+            color: var(--terminal-cyan);
+            text-shadow: var(--glow-cyan);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav-links a {
+            color: var(--terminal-cyan);
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            text-decoration: none;
+            border: 1px solid var(--border-low);
+            padding: 4px 10px;
+        }
+
+        .data-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1px;
+            background: var(--border-low);
+            border: 1px solid var(--border-low);
+        }
+
+        .data-module {
+            background: var(--bg-panel);
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .module-label {
+            font-family: var(--font-mono);
+            font-size: 0.65em;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .module-value {
+            font-family: var(--font-mono);
+            font-size: 1.2em;
+            font-weight: 700;
+        }
+
+        .module-value.green {
+            color: var(--terminal-green);
+        }
+
+        .module-value.cyan {
+            color: var(--terminal-cyan);
+        }
+
+        .module-value.red {
+            color: var(--terminal-red);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr;
+            gap: 20px;
+        }
+
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            padding: 18px;
+        }
+
+        .panel-title {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: var(--terminal-cyan);
+            margin-bottom: 12px;
+            letter-spacing: 1px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 10px 8px;
+            border-bottom: 1px solid var(--border-low);
+        }
+
+        th {
+            color: var(--terminal-cyan);
+            font-size: 0.7em;
+            letter-spacing: 1px;
+        }
+
+        tr:hover {
+            background: rgba(0, 242, 255, 0.05);
+        }
+
+        .status-pill {
+            padding: 3px 8px;
+            border: 1px solid var(--border-low);
+            font-size: 0.7em;
+        }
+
+        .news-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 380px;
+            overflow-y: auto;
+        }
+
+        .news-item {
+            border: 1px solid var(--border-low);
+            padding: 10px 12px;
+            background: rgba(8, 8, 14, 0.6);
+        }
+
+        .news-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .news-meta {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: #777;
+            display: flex;
+            gap: 8px;
+        }
+
+        .trace-list {
+            max-height: 280px;
+            overflow-y: auto;
+        }
+
+        .trace-item {
+            padding: 8px 10px;
+            border: 1px solid var(--border-low);
+            margin-bottom: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+        }
+
+        @media (max-width: 1100px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    <!-- Conversational Agent Widget -->
+    <link rel="stylesheet" href="/agent-widget.css">
+    <meta name="agent-widget" content="true">
+</head>
+
+<body>
+    <div class="container">
+        <header class="top-bar">
+            <div class="system-id">[ PRED_NODE.009 ]</div>
+            <div class="system-title"><span>PREDICTIONS</span>_ENGINE.ai</div>
+            <div class="nav-links">
+                <a href="/">➔ DASHBOARD_HOME</a>
+                <a href="/news">➔ NEWS_FEED</a>
+            </div>
+        </header>
+
+        <div class="data-strip">
+            <div class="data-module">
+                <span class="module-label">AGENT_STATUS</span>
+                <span class="module-value" id="agent-status">UNKNOWN</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">ACTIVE_MARKETS</span>
+                <span class="module-value cyan" id="active-markets">0</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">OPEN_POSITIONS</span>
+                <span class="module-value cyan" id="open-positions">0</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">TOTAL_VALUE</span>
+                <span class="module-value" id="portfolio-value">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">REALIZED_PNL</span>
+                <span class="module-value" id="portfolio-realized">$0.00</span>
+            </div>
+            <div class="data-module">
+                <span class="module-label">UNREALIZED_PNL</span>
+                <span class="module-value" id="portfolio-unrealized">$0.00</span>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="panel">
+                <div class="panel-title">// ACTIVE_MARKETS</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>MARKET</th>
+                            <th>YES</th>
+                            <th>NO</th>
+                            <th>VOLUME</th>
+                        </tr>
+                    </thead>
+                    <tbody id="markets-table">
+                        <tr>
+                            <td colspan="4" style="color:#666;">// LOADING_MARKETS</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">// OPEN_POSITIONS</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>MARKET</th>
+                            <th>OUTCOME</th>
+                            <th>SHARES</th>
+                            <th>PNL</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positions-table">
+                        <tr>
+                            <td colspan="4" style="color:#666;">// NO_OPEN_POSITIONS</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">// RECENT_TRADES</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>TIME</th>
+                            <th>MARKET</th>
+                            <th>SIDE</th>
+                            <th>PRICE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-table">
+                        <tr>
+                            <td colspan="4" style="color:#666;">// NO_TRADES</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">// MARKET_NEWS_LINKS</div>
+                <div class="news-list" id="market-news">
+                    <div style="color:#666;">// SELECT_A_MARKET</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">// LATEST_TRACES</div>
+                <div class="trace-list" id="trace-list">
+                    <div style="color:#666;">// NO_TRACES</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">// BACKTEST_DIGEST</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>MARKET</th>
+                            <th>WIN%</th>
+                            <th>AVG%</th>
+                            <th>TRADES</th>
+                        </tr>
+                    </thead>
+                    <tbody id="backtests-table">
+                        <tr>
+                            <td colspan="4" style="color:#666;">// NO_BACKTESTS</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedMarketId = null;
+        let marketsCache = [];
+
+        function formatMoney(value) {
+            const num = Number(value || 0);
+            return '$' + num.toFixed(2);
+        }
+
+        function formatPct(value) {
+            if (!Number.isFinite(value)) return '0.0%';
+            return `${value.toFixed(1)}%`;
+        }
+
+        function updateStatusBadge(element, status) {
+            element.textContent = status;
+            element.classList.remove('green', 'red', 'cyan');
+            if (status === 'RUNNING') element.classList.add('green');
+            else if (status === 'ERROR') element.classList.add('red');
+            else element.classList.add('cyan');
+        }
+
+        async function fetchAll() {
+            try {
+                const [status, markets, positions, trades, traces, backtests] = await Promise.all([
+                    fetch('/api/predictions/status').then(r => r.json()),
+                    fetch('/api/predictions/markets?limit=50').then(r => r.json()),
+                    fetch('/api/predictions/positions').then(r => r.json()),
+                    fetch('/api/predictions/trades?limit=15').then(r => r.json()),
+                    fetch('/api/predictions/traces?limit=12').then(r => r.json()),
+                    fetch('/api/predictions/backtests?limit=12').then(r => r.json()),
+                ]);
+
+                updateStatusBadge(document.getElementById('agent-status'), (status.status || 'UNKNOWN').toUpperCase());
+                document.getElementById('active-markets').textContent = status.activeMarkets ?? markets.length ?? 0;
+                document.getElementById('open-positions').textContent = status.openPositions ?? positions.length ?? 0;
+
+                const portfolio = status.metadata?.portfolio || {};
+                document.getElementById('portfolio-value').textContent = formatMoney(portfolio.totalValue || 0);
+                document.getElementById('portfolio-realized').textContent = formatMoney(portfolio.realizedPnL || 0);
+                document.getElementById('portfolio-unrealized').textContent = formatMoney(portfolio.unrealizedPnL || 0);
+
+                marketsCache = markets;
+                renderMarkets(markets);
+                renderPositions(positions);
+                renderTrades(trades);
+                renderTraces(traces);
+                renderBacktests(backtests, markets);
+
+                if (!selectedMarketId && markets.length) {
+                    selectMarket(markets[0]);
+                }
+            } catch (error) {
+                console.error('Failed to fetch prediction data', error);
+            }
+        }
+
+        function renderMarkets(markets) {
+            const tbody = document.getElementById('markets-table');
+            if (!markets.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;">// NO_MARKETS</td></tr>';
+                return;
+            }
+            tbody.innerHTML = markets.map(market => `
+                <tr onclick="selectMarketById('${market.id}')">
+                    <td>${market.title}</td>
+                    <td>${market.yesPrice !== undefined ? market.yesPrice.toFixed(3) : 'n/a'}</td>
+                    <td>${market.noPrice !== undefined ? market.noPrice.toFixed(3) : 'n/a'}</td>
+                    <td>${market.volume ? market.volume.toFixed(0) : 'n/a'}</td>
+                </tr>
+            `).join('');
+        }
+
+        function selectMarketById(marketId) {
+            const market = marketsCache.find(m => m.id === marketId);
+            if (!market) return;
+            selectMarket(market);
+        }
+
+        function renderPositions(positions) {
+            const tbody = document.getElementById('positions-table');
+            if (!positions.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;">// NO_OPEN_POSITIONS</td></tr>';
+                return;
+            }
+            tbody.innerHTML = positions.map(pos => `
+                <tr>
+                    <td>${pos.marketTitle}</td>
+                    <td>${pos.outcome}</td>
+                    <td>${pos.shares.toFixed(2)}</td>
+                    <td style="color:${pos.unrealizedPnL >= 0 ? 'var(--terminal-green)' : 'var(--terminal-red)'}">
+                        ${formatMoney(pos.unrealizedPnL)}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderTrades(trades) {
+            const tbody = document.getElementById('trades-table');
+            if (!trades.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;">// NO_TRADES</td></tr>';
+                return;
+            }
+            tbody.innerHTML = trades.map(trade => `
+                <tr>
+                    <td>${new Date(trade.timestamp).toLocaleTimeString()}</td>
+                    <td>${trade.marketTitle}</td>
+                    <td style="color:${trade.side === 'BUY' ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${trade.side}</td>
+                    <td>${trade.price.toFixed(3)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderTraces(traces) {
+            const container = document.getElementById('trace-list');
+            if (!traces.length) {
+                container.innerHTML = '<div style="color:#666;">// NO_TRACES</div>';
+                return;
+            }
+            container.innerHTML = traces.map(trace => `
+                <div class="trace-item">
+                    <div>${trace.symbol} :: ${trace.success ? 'SUCCESS' : 'CHECK'} :: ${new Date(trace.startTime).toLocaleTimeString()}</div>
+                    <div style="color:#666;">Strategies ${trace.strategyCount} | Risk ${trace.riskScore?.toFixed(2) || 0}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderBacktests(backtests, markets) {
+            const tbody = document.getElementById('backtests-table');
+            if (!backtests.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;">// NO_BACKTESTS</td></tr>';
+                return;
+            }
+            const marketMap = new Map(markets.map(m => [m.id, m.title]));
+            tbody.innerHTML = backtests.map(bt => `
+                <tr>
+                    <td>${marketMap.get(bt.marketId) || bt.marketId}</td>
+                    <td>${formatPct(bt.winRate)}</td>
+                    <td>${formatPct(bt.averageReturn)}</td>
+                    <td>${bt.tradesSimulated}</td>
+                </tr>
+            `).join('');
+        }
+
+        async function selectMarket(market) {
+            selectedMarketId = market.id;
+            const container = document.getElementById('market-news');
+            container.innerHTML = '<div style="color:#666;">// FETCHING_NEWS</div>';
+            try {
+                const news = await fetch(`/api/predictions/news?marketId=${market.id}&marketSlug=${market.slug || ''}`).then(r => r.json());
+                if (!news.length) {
+                    container.innerHTML = '<div style="color:#666;">// NO_LINKED_NEWS</div>';
+                    return;
+                }
+                container.innerHTML = news.map(item => `
+                    <div class="news-item">
+                        <div class="news-title">${item.title}</div>
+                        <div class="news-meta">
+                            <span>${item.source}</span>
+                            <span>${item.sentiment}</span>
+                            <span>${item.importance}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                container.innerHTML = '<div style="color:#666;">// NEWS_ERROR</div>';
+            }
+        }
+
+        fetchAll();
+        setInterval(fetchAll, 20000);
+    </script>
+    <!-- Conversational Agent Widget -->
+    <script src="/agent-widget.js"></script>
+</body>
+
+</html>

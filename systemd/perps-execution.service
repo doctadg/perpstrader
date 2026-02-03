@@ -1,0 +1,16 @@
+[Unit]
+Description=PerpsTrader Execution Engine
+After=network.target
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/execution.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=HYPERLIQUID_API_KEY_FILE=/home/d/PerpsTrader/config/hyperliquid.keys
+
+[Install]
+WantedBy=multi-user.target

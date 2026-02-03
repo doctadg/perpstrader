@@ -1,0 +1,26 @@
+[Unit]
+Description=PerpsTrader pump.fun Token Analysis Agent
+After=network.target perps-redis.service
+Wants=perps-redis.service
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/pumpfun-agent/index.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=SOLANA_COMMITMENT=confirmed
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perps-pumpfun
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

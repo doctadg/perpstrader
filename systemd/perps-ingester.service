@@ -1,0 +1,16 @@
+[Unit]
+Description=PerpsTrader Market Data Ingester
+After=network.target
+
+[Service]
+Type=simple
+User=d
+WorkingDirectory=/home/d/PerpsTrader
+ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/market-ingester/market-ingester.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=CONFIG_PATH=/home/d/PerpsTrader/config/config.json
+
+[Install]
+WantedBy=multi-user.target

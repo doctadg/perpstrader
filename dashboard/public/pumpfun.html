@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERPS_TRADER // PUMPFUN_ANALYZER</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
+
+        :root {
+            --bg-obsidian: #050507;
+            --bg-panel: rgba(12, 12, 18, 0.85);
+            --terminal-green: #00ff9d;
+            --terminal-cyan: #00f2ff;
+            --terminal-amber: #ffb300;
+            --terminal-red: #ff3e3e;
+            --border-low: rgba(0, 242, 255, 0.15);
+            --border-med: rgba(0, 242, 255, 0.4);
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Inter', sans-serif;
+            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-obsidian);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 1000;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.12;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            border-left: 4px solid #6d28d9;
+            backdrop-filter: blur(8px);
+        }
+
+        .system-id {
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            letter-spacing: 2px;
+            color: #a855f7;
+            text-transform: uppercase;
+        }
+
+        .system-title {
+            font-weight: 800;
+            font-size: 1.4em;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .system-title span {
+            color: #a855f7;
+            text-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav-links a {
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+            padding: 6px 12px;
+            border: 1px solid var(--border-low);
+            transition: all 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--terminal-cyan);
+            border-color: var(--terminal-cyan);
+        }
+
+        .stats-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            padding: 20px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            border-left: 3px solid #6d28d9;
+            backdrop-filter: blur(8px);
+        }
+
+        .stat-box {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .stat-label {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: rgba(255,255,255,0.5);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.8em;
+            font-weight: 700;
+            color: var(--terminal-cyan);
+        }
+
+        .filters {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            padding: 15px 20px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            backdrop-filter: blur(8px);
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .filter-label {
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+            color: rgba(255,255,255,0.6);
+        }
+
+        select, input {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-low);
+            color: var(--terminal-cyan);
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            padding: 8px 12px;
+            border-radius: 4px;
+        }
+
+        .tokens-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 15px;
+        }
+
+        .token-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            border-left: 3px solid var(--border-low);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .token-card:hover {
+            border-color: var(--border-med);
+            transform: translateY(-2px);
+        }
+
+        .token-card.high-confidence {
+            border-left-color: var(--terminal-green);
+            box-shadow: 0 0 20px rgba(0, 255, 157, 0.1);
+        }
+
+        .token-card.medium-confidence {
+            border-left-color: var(--terminal-amber);
+        }
+
+        .token-card.low-confidence {
+            border-left-color: var(--terminal-red);
+        }
+
+        .token-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .token-name {
+            font-weight: 700;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .token-symbol {
+            font-family: var(--font-mono);
+            background: rgba(168, 85, 247, 0.2);
+            color: #a855f7;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        .token-score {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1.2em;
+        }
+
+        .token-score.high { color: var(--terminal-green); }
+        .token-score.medium { color: var(--terminal-amber); }
+        .token-score.low { color: var(--terminal-red); }
+
+        .token-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 0.8em;
+            color: rgba(255,255,255,0.6);
+        }
+
+        .token-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .token-meta-item.active {
+            color: var(--terminal-green);
+        }
+
+        .token-meta-item.inactive {
+            color: var(--terminal-red);
+        }
+
+        .token-recommendation {
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+            font-weight: 600;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .rec-STRONG_BUY { background: rgba(0, 255, 157, 0.2); color: var(--terminal-green); }
+        .rec-BUY { background: rgba(0, 255, 157, 0.15); color: var(--terminal-green); }
+        .rec-HOLD { background: rgba(255, 179, 0, 0.15); color: var(--terminal-amber); }
+        .rec-AVOID { background: rgba(255, 62, 62, 0.15); color: var(--terminal-red); }
+        .rec-STRONG_AVOID { background: rgba(255, 62, 62, 0.2); color: var(--terminal-red); }
+
+        .token-rationale {
+            font-size: 0.85em;
+            color: rgba(255,255,255,0.7);
+            line-height: 1.4;
+        }
+
+        .flags {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .flag {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            padding: 3px 8px;
+            border-radius: 3px;
+        }
+
+        .flag.green {
+            background: rgba(0, 255, 157, 0.15);
+            color: var(--terminal-green);
+            border: 1px solid rgba(0, 255, 157, 0.3);
+        }
+
+        .flag.red {
+            background: rgba(255, 62, 62, 0.15);
+            color: var(--terminal-red);
+            border: 1px solid rgba(255, 62, 62, 0.3);
+        }
+
+        .score-bar {
+            height: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .score-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .score-fill.high { background: linear-gradient(90deg, var(--terminal-green), #00ff00); }
+        .score-fill.medium { background: linear-gradient(90deg, var(--terminal-amber), #ffcc00); }
+        .score-fill.low { background: linear-gradient(90deg, var(--terminal-red), #ff6666); }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-family: var(--font-mono);
+            color: rgba(255,255,255,0.5);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: rgba(255,255,255,0.4);
+        }
+
+        .empty-state i {
+            font-size: 3em;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--terminal-green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .section-title {
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            color: rgba(255,255,255,0.5);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-low);
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <div class="system-title">
+                <span>⚡</span>
+                <span>pump.fun_analyzer</span>
+            </div>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/news">News</a>
+                <a href="/predictions">Predictions</a>
+                <a href="/pumpfun">pump.fun</a>
+            </div>
+        </div>
+
+        <div class="stats-panel" id="stats">
+            <div class="stat-box">
+                <div class="stat-label">Total Analyzed</div>
+                <div class="stat-value" id="stat-total">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Average Score</div>
+                <div class="stat-value" id="stat-avg">0.00</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">High Confidence</div>
+                <div class="stat-value" id="stat-high" style="color: var(--terminal-green)">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">STRONG BUY</div>
+                <div class="stat-value" id="stat-strong-buy">0</div>
+            </div>
+            <div class="stat-box" style="display:flex; align-items:center; gap:10px;">
+                <div class="stat-label">Agent Status</div>
+                <div class="status-dot" id="status-dot"></div>
+            </div>
+        </div>
+
+        <div class="filters">
+            <div class="filter-group">
+                <span class="filter-label">Min Score:</span>
+                <select id="minScore">
+                    <option value="0">All</option>
+                    <option value="0.3">0.3+</option>
+                    <option value="0.5">0.5+</option>
+                    <option value="0.7" selected>0.7+ (High Confidence)</option>
+                    <option value="0.85">0.85+</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <span class="filter-label">Recommendation:</span>
+                <select id="recommendation">
+                    <option value="">All</option>
+                    <option value="STRONG_BUY">STRONG BUY</option>
+                    <option value="BUY">BUY</option>
+                    <option value="HOLD">HOLD</option>
+                    <option value="AVOID">AVOID</option>
+                    <option value="STRONG_AVOID">STRONG AVOID</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <span class="filter-label">Limit:</span>
+                <select id="limit">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <button id="refreshBtn" style="font-family:var(--font-mono);background:#6d28d9;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">
+                Refresh
+            </button>
+        </div>
+
+        <div class="section-title">Analyzed Tokens</div>
+        <div class="tokens-grid" id="tokensGrid">
+            <div class="loading">Loading tokens...</div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const tokensGrid = document.getElementById('tokensGrid');
+
+        // Load tokens
+        async function loadTokens() {
+            const minScore = document.getElementById('minScore').value;
+            const limit = document.getElementById('limit').value;
+            const rec = document.getElementById('recommendation').value;
+
+            let url = `/api/pumpfun/tokens?limit=${limit}&minScore=${minScore}`;
+            if (rec) url = `/api/pumpfun/recommendation/${rec}?limit=${limit}`;
+
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+                renderTokens(data.tokens || []);
+            } catch (error) {
+                tokensGrid.innerHTML = '<div class="empty-state"><i>⚠</i>Failed to load tokens</div>';
+            }
+        }
+
+        // Load stats
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/pumpfun/stats');
+                const data = await res.json();
+                updateStats(data.stats || {});
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        function renderTokens(tokens) {
+            if (tokens.length === 0) {
+                tokensGrid.innerHTML = '<div class="empty-state"><i>📊</i>No tokens found<br><small>Adjust filters or wait for analysis cycle</small></div>';
+                return;
+            }
+
+            tokensGrid.innerHTML = tokens.map(t => {
+                const scoreClass = t.overallScore >= 0.7 ? 'high' : t.overallScore >= 0.4 ? 'medium' : 'low';
+                const confidenceClass = t.overallScore >= 0.7 ? 'high-confidence' : t.overallScore >= 0.4 ? 'medium-confidence' : 'low-confidence';
+
+                const flags = [];
+                (t.greenFlags || []).slice(0, 2).forEach(f => flags.push(`<span class="flag green">✓ ${f}</span>`));
+                (t.redFlags || []).slice(0, 2).forEach(f => flags.push(`<span class="flag red">✗ ${f}</span>`));
+
+                return `
+                    <div class="token-card ${confidenceClass}" onclick="showTokenDetails('${t.mintAddress}')">
+                        <div class="token-header">
+                            <div class="token-name">${t.token.name || 'Unknown'}</div>
+                            <div class="token-symbol">${t.token.symbol || 'N/A'}</div>
+                        </div>
+                        <div class="token-score ${scoreClass}">${t.overallScore.toFixed(2)}</div>
+                        <div class="score-bar">
+                            <div class="score-fill ${scoreClass}" style="width:${t.overallScore * 100}%"></div>
+                        </div>
+                        <div class="token-recommendation rec-${t.recommendation}">${t.recommendation.replace('_', ' ')}</div>
+                        <div class="token-meta">
+                            <div class="token-meta-item ${t.security.isMintable ? 'inactive' : 'active'}">
+                                ${t.security.isMintable ? '⚠ Mintable' : '✓ Fixed Supply'}
+                            </div>
+                            <div class="token-meta-item ${t.security.isFreezable ? 'inactive' : 'active'}">
+                                ${t.security.isFreezable ? '⚠ Freezable' : '✓ Not Freezable'}
+                            </div>
+                        </div>
+                        <div class="token-meta">
+                            <div class="token-meta-item ${t.metadata.website ? 'active' : 'inactive'}">
+                                ${t.metadata.website ? '🌐 Website' : '• No Website'}
+                            </div>
+                            <div class="token-meta-item ${t.metadata.twitter ? 'active' : 'inactive'}">
+                                ${t.metadata.twitter ? '🐦 Twitter' : '• No Twitter'}
+                            </div>
+                        </div>
+                        ${flags.length ? `<div class="flags">${flags.join('')}</div>` : ''}
+                        <div class="token-rationale">${t.rationale || 'No analysis available'}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateStats(stats) {
+            document.getElementById('stat-total').textContent = stats.totalTokens || 0;
+            document.getElementById('stat-avg').textContent = (stats.averageScore || 0).toFixed(2);
+            document.getElementById('stat-high').textContent = stats.highConfidenceCount || 0;
+            document.getElementById('stat-strong-buy').textContent = stats.byRecommendation?.STRONG_BUY || 0;
+        }
+
+        async function showTokenDetails(mintAddress) {
+            try {
+                const res = await fetch(`/api/pumpfun/token/${mint}`);
+                const data = await res.json();
+                const token = data.token;
+                if (!token) return;
+
+                alert(`${token.token.name} ($${token.token.symbol})\n\nScore: ${(token.overallScore * 100).toFixed(0)}%\nRecommendation: ${token.recommendation}\n\nRationale: ${token.rationale}\n\nRed Flags: ${(token.redFlags || []).join(', ') || 'None'}\nGreen Flags: ${(token.greenFlags || []).join(', ') || 'None'}`);
+            } catch (error) {
+                console.error('Failed to fetch token details:', error);
+            }
+        }
+
+        // Event listeners
+        document.getElementById('minScore').addEventListener('change', loadTokens);
+        document.getElementById('limit').addEventListener('change', loadTokens);
+        document.getElementById('recommendation').addEventListener('change', loadTokens);
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            loadTokens();
+            loadStats();
+        });
+
+        // Socket events
+        socket.on('pumpfun_high_confidence', (data) => {
+            loadTokens();
+            loadStats();
+        });
+
+        socket.on('pumpfun_cycle_complete', (data) => {
+            loadTokens();
+            loadStats();
+        });
+
+        // Initial load
+        loadTokens();
+        loadStats();
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            loadTokens();
+            loadStats();
+        }, 30000);
+    </script>
+</body>
+</html>
