@@ -1,0 +1,56 @@
+{
+  "app": {
+    "name": "PerpsTrader AI",
+    "version": "1.0.0",
+    "environment": "production",
+    "logLevel": "info"
+  },
+  "hyperliquid": {
+    "privateKey": "0xfa0f031555db618d9ece53fe32e5a4fba54fbb794b3cb2396adfd73df9722bf6",
+    "mainAddress": "0xC939FF91DFA67544Aaeeab16489e5d63Dca650E8",
+    "testnet": true,
+    "baseUrl": "https://api.hyperliquid.xyz"
+  },
+  "searchApi": {
+    "baseUrl": "http://localhost:8000/api/v1",
+    "timeout": 30000
+  },
+  "glm": {
+    "enabled": true,
+    "apiKey": "4cbc93e369504869888938829ece48ca.cUhcQ6ZlIZ4AQgwc",
+    "baseUrl": "https://api.z.ai/api/paas/v4",
+    "model": "glm-4.7",
+    "timeout": 30000
+  },
+  "database": {
+    "type": "sqlite",
+    "connection": "/home/d/PerpsTrader/data/trading.db"
+  },
+  "risk": {
+    "maxPositionSize": 10.0,
+    "maxDailyLoss": 0.3,
+    "maxLeverage": 180,
+    "emergencyStop": false
+  },
+  "trading": {
+    "symbols": [
+      "BTC",
+      "ETH",
+      "SOL"
+    ],
+    "timeframes": [
+      "1s",
+      "1m",
+      "5m",
+      "15m",
+      "1h"
+    ],
+    "strategies": [
+      "market_making",
+      "trend_following",
+      "mean_reversion",
+      "arbitrage",
+      "prediction"
+    ]
+  }
+}

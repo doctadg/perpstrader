@@ -1,0 +1,11 @@
+# Hyperliquid API Credentials
+# IMPORTANT: Keep this file secure and never commit to version control
+HYPERLIQUID_API_KEY=0xC939FF91DFA67544Aaeeab16489e5d63Dca650E8
+HYPERLIQUID_API_SECRET=0xfa0f031555db618d9ece53fe32e5a4fba54fbb794b3cb2396adfd73df9722bf6
+HYPERLIQUID_TESTNET=true
+HYPERLIQUID_MAX_LEVERAGE=180
+
+# Z.AI GLM 4.6 API Credentials
+ZAI_API_KEY=4cbc93e369504869888938829ece48ca.cUhcQ6ZlIZ4AQgwc
+ZAI_API_URL=https://api.z.ai/api/paas/v4
+ZAI_MODEL=glm-4.6

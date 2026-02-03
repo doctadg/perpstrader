@@ -1,0 +1,127 @@
+{
+  "generatedAt": "2026-02-01T15:16:41.928Z",
+  "summary": {
+    "totalTraces": 141330,
+    "tradesExecuted": 622,
+    "tradesSuccessful": 133494,
+    "executionRate": "0.44",
+    "successRate": "21462.06",
+    "uniqueSymbols": 114,
+    "uniqueRegimes": 4
+  },
+  "timing": {
+    "stats": {
+      "sampleSize": 10000,
+      "min": 13,
+      "max": 80091,
+      "avg": 9367,
+      "p50": 55,
+      "p75": 10515,
+      "p90": 43401,
+      "p95": 44741,
+      "p99": 47961
+    }
+  },
+  "errors": {
+    "chroma_db": 2007,
+    "hyperliquid_api": 6584,
+    "other": 30
+  },
+  "strategies": {
+    "RSI Mean Reversion": {
+      "count": 15020,
+      "trades": 70,
+      "success": 8272
+    },
+    "RSI Tight Reversion": {
+      "count": 753,
+      "trades": 2,
+      "success": 443
+    },
+    "Standard SMA Trend": {
+      "count": 149,
+      "trades": 0,
+      "success": 40
+    },
+    "Fast SMA Trend": {
+      "count": 474,
+      "trades": 0,
+      "success": 281
+    },
+    "RSI Loose Reversion": {
+      "count": 126,
+      "trades": 1,
+      "success": 60
+    },
+    "Slow SMA Trend": {
+      "count": 367,
+      "trades": 0,
+      "success": 21
+    }
+  },
+  "signalFlow": {
+    "signals": 1643,
+    "approved": 0,
+    "riskChecked": 1643,
+    "riskApproved": 1491,
+    "executed": 29,
+    "successful": 2318,
+    "approvalRate": "0.0",
+    "riskPassRate": "90.7",
+    "executionRate": 0,
+    "successRate": "7993.1"
+  },
+  "bottlenecks": [
+    {
+      "type": "low_execution_rate",
+      "severity": "critical",
+      "metric": "0.44% execution rate",
+      "description": "Only 0.44% of traces result in executed trades",
+      "impact": "System is analyzing but not trading effectively"
+    },
+    {
+      "type": "configuration_failure",
+      "severity": "critical",
+      "metric": "6584 errors",
+      "description": "Hyperliquid/ChromaDB not properly configured",
+      "impact": "Cannot execute live trades"
+    },
+    {
+      "type": "chroma_db_failure",
+      "severity": "high",
+      "metric": "2007 errors",
+      "description": "ChromaDB connection failures preventing pattern matching",
+      "impact": "Degraded strategy selection, reduced performance"
+    },
+    {
+      "type": "execution_gap",
+      "severity": "high",
+      "metric": "0% execution rate from approved signals",
+      "description": "Approved signals are not being executed",
+      "impact": "Missing trading opportunities"
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": "critical",
+      "category": "Trading",
+      "issue": "Extremely low trade execution rate (0.44%)",
+      "action": "1. Configure Hyperliquid API credentials 2. Fix ChromaDB connection 3. Review risk gate logic 4. Enable paper trading for testing",
+      "impact": "Enable actual trading (currently analysis-only)"
+    },
+    {
+      "priority": "high",
+      "category": "Infrastructure",
+      "issue": "ChromaDB connectivity issues",
+      "action": "1. Start ChromaDB service 2. Check CHROMADB_URL 3. Implement fallback pattern matching without Chroma",
+      "impact": "Restore pattern matching functionality"
+    },
+    {
+      "priority": "high",
+      "category": "Execution Pipeline",
+      "issue": "Only 0% of approved signals execute",
+      "action": "Debug execution pipeline: check for race conditions, verify order validation, add execution logging",
+      "impact": "Capture 50%+ more trading opportunities"
+    }
+  ]
+}
