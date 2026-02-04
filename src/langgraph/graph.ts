@@ -15,6 +15,7 @@ import {
 } from './nodes';
 import logger from '../shared/logger';
 import circuitBreaker from '../shared/circuit-breaker';
+import { solprismWrappedExecute } from '../solprism';
 
 // Re-export types for convenience
 export { AgentState, createInitialState, PatternMatch, StrategyIdea, MarketRegime };
@@ -72,9 +73,15 @@ export class TradingOrchestrator {
             state = { ...state, ...await this.safeExecute('risk-gate', () => riskGateNode(state), true) };
 
             // Conditional: Execute if approved
+            // SOLPRISM: Wrap execution with commit-reveal reasoning verification.
+            // The reasoning hash is committed onchain BEFORE the trade executes,
+            // then the full reasoning is revealed AFTER. This gives investors a
+            // verifiable, tamper-proof audit trail for every position.
             if (state.shouldExecute && state.signal && state.riskAssessment?.approved) {
-                logger.info('[Orchestrator] Step 7: Execution');
-                state = { ...state, ...await this.safeExecute('executor', () => executorNode(state), true) };
+                logger.info('[Orchestrator] Step 7: Execution (with SOLPRISM reasoning verification)');
+                state = { ...state, ...await this.safeExecute('executor', () =>
+                    solprismWrappedExecute(state, executorNode),
+                true) };
 
                 // Reset error counter on successful execution
                 this.consecutiveErrors = 0;
