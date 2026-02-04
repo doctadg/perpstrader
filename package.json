@@ -24,6 +24,7 @@
     "@langchain/langgraph": "^1.0.7",
     "@langchain/openai": "^1.2.0",
     "@nktkas/hyperliquid": "^0.17.0",
+    "@solprism/sdk": "^0.1.0",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.95.0",
     "@uniswap/sdk-core": "^7.10.1",
