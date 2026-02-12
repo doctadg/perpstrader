@@ -37,7 +37,7 @@ class ConfigManager {
         timeout: parseInt(process.env.ZAI_API_TIMEOUT || '30000')
       },
       openrouter: {
-        apiKey: process.env.OPENROUTER_API_KEY || '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',
+        apiKey: process.env.OPENROUTER_API_KEY || '',
         baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
         labelingModel: process.env.OPENROUTER_LABELING_MODEL || 'openai/gpt-oss-20b',
         embeddingModel: process.env.OPENROUTER_EMBEDDING_MODEL || 'qwen/qwen3-embedding-8b',

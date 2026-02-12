@@ -21,23 +21,24 @@ const DB_PATH = './data/trading.db';
 const RECONNECT_DELAY = 5000;
 const PING_INTERVAL = 30000;
 class WebSocketCandleService {
+    db;
+    ws = null;
+    reconnectTimer = null;
+    pingTimer = null;
+    isRunning = false;
+    activeSymbols = new Set();
+    // Candle builders for each symbol/timeframe
+    candleBuilders = new Map();
+    // Timeframes to track (in milliseconds)
+    timeframes = {
+        '1m': 60 * 1000,
+        '5m': 5 * 60 * 1000,
+        '15m': 15 * 60 * 1000,
+        '1h': 60 * 60 * 1000,
+        '4h': 4 * 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000
+    };
     constructor() {
-        this.ws = null;
-        this.reconnectTimer = null;
-        this.pingTimer = null;
-        this.isRunning = false;
-        this.activeSymbols = new Set();
-        // Candle builders for each symbol/timeframe
-        this.candleBuilders = new Map();
-        // Timeframes to track (in milliseconds)
-        this.timeframes = {
-            '1m': 60 * 1000,
-            '5m': 5 * 60 * 1000,
-            '15m': 15 * 60 * 1000,
-            '1h': 60 * 60 * 1000,
-            '4h': 4 * 60 * 60 * 1000,
-            '1d': 24 * 60 * 60 * 1000
-        };
         this.db = new better_sqlite3_1.default(DB_PATH);
         this.setupDatabase();
         this.loadActiveSymbols();
@@ -293,3 +294,4 @@ service.start().catch(err => {
     process.exit(1);
 });
 exports.default = service;
+//# sourceMappingURL=websocket-candles.js.map

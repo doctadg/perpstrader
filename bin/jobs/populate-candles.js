@@ -20,10 +20,11 @@ const CANDLE_LIMIT = 500; // Number of candles to fetch per symbol
 const BATCH_SIZE = 3; // Process this many symbols concurrently (reduced for rate limiting)
 const REQUEST_DELAY_MS = 500; // Delay between API requests
 class CandlePopulationJob {
+    db;
+    hyperliquidUrl = 'https://api.hyperliquid.xyz/info';
+    isRunning = false;
+    updateTimer = null;
     constructor() {
-        this.hyperliquidUrl = 'https://api.hyperliquid.xyz/info';
-        this.isRunning = false;
-        this.updateTimer = null;
         // Connect to trading database
         this.db = new better_sqlite3_1.default('./data/trading.db');
         this.setupDatabase();
@@ -285,3 +286,4 @@ if (require.main === module) {
     candleJob.start();
 }
 exports.default = candleJob;
+//# sourceMappingURL=populate-candles.js.map

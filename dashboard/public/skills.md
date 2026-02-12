@@ -76,7 +76,7 @@ PerpsTrader is an autonomous AI-powered trading and intelligence platform that c
 ### Folder Structure
 
 ```
-/home/d/PerpsTrader/
+perpstrader/
 ├── src/                          # TypeScript source code
 │   ├── main.ts                   # Main trading agent entry point
 │   ├── news-agent.ts             # News agent entry point
@@ -788,7 +788,7 @@ npm install -g pm2
 
 ```bash
 # Clone repository
-git clone https://github.com/doctadg/perpstrader.git
+git clone https://github.com/yourusername/perpstrader.git
 cd perpstrader
 
 # Install Node.js dependencies
@@ -804,18 +804,18 @@ npm install
 
 ```bash
 # Create Python virtual environment
-python3 -m venv /home/d/searxng/venv
+python3 -m venv ./searxng/venv
 
 # Activate virtual environment
-source /home/d/searxng/venv/bin/activate
+source ./searxng/venv/bin/activate
 
 # Install SearXNG
-git clone https://github.com/searxng/searxng.git /home/d/searxng/app
-cd /home/d/searxng/app
+git clone https://github.com/searxng/searxng.git ./searxng/app
+cd ./searxng/app
 pip install -e .
 
 # Copy default settings
-cp searx/settings.yml /home/d/searxng/settings.yml
+cp searx/settings.yml ./searxng/settings.yml
 ```
 
 #### 4. Configure Environment Variables
@@ -1113,13 +1113,13 @@ npm run predictions
 #### 8. Start SearXNG (for news search)
 
 ```bash
-cd /home/d/searxng
+cd ./searxng
 source venv/bin/activate
-export SEARXNG_SETTINGS_PATH=/home/d/searxng/settings.yml
+export SEARXNG_SETTINGS_PATH=./searxng/settings.yml
 python -m searx.webapp
 
 # Or use the startup script
-bash /home/d/searxng/start.sh
+bash ./searxng/start.sh
 ```
 
 #### 9. Access Dashboard
