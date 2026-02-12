@@ -730,30 +730,286 @@ sudo journalctl -u perps-agent -f
 0 2 * * * /home/d/PerpsTrader/scripts/backup.sh
 ```
 
-### First-Time Setup
+## 11. Setup & Dependencies
+
+### System Requirements
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Node.js | 20.x or 22.x | LTS recommended |
+| npm | 10.x+ | Comes with Node.js |
+| SQLite | 3.x | For database (bundled with better-sqlite3) |
+| Redis | 7.x+ | Optional, for message bus |
+| PM2 | 5.x+ | Optional, for process management |
+| Git | 2.x+ | For cloning |
+
+### Step-by-Step Installation
+
+#### 1. Install System Dependencies
+
+**Ubuntu/Debian:**
+```bash
+# Update package list
+sudo apt update
+
+# Install Node.js 22.x
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# Install build tools (for native modules)
+sudo apt install -y build-essential python3 make g++
+
+# Install Redis (optional)
+sudo apt install -y redis-server
+sudo systemctl enable redis-server
+sudo systemctl start redis-server
+
+# Install PM2 globally (optional)
+sudo npm install -g pm2
+```
+
+**macOS:**
+```bash
+# Install Homebrew if not present
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Node.js
+brew install node@22
+
+# Install Redis (optional)
+brew install redis
+brew services start redis
+
+# Install PM2 globally (optional)
+npm install -g pm2
+```
+
+#### 2. Clone & Setup Repository
 
 ```bash
-# 1. Clone repository
+# Clone repository
 git clone https://github.com/doctadg/perpstrader.git
 cd perpstrader
 
-# 2. Install dependencies
+# Install Node.js dependencies
 npm install
 
-# 3. Set up databases
-bash database/setup.sh
+# The following native modules will be built:
+# - better-sqlite3 (SQLite database)
+# - bcrypt (password hashing - if used)
+# - Other native dependencies
+```
 
-# 4. Configure environment
+#### 3. Install Python Dependencies (for SearXNG search)
+
+```bash
+# Create Python virtual environment
+python3 -m venv /home/d/searxng/venv
+
+# Activate virtual environment
+source /home/d/searxng/venv/bin/activate
+
+# Install SearXNG
+git clone https://github.com/searxng/searxng.git /home/d/searxng/app
+cd /home/d/searxng/app
+pip install -e .
+
+# Copy default settings
+cp searx/settings.yml /home/d/searxng/settings.yml
+```
+
+#### 4. Configure Environment Variables
+
+```bash
+# Copy example environment file
 cp .env.example .env
-# Edit .env with your API keys
 
-# 5. Build TypeScript
+# Edit .env with your settings
+nano .env
+```
+
+**Required Environment Variables:**
+```bash
+# Hyperliquid Trading (Required for trading)
+HYPERLIQUID_PRIVATE_KEY=your_private_key_here
+HYPERLIQUID_ADDRESS=your_wallet_address
+HYPERLIQUID_TESTNET=false
+
+# Database Paths
+NEWS_DB_PATH=./data/news.db
+PREDICTIONS_DB_PATH=./data/predictions.db
+TRADING_DB_PATH=./data/trading.db
+
+# GLM API (for strategy generation)
+GLM_API_KEY=your_glm_api_key
+
+# OpenRouter (for news analysis - optional)
+OPENROUTER_API_KEY=your_openrouter_key
+
+# SearXNG (for news search)
+SEARXNG_URL=http://localhost:8080
+
+# Redis (optional)
+REDIS_URL=redis://localhost:6379
+
+# Dashboard
+DASHBOARD_PORT=3001
+```
+
+#### 5. Set Up Databases
+
+```bash
+# Create data directory
+mkdir -p data
+
+# Databases are created automatically on first run
+# Or manually initialize:
+node -e "
+const Database = require('better-sqlite3');
+const db = new Database('./data/trading.db');
+console.log('Trading database ready');
+db.close();
+"
+```
+
+#### 6. Build TypeScript
+
+```bash
+# Compile TypeScript to JavaScript
 npm run build
 
-# 6. Start the system
+# This creates the bin/ directory with compiled output
+```
+
+#### 7. Start Services
+
+**Option A: Using the control script (recommended)**
+```bash
+# Start all services
 ./scripts/perps-control start
 
-# 7. Access dashboard
+# Check status
+./scripts/perps-control status
+
+# View logs
+./scripts/perps-control logs
+```
+
+**Option B: Using PM2**
+```bash
+# Start with PM2
+pm2 start ecosystem.config.js
+
+# Save PM2 config
+pm2 save
+pm2 startup
+```
+
+**Option C: Manual start**
+```bash
+# Terminal 1: Dashboard
+npm run dashboard
+
+# Terminal 2: Trading Agent
+npm run agent
+
+# Terminal 3: News Agent (optional)
+npm run news
+
+# Terminal 4: Predictions (optional)
+npm run predictions
+```
+
+#### 8. Start SearXNG (for news search)
+
+```bash
+cd /home/d/searxng
+source venv/bin/activate
+export SEARXNG_SETTINGS_PATH=/home/d/searxng/settings.yml
+python -m searx.webapp
+
+# Or use the startup script
+bash /home/d/searxng/start.sh
+```
+
+#### 9. Access Dashboard
+
+```bash
+# Open in browser
+open http://localhost:3001
+
+# Or via Cloudflare Tunnel (if configured)
+open https://perps.venym.io
+```
+
+### Dependency List
+
+**Core Dependencies (package.json):**
+```json
+{
+  "dependencies": {
+    "axios": "^1.6.0",
+    "better-sqlite3": "^9.4.0",
+    "dotenv": "^16.3.0",
+    "express": "^4.18.0",
+    "ioredis": "^5.3.0",
+    "langchain": "^0.1.0",
+    "@langchain/core": "^0.1.0",
+    "@langchain/glm": "^0.1.0",
+    "socket.io": "^4.7.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.14.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
+```
+
+**Install all dependencies:**
+```bash
+npm install
+```
+
+### Troubleshooting Setup Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| `better-sqlite3` build fails | Missing build tools | `sudo apt install build-essential python3` |
+| `node-gyp` errors | Python not found | `sudo apt install python3` and `npm config set python python3` |
+| Permission denied | npm global permissions | Use `npx` or fix npm permissions |
+| Redis connection fails | Redis not running | `redis-server` or `sudo systemctl start redis` |
+| Port 3001 in use | Another service using port | Kill process or change DASHBOARD_PORT |
+| TypeScript build errors | Missing types | `npm install` or `npm run build:clean` |
+
+### First-Time Setup Quick Checklist
+
+```bash
+# 1. Verify Node.js version (should be 20.x or 22.x)
+node -v
+
+# 2. Verify npm
+npm -v
+
+# 3. Clone repo
+git clone https://github.com/doctadg/perpstrader.git && cd perpstrader
+
+# 4. Install deps
+npm install
+
+# 5. Copy env
+cp .env.example .env
+# -> Edit .env with your API keys
+
+# 6. Build
+npm run build
+
+# 7. Start
+./scripts/perps-control start
+
+# 8. Check
 open http://localhost:3001
 ```
 
