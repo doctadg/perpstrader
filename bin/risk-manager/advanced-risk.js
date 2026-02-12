@@ -47,7 +47,7 @@ class AdvancedRiskEngine {
     riskHistory = [];
     maxHistorySize = 100;
     constructor() {
-        this.db = new better_sqlite3_1.default(process.env.DB_PATH || '/home/d/PerpsTrader/data/trading.db');
+        this.db = new better_sqlite3_1.default(process.env.DB_PATH || './data/trading.db');
         this.riskThresholds = {
             maxOverallRisk: 0.7,
             maxPositionRisk: 0.5,

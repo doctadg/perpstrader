@@ -49,7 +49,7 @@ class AdvancedRiskEngine {
   private maxHistorySize = 100;
 
   constructor() {
-    this.db = new Database(process.env.DB_PATH || '/home/d/PerpsTrader/data/trading.db');
+    this.db = new Database(process.env.DB_PATH || './data/trading.db');
 
     this.riskThresholds = {
       maxOverallRisk: 0.7,
