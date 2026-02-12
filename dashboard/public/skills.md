@@ -2,7 +2,7 @@
 
 > **Version:** 2.0.0  
 > **Last Updated:** February 2026  
-> **Repository:** `/home/d/PerpsTrader`
+> **Repository:** `perpstrader/`
 
 ---
 
@@ -721,13 +721,13 @@ sudo journalctl -u perps-agent -f
 
 ```bash
 # Daily database cleanup (3 AM)
-0 3 * * * /home/d/PerpsTrader/scripts/cleanup.sh
+0 3 * * * /path/to/perpstrader/scripts/cleanup.sh
 
 # Hourly trace analysis
-0 * * * * /home/d/PerpsTrader/scripts/trace-analysis.sh
+0 * * * * /path/to/perpstrader/scripts/trace-analysis.sh
 
 # Daily backup (2 AM)
-0 2 * * * /home/d/PerpsTrader/scripts/backup.sh
+0 2 * * * /path/to/perpstrader/scripts/backup.sh
 ```
 
 ## 11. Setup & Dependencies
