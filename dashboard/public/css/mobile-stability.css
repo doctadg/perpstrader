@@ -1,0 +1,221 @@
+/**
+ * Mobile Stability CSS Fixes
+ * Prevents jittery/jumping behavior on mobile
+ */
+
+/* ============================================
+   VIEWPORT HEIGHT FIX
+   Use --vh instead of vh to prevent jumping
+   ============================================ */
+html {
+  height: 100%;
+  height: -webkit-fill-available;
+}
+
+body {
+  min-height: 100vh;
+  min-height: calc(var(--vh, 1vh) * 100);
+  min-height: -webkit-fill-available;
+}
+
+/* Full-height elements should use --vh */
+.full-height,
+[data-full-height] {
+  height: calc(var(--vh, 1vh) * 100);
+}
+
+/* ============================================
+   ELIMINATE TOUCH DELAYS
+   ============================================ */
+* {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Ensure fast tap response */
+a, button, [role="button"], 
+input, select, textarea,
+.clickable, [data-clickable] {
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+/* ============================================
+   OVERSCROLL BEHAVIOR
+   ============================================ */
+html, body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent bounce on main scroll */
+body {
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================
+   SCROLL PERFORMANCE
+   ============================================ */
+.scroll-container,
+.data-strip,
+.scroll-x,
+.scroll-y {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* GPU acceleration for animated elements */
+.animate-gpu {
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* ============================================
+   REDUCED MOTION (performance)
+   ============================================ */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ============================================
+   BOTTOM NAV STABILITY
+   ============================================ */
+.app-bottom-nav,
+.mobile-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  transition: transform 0.2s ease;
+}
+
+/* ============================================
+   SAFARI-SPECIFIC FIXES
+   ============================================ */
+@supports (-webkit-touch-callout: none) {
+  /* iOS specific fixes */
+  body {
+    /* Prevent callout menu */
+    -webkit-touch-callout: none;
+    /* Prevent text selection on UI elements */
+    -webkit-user-select: none;
+  }
+  
+  /* Allow text selection on content */
+  p, h1, h2, h3, h4, h5, h6, span, div {
+    -webkit-user-select: text;
+  }
+  
+  /* Prevent zoom on input focus */
+  input, select, textarea {
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+}
+
+/* ============================================
+   MODAL/DRAWER STABILITY
+   ============================================ */
+.modal, .drawer, .bottom-sheet {
+  /* Prevent body scroll when modal open */
+  overscroll-behavior: contain;
+}
+
+/* Lock body when modal open */
+body.modal-open {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  height: 100%;
+}
+
+/* ============================================
+   DATA STRIP STABILITY (horizontal scroll)
+   ============================================ */
+.data-strip {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Prevent vertical scroll interference */
+  touch-action: pan-x;
+}
+
+.data-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.data-strip > * {
+  scroll-snap-align: start;
+  flex-shrink: 0;
+}
+
+/* ============================================
+   CRITICAL MOBILE BREAKPOINT FIXES
+   ============================================ */
+@media (max-width: 768px) {
+  /* Ensure smooth transitions */
+  * {
+    transition-duration: 0.2s;
+  }
+  
+  /* Prevent layout shift on hover/active */
+  .data-module:active,
+  .card:active,
+  button:active {
+    transform: scale(0.98);
+  }
+  
+  /* Optimize card animations */
+  .card {
+    will-change: transform;
+    transform: translateZ(0);
+  }
+  
+  /* Fix for sticky elements jumping */
+  .sticky, [data-sticky] {
+    position: -webkit-sticky;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+}
+
+/* ============================================
+   PERFORMANCE OPTIMIZATIONS
+   ============================================ */
+/* Contain paint for complex sections */
+.metric-section,
+.chart-container,
+.data-grid {
+  contain: layout style paint;
+}
+
+/* Optimize animations */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Low-end device optimizations */
+.low-power * {
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}

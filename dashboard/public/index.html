@@ -3,10 +3,14 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>PERPS_TRADER // CONTROL_TERMINAL</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="/js/universal-nav.js"></script>
+    <!-- Mobile Stability Fixes (load first) -->
+    <link rel="stylesheet" href="/css/mobile-stability.css">
+    <script src="/js/mobile-stability.js"></script>
+    <!-- Existing mobile styles -->
     <link rel="stylesheet" href="/css/mobile-responsive.css">
     <link rel="stylesheet" href="/css/mobile-native.css">
     <script src="/js/mobile-enhancements.js"></script>
