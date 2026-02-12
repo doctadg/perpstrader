@@ -828,33 +828,223 @@ cp .env.example .env
 nano .env
 ```
 
-**Required Environment Variables:**
+### Required API Keys
+
+The following API keys are required for full functionality. You can obtain them from the respective services.
+
+#### 1. Hyperliquid (Required for Trading)
+
+**What it's for:** Executing trades on Hyperliquid DEX
+
+**How to obtain:**
+1. Visit https://app.hyperliquid.xyz
+2. Connect your wallet (MetaMask, WalletConnect, etc.)
+3. Deposit USDC to your trading account
+4. Export your wallet's private key (keep this secure!)
+5. Copy your wallet address
+
+**Environment variables:**
 ```bash
-# Hyperliquid Trading (Required for trading)
-HYPERLIQUID_PRIVATE_KEY=your_private_key_here
-HYPERLIQUID_ADDRESS=your_wallet_address
+HYPERLIQUID_PRIVATE_KEY=your_wallet_private_key_here
+HYPERLIQUID_ADDRESS=your_wallet_address_here
+HYPERLIQUID_TESTNET=false  # Set to true for testnet
+```
+
+**Security note:** Never share your private key. Store it in `.env` only.
+
+#### 2. OpenRouter (Required for AI Analysis)
+
+**What it's for:** Accessing LLMs for news analysis, strategy generation, and predictions
+
+**How to obtain:**
+1. Visit https://openrouter.ai
+2. Create an account
+3. Go to Settings → API Keys
+4. Generate a new API key
+5. Copy the key (starts with `sk-or-...`)
+
+**Environment variables:**
+```bash
+OPENROUTER_API_KEY=sk-or-your-key-here
+```
+
+**Models used:**
+- `google/gemini-2.0-flash-001` - Fast news analysis
+- `anthropic/claude-3.5-sonnet` - Strategy generation
+- `meta-llama/llama-3.3-70b-instruct` - Predictions
+
+#### 3. GLM API (Alternative to OpenRouter)
+
+**What it's for:** Chinese LLM for strategy generation (optional alternative)
+
+**How to obtain:**
+1. Visit https://open.bigmodel.cn
+2. Create an account
+3. Go to API Keys section
+4. Generate and copy your API key
+
+**Environment variables:**
+```bash
+GLM_API_KEY=your_glm_api_key_here
+```
+
+#### 4. ChromaDB (Optional - for Vector Store)
+
+**What it's for:** Storing pattern embeddings for similarity search
+
+**How to obtain:** Self-hosted or cloud instance
+
+**Environment variables:**
+```bash
+CHROMADB_URL=http://localhost:8000  # Or your ChromaDB instance
+```
+
+**Setup:**
+```bash
+# Install ChromaDB
+pip install chromadb
+
+# Start ChromaDB server
+chroma run --path ./chroma_data
+```
+
+#### 5. Telegram Bot (Optional - for Alerts)
+
+**What it's for:** Sending trading alerts and status updates to your phone
+
+**How to obtain:**
+1. Message @BotFather on Telegram
+2. Create a new bot with `/newbot`
+3. Follow prompts to name your bot
+4. Copy the bot token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+5. Message your bot to get your chat ID
+
+**Environment variables:**
+```bash
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=your_telegram_user_id
+```
+
+**Getting your chat ID:**
+```bash
+# Message @userinfobot on Telegram
+# It will reply with your user ID
+```
+
+#### 6. Twitter/X API (Optional - for Social Signals)
+
+**What it's for:** Monitoring Twitter for market sentiment
+
+**How to obtain:**
+1. Visit https://developer.twitter.com
+2. Apply for Developer Account
+3. Create a new app/project
+4. Generate API Key and Secret
+5. Generate Access Token and Secret
+
+**Environment variables:**
+```bash
+TWITTER_API_KEY=your_api_key
+TWITTER_API_SECRET=your_api_secret
+TWITTER_ACCESS_TOKEN=your_access_token
+TWITTER_ACCESS_SECRET=your_access_secret
+```
+
+#### 7. Discord Webhook (Optional - for Alerts)
+
+**What it's for:** Sending alerts to Discord channels
+
+**How to obtain:**
+1. In Discord, go to Server Settings → Integrations → Webhooks
+2. Create a new webhook
+3. Copy the webhook URL
+
+**Environment variables:**
+```bash
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+```
+
+### Complete Environment File Example
+
+Create `.env` file in the project root:
+
+```bash
+# ============================================
+# REQUIRED: Trading
+# ============================================
+HYPERLIQUID_PRIVATE_KEY=0x1234567890abcdef...
+HYPERLIQUID_ADDRESS=0x1234567890abcdef...
 HYPERLIQUID_TESTNET=false
 
-# Database Paths
+# ============================================
+# REQUIRED: AI/LLM (Choose OpenRouter OR GLM)
+# ============================================
+# Option 1: OpenRouter (Recommended)
+OPENROUTER_API_KEY=sk-or-v1-1234567890abcdef...
+
+# Option 2: GLM (Alternative)
+# GLM_API_KEY=your_glm_key_here
+
+# ============================================
+# OPTIONAL: Notifications
+# ============================================
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjkl...
+TELEGRAM_CHAT_ID=123456789
+
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# ============================================
+# OPTIONAL: External Services
+# ============================================
+CHROMADB_URL=http://localhost:8000
+REDIS_URL=redis://localhost:6379
+SEARXNG_URL=http://localhost:8080
+
+# ============================================
+# OPTIONAL: Social Signals
+# ============================================
+TWITTER_API_KEY=your_twitter_api_key
+TWITTER_API_SECRET=your_twitter_api_secret
+TWITTER_ACCESS_TOKEN=your_access_token
+TWITTER_ACCESS_SECRET=your_access_secret
+
+# ============================================
+# System Configuration
+# ============================================
+DASHBOARD_PORT=3001
+NODE_ENV=production
+LOG_LEVEL=info
+
+# Database paths
 NEWS_DB_PATH=./data/news.db
 PREDICTIONS_DB_PATH=./data/predictions.db
 TRADING_DB_PATH=./data/trading.db
-
-# GLM API (for strategy generation)
-GLM_API_KEY=your_glm_api_key
-
-# OpenRouter (for news analysis - optional)
-OPENROUTER_API_KEY=your_openrouter_key
-
-# SearXNG (for news search)
-SEARXNG_URL=http://localhost:8080
-
-# Redis (optional)
-REDIS_URL=redis://localhost:6379
-
-# Dashboard
-DASHBOARD_PORT=3001
 ```
+
+### API Key Security Best Practices
+
+1. **Never commit `.env` to git**
+   ```bash
+   echo ".env" >> .gitignore
+   ```
+
+2. **Use restrictive permissions**
+   ```bash
+   chmod 600 .env
+   ```
+
+3. **Rotate keys regularly**
+   - Hyperliquid: Generate new wallet for each deployment
+   - OpenRouter: Regenerate keys monthly
+   - Telegram: Revoke and recreate bot if compromised
+
+4. **Use environment-specific keys**
+   - `.env.development` - Test keys
+   - `.env.production` - Production keys (never shared)
+
+5. **Monitor usage**
+   - Check OpenRouter dashboard for unexpected usage
+   - Monitor Hyperliquid wallet for unauthorized trades
 
 #### 5. Set Up Databases
 
