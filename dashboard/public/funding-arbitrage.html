@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERPS_TRADER // FUNDING_ARBITRAGE</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/js/universal-nav.js"></script>
+    <link rel="stylesheet" href="/css/mobile-responsive.css">
+    <link rel="stylesheet" href="/css/mobile-native.css">
+    <script src="/js/mobile-enhancements.js"></script>
+    <script src="/js/mobile-native.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
+
+        :root {
+            --bg-obsidian: #050507;
+            --bg-panel: rgba(12, 12, 18, 0.85);
+            --terminal-green: #00ff9d;
+            --terminal-cyan: #00f2ff;
+            --terminal-amber: #ffb300;
+            --terminal-red: #ff3e3e;
+            --terminal-purple: #b829dd;
+            --border-low: rgba(0, 242, 255, 0.15);
+            --border-med: rgba(0, 242, 255, 0.4);
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Inter', sans-serif;
+            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
+            --glow-green: 0 0 15px rgba(0, 255, 157, 0.3);
+            --glow-red: 0 0 15px rgba(255, 62, 62, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: var(--terminal-cyan) transparent;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-obsidian);
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* CRT Scanline Effect */
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 1000;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            border-left: 4px solid var(--terminal-cyan);
+            backdrop-filter: blur(8px);
+        }
+
+        .system-id {
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            letter-spacing: 2px;
+            color: var(--terminal-cyan);
+            text-transform: uppercase;
+        }
+
+        .system-title {
+            font-weight: 800;
+            font-size: 1.4em;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .system-title span {
+            color: var(--terminal-cyan);
+            text-shadow: var(--glow-cyan);
+        }
+
+        .status-module {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+        }
+
+        .connection-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px;
+            background: rgba(0, 255, 157, 0.1);
+            border: 1px solid var(--terminal-green);
+            color: var(--terminal-green);
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--terminal-green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--terminal-green);
+            animation: flicker 1.5s infinite;
+        }
+
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .stat-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--terminal-cyan), transparent);
+            opacity: 0.5;
+        }
+
+        .stat-card.positive::before {
+            background: linear-gradient(90deg, var(--terminal-green), transparent);
+        }
+
+        .stat-card.negative::before {
+            background: linear-gradient(90deg, var(--terminal-red), transparent);
+        }
+
+        .stat-label {
+            font-family: var(--font-mono);
+            font-size: 0.65em;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.6em;
+            font-weight: 700;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .stat-value.positive { color: var(--terminal-green); text-shadow: var(--glow-green); }
+        .stat-value.negative { color: var(--terminal-red); text-shadow: var(--glow-red); }
+        .stat-value.neutral { color: var(--terminal-cyan); text-shadow: var(--glow-cyan); }
+
+        .stat-sublabel {
+            font-size: 0.5em;
+            color: #666;
+            font-weight: 400;
+        }
+
+        /* Filter Bar */
+        .filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 16px 20px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-label {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .filter-input {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-low);
+            padding: 8px 12px;
+            color: #e0e0e0;
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            min-width: 120px;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: var(--terminal-cyan);
+            box-shadow: var(--glow-cyan);
+        }
+
+        .filter-btn {
+            background: transparent;
+            border: 1px solid var(--border-low);
+            padding: 8px 16px;
+            color: #888;
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+
+        .filter-btn:hover,
+        .filter-btn.active {
+            border-color: var(--terminal-cyan);
+            color: var(--terminal-cyan);
+            background: rgba(0, 242, 255, 0.05);
+        }
+
+        /* Main Content Grid */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Panel Styles */
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-low);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: rgba(0, 242, 255, 0.05);
+            border-bottom: 1px solid var(--border-low);
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #aaa;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-title.positive { color: var(--terminal-green); }
+        .panel-title.negative { color: var(--terminal-red); }
+
+        .panel-badge {
+            font-size: 0.7em;
+            padding: 2px 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .panel-body {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        /* Table Styles */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 0.65em;
+            color: #666;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border-low);
+            background: rgba(0, 0, 0, 0.2);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .data-table td {
+            padding: 12px 16px;
+            font-size: 0.85em;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .data-table tr:hover {
+            background: rgba(0, 242, 255, 0.03);
+        }
+
+        .coin-cell {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .coin-icon {
+            width: 28px;
+            height: 28px;
+            background: linear-gradient(135deg, var(--terminal-cyan), var(--terminal-purple));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7em;
+            font-weight: 700;
+            color: #000;
+        }
+
+        .coin-name {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .coin-symbol {
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .coin-category {
+            font-size: 0.75em;
+            color: #666;
+        }
+
+        /* Rate Display */
+        .rate-display {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .rate-value {
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+
+        .rate-value.positive { color: var(--terminal-green); }
+        .rate-value.negative { color: var(--terminal-red); }
+        .rate-value.neutral { color: #888; }
+
+        .rate-apr {
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        /* Trend Indicator */
+        .trend-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+        }
+
+        .trend-up {
+            background: rgba(0, 255, 157, 0.1);
+            color: var(--terminal-green);
+        }
+
+        .trend-down {
+            background: rgba(255, 62, 62, 0.1);
+            color: var(--terminal-red);
+        }
+
+        .trend-stable {
+            background: rgba(136, 136, 136, 0.1);
+            color: #888;
+        }
+
+        .trend-arrow {
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: translateY(0); }
+            50% { opacity: 0.6; transform: translateY(-1px); }
+        }
+
+        /* Opportunity Score */
+        .opportunity-score {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .score-bar {
+            width: 60px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .score-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .score-fill.high { background: var(--terminal-red); }
+        .score-fill.medium { background: var(--terminal-amber); }
+        .score-fill.low { background: var(--terminal-green); }
+
+        .score-value {
+            font-size: 0.85em;
+            font-weight: 600;
+            min-width: 32px;
+        }
+
+        /* Action Buttons */
+        .action-btns {
+            display: flex;
+            gap: 6px;
+        }
+
+        .action-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid var(--border-low);
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            border-color: var(--terminal-cyan);
+            color: var(--terminal-cyan);
+            background: rgba(0, 242, 255, 0.05);
+        }
+
+        .action-btn.trade:hover {
+            border-color: var(--terminal-green);
+            color: var(--terminal-green);
+        }
+
+        .action-btn.alert:hover {
+            border-color: var(--terminal-amber);
+            color: var(--terminal-amber);
+        }
+
+        /* Sparkline */
+        .sparkline {
+            width: 80px;
+            height: 24px;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #555;
+        }
+
+        .empty-state-icon {
+            font-size: 3em;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            gap: 12px;
+            color: var(--terminal-cyan);
+        }
+
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-low);
+            border-top-color: var(--terminal-cyan);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Last Updated */
+        .last-updated {
+            font-family: var(--font-mono);
+            font-size: 0.7em;
+            color: #666;
+            text-align: right;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-top: 1px solid var(--border-low);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-low);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--terminal-cyan);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-med);
+            max-width: 500px;
+            width: 90%;
+            padding: 24px;
+        }
+
+        .modal-title {
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--terminal-cyan);
+            margin-bottom: 16px;
+        }
+
+        .modal-content {
+            margin-bottom: 20px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .modal-btn {
+            padding: 10px 20px;
+            border: 1px solid var(--border-low);
+            background: transparent;
+            color: #888;
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .modal-btn.primary {
+            border-color: var(--terminal-cyan);
+            color: var(--terminal-cyan);
+        }
+
+        .modal-btn:hover {
+            background: rgba(0, 242, 255, 0.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Top Status Bar -->
+        <header class="top-bar">
+            <div class="system-id">[ FUNDING_ARB_MODULE ]</div>
+            <div class="system-title">
+                <span>FUNDING</span>_ARBITRAGE
+            </div>
+            <div class="status-module">
+                <div class="connection-indicator">
+                    <span class="live-dot"></span>
+                    <span id="connection-status">LIVE</span>
+                </div>
+                <div id="last-update-time">--:--:--</div>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card positive">
+                <div class="stat-label">Best Long Funding</div>
+                <div class="stat-value positive" id="best-long">
+                    --
+                    <span class="stat-sublabel">APR</span>
+                </div>
+            </div>
+            <div class="stat-card negative">
+                <div class="stat-label">Best Short Funding</div>
+                <div class="stat-value negative" id="best-short">
+                    --
+                    <span class="stat-sublabel">APR</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Average Funding</div>
+                <div class="stat-value neutral" id="avg-funding">
+                    --
+                    <span class="stat-sublabel">APR</span>
+                </div>
+            </div>
+            <div class="stat-card negative">
+                <div class="stat-label">Extreme Markets</div>
+                <div class="stat-value" id="extreme-count">
+                    --
+                    <span class="stat-sublabel">>30% APR</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+            <div class="filter-group">
+                <span class="filter-label">Search:</span>
+                <input type="text" class="filter-input" id="search-input" placeholder="SYMBOL...">
+            </div>
+            <div class="filter-group">
+                <span class="filter-label">Min APR:</span>
+                <input type="number" class="filter-input" id="min-apr" placeholder="-100" value="-100">
+            </div>
+            <div class="filter-group">
+                <span class="filter-label">Max APR:</span>
+                <input type="number" class="filter-input" id="max-apr" placeholder="100" value="100">
+            </div>
+            <div class="filter-group">
+                <button class="filter-btn active" data-sort="rate">Sort by Rate</button>
+                <button class="filter-btn" data-sort="opportunity">By Opportunity</button>
+                <button class="filter-btn" data-sort="trend">By Trend</button>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="content-grid">
+            <!-- Short Opportunities (Positive Funding) -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title negative">
+                        🔴 SHORT OPPORTUNITIES
+                        <span class="panel-badge" id="short-count">0</span>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Coin</th>
+                                <th>Funding</th>
+                                <th>APR</th>
+                                <th>Trend</th>
+                                <th>Score</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="short-tbody">
+                            <tr>
+                                <td colspan="6" class="loading">
+                                    <div class="loading-spinner"></div>
+                                    <span>Loading...</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="last-updated" id="short-last-updated">--</div>
+            </div>
+
+            <!-- Long Opportunities (Negative Funding) -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title positive">
+                        🟢 LONG OPPORTUNITIES
+                        <span class="panel-badge" id="long-count">0</span>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Coin</th>
+                                <th>Funding</th>
+                                <th>APR</th>
+                                <th>Trend</th>
+                                <th>Score</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="long-tbody">
+                            <tr>
+                                <td colspan="6" class="loading">
+                                    <div class="loading-spinner"></div>
+                                    <span>Loading...</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="last-updated" id="long-last-updated">--</div>
+            </div>
+        </div>
+
+        <!-- Cross-Exchange Arbitrage Section -->
+        <div class="panel" style="margin-top: 20px;">
+            <div class="panel-header">
+                <div class="panel-title" style="color: var(--terminal-purple);">
+                    ⚡ CROSS-EXCHANGE ARBITRAGE
+                    <span class="panel-badge" id="cross-exchange-count">0</span>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div class="exchange-status" id="exchange-status">
+                        <span class="status-dot" id="hl-status-dot" style="color: var(--terminal-green);">● HL</span>
+                        <span class="status-dot" id="aster-status-dot" style="color: #666;">● ASTERDEX</span>
+                    </div>
+                    <button class="filter-btn" onclick="loadCrossExchangeData()">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="panel-body">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Coin</th>
+                            <th>Hyperliquid</th>
+                            <th>Asterdex</th>
+                            <th>Spread</th>
+                            <th>Annualized</th>
+                            <th>Action</th>
+                            <th>Yield</th>
+                            <th>Confidence</th>
+                            <th>Execute</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cross-exchange-tbody">
+                        <tr>
+                            <td colspan="9" class="loading">
+                                <div class="loading-spinner"></div>
+                                <span>Loading cross-exchange data...</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="last-updated" id="cross-exchange-last-updated">--</div>
+        </div>
+    </div>
+
+    <!-- Alert Modal -->
+    <div class="modal-overlay" id="alert-modal">
+        <div class="modal">
+            <div class="modal-title">Set Funding Alert</div>
+            <div class="modal-content">
+                <p style="color: #888; margin-bottom: 16px;">
+                    Alert when <strong id="alert-symbol" style="color: var(--terminal-cyan);">--</strong> 
+                    funding rate crosses:
+                </p>
+                <input type="number" class="filter-input" id="alert-threshold" placeholder="Enter APR %" style="width: 100%;">
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn" onclick="closeAlertModal()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveAlert()">Set Alert</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let fundingData = [];
+        let sortBy = 'rate';
+        let currentAlertSymbol = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFundingData();
+            loadCrossExchangeData();
+            setInterval(loadFundingData, 300000); // Refresh every 5 minutes
+            setInterval(loadCrossExchangeData, 60000); // Cross-exchange every 1 minute
+            setInterval(updateClock, 1000);
+            setupFilters();
+        });
+
+        // Load funding data from API
+        async function loadFundingData() {
+            try {
+                const [ratesResponse, statsResponse] = await Promise.all([
+                    fetch('/api/funding/rates'),
+                    fetch('/api/funding/stats')
+                ]);
+
+                const rates = await ratesResponse.json();
+                const stats = await statsResponse.json();
+
+                if (rates.success) {
+                    fundingData = rates.rates || [];
+                    renderTables();
+                }
+
+                if (stats.success) {
+                    updateStats(stats.stats);
+                }
+
+                updateLastUpdated();
+            } catch (error) {
+                console.error('Failed to load funding data:', error);
+                showErrorState();
+            }
+        }
+
+        // Update stats display
+        function updateStats(stats) {
+            const bestLongEl = document.getElementById('best-long');
+            const bestShortEl = document.getElementById('best-short');
+            const avgEl = document.getElementById('avg-funding');
+            const extremeEl = document.getElementById('extreme-count');
+
+            if (stats.bestLongFunding) {
+                bestLongEl.innerHTML = `${stats.bestLongFunding.rate.toFixed(2)}% <span class="stat-sublabel">${stats.bestLongFunding.symbol}</span>`;
+                bestLongEl.className = 'stat-value negative';
+            }
+
+            if (stats.bestShortFunding) {
+                bestShortEl.innerHTML = `${stats.bestShortFunding.rate.toFixed(2)}% <span class="stat-sublabel">${stats.bestShortFunding.symbol}</span>`;
+                bestShortEl.className = 'stat-value positive';
+            }
+
+            avgEl.innerHTML = `${stats.averageFunding.toFixed(2)}% <span class="stat-sublabel">APR</span>`;
+            avgEl.className = `stat-value ${stats.averageFunding > 0 ? 'positive' : stats.averageFunding < 0 ? 'negative' : 'neutral'}`;
+
+            extremeEl.innerHTML = `${stats.extremeMarketsCount} <span class="stat-sublabel">>30% APR</span>`;
+        }
+
+        // Render tables
+        function renderTables() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const minApr = parseFloat(document.getElementById('min-apr').value) || -Infinity;
+            const maxApr = parseFloat(document.getElementById('max-apr').value) || Infinity;
+
+            // Filter data
+            let filtered = fundingData.filter(item => {
+                const matchesSearch = item.symbol.toLowerCase().includes(searchTerm);
+                const withinRange = item.annualizedRate >= minApr && item.annualizedRate <= maxApr;
+                return matchesSearch && withinRange;
+            });
+
+            // Sort data
+            filtered.sort((a, b) => {
+                if (sortBy === 'rate') return Math.abs(b.annualizedRate) - Math.abs(a.annualizedRate);
+                if (sortBy === 'opportunity') return b.opportunityScore - a.opportunityScore;
+                if (sortBy === 'trend') {
+                    const trendOrder = { increasing: 0, stable: 1, decreasing: 2 };
+                    return trendOrder[a.trend] - trendOrder[b.trend];
+                }
+                return 0;
+            });
+
+            // Split into positive (short) and negative (long)
+            const shortOpportunities = filtered.filter(item => item.annualizedRate > 0);
+            const longOpportunities = filtered.filter(item => item.annualizedRate <= 0);
+
+            // Update counts
+            document.getElementById('short-count').textContent = shortOpportunities.length;
+            document.getElementById('long-count').textContent = longOpportunities.length;
+
+            // Render tables
+            document.getElementById('short-tbody').innerHTML = renderTableRows(shortOpportunities, 'short');
+            document.getElementById('long-tbody').innerHTML = renderTableRows(longOpportunities, 'long');
+        }
+
+        // Render table rows
+        function renderTableRows(items, type) {
+            if (items.length === 0) {
+                return `
+                    <tr>
+                        <td colspan="6" class="empty-state">
+                            <div class="empty-state-icon">📊</div>
+                            <div>No ${type} opportunities found</div>
+                        </td>
+                    </tr>
+                `;
+            }
+
+            return items.map(item => {
+                const isPositive = item.annualizedRate > 0;
+                const trendArrow = item.trend === 'increasing' ? '↗' : item.trend === 'decreasing' ? '↘' : '→';
+                const trendClass = item.trend === 'increasing' ? 'trend-up' : item.trend === 'decreasing' ? 'trend-down' : 'trend-stable';
+                const scoreClass = item.opportunityScore > 70 ? 'high' : item.opportunityScore > 40 ? 'medium' : 'low';
+                const category = getCategory(item.symbol);
+
+                return `
+                    <tr>
+                        <td>
+                            <div class="coin-cell">
+                                <div class="coin-icon">${item.symbol.slice(0, 2)}</div>
+                                <div class="coin-name">
+                                    <span class="coin-symbol">${item.symbol}</span>
+                                    <span class="coin-category">${category}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="rate-display">
+                                <span class="rate-value ${isPositive ? 'positive' : 'negative'}">${(item.fundingRate * 100).toFixed(4)}%</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="rate-display">
+                                <span class="rate-value ${isPositive ? 'positive' : 'negative'}">${item.annualizedRate.toFixed(2)}%</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="trend-indicator ${trendClass}">
+                                <span class="trend-arrow">${trendArrow}</span>
+                                ${item.trend}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="opportunity-score">
+                                <div class="score-bar">
+                                    <div class="score-fill ${scoreClass}" style="width: ${item.opportunityScore}%"></div>
+                                </div>
+                                <span class="score-value">${Math.round(item.opportunityScore)}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="action-btns">
+                                <button class="action-btn trade" onclick="trade('${item.symbol}', '${type}')" title="Trade">💱</button>
+                                <button class="action-btn" onclick="addToWatchlist('${item.symbol}')" title="Watchlist">⭐</button>
+                                <button class="action-btn alert" onclick="openAlertModal('${item.symbol}')" title="Set Alert">🔔</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Get category for symbol (simplified)
+        function getCategory(symbol) {
+            const sym = symbol.toLowerCase();
+            if (['btc', 'eth'].includes(sym)) return 'Layer 1';
+            if (['arb', 'op', 'base', 'mnt', 'strk', 'zk'].includes(sym)) return 'Layer 2';
+            if (['uni', 'aave', 'crv', 'comp', 'mkr'].includes(sym)) return 'DeFi';
+            if (['doge', 'shib', 'pepe', 'floki', 'bonk', 'wif', 'mog'].includes(sym)) return 'Meme';
+            if (['render', 'tao', 'fet', 'wld'].includes(sym)) return 'AI';
+            return 'Altcoin';
+        }
+
+        // Setup filter event listeners
+        function setupFilters() {
+            document.getElementById('search-input').addEventListener('input', renderTables);
+            document.getElementById('min-apr').addEventListener('input', renderTables);
+            document.getElementById('max-apr').addEventListener('input', renderTables);
+
+            document.querySelectorAll('.filter-btn[data-sort]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.filter-btn[data-sort]').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    sortBy = btn.dataset.sort;
+                    renderTables();
+                });
+            });
+        }
+
+        // Update clock
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('last-update-time').textContent = now.toLocaleTimeString('en-GB');
+        }
+
+        // Update last updated text
+        function updateLastUpdated() {
+            const now = new Date().toLocaleTimeString();
+            document.getElementById('short-last-updated').textContent = `Last updated: ${now}`;
+            document.getElementById('long-last-updated').textContent = `Last updated: ${now}`;
+        }
+
+        // Show error state
+        function showErrorState() {
+            const errorRow = `
+                <tr>
+                    <td colspan="6" class="empty-state">
+                        <div class="empty-state-icon">⚠️</div>
+                        <div>Failed to load data</div>
+                    </td>
+                </tr>
+            `;
+            document.getElementById('short-tbody').innerHTML = errorRow;
+            document.getElementById('long-tbody').innerHTML = errorRow;
+        }
+
+        // Actions
+        function trade(symbol, type) {
+            window.open(`/predictions?symbol=${symbol}&side=${type}`, '_blank');
+        }
+
+        function addToWatchlist(symbol) {
+            // Store in localStorage for now
+            const watchlist = JSON.parse(localStorage.getItem('fundingWatchlist') || '[]');
+            if (!watchlist.includes(symbol)) {
+                watchlist.push(symbol);
+                localStorage.setItem('fundingWatchlist', JSON.stringify(watchlist));
+                alert(`${symbol} added to watchlist`);
+            } else {
+                alert(`${symbol} already in watchlist`);
+            }
+        }
+
+        function openAlertModal(symbol) {
+            currentAlertSymbol = symbol;
+            document.getElementById('alert-symbol').textContent = symbol;
+            document.getElementById('alert-threshold').value = '';
+            document.getElementById('alert-modal').classList.add('active');
+        }
+
+        function closeAlertModal() {
+            document.getElementById('alert-modal').classList.remove('active');
+            currentAlertSymbol = null;
+        }
+
+        function saveAlert() {
+            const threshold = document.getElementById('alert-threshold').value;
+            if (threshold && currentAlertSymbol) {
+                const alerts = JSON.parse(localStorage.getItem('fundingAlerts') || '[]');
+                alerts.push({
+                    symbol: currentAlertSymbol,
+                    threshold: parseFloat(threshold),
+                    createdAt: new Date().toISOString()
+                });
+                localStorage.setItem('fundingAlerts', JSON.stringify(alerts));
+                alert(`Alert set for ${currentAlertSymbol} at ${threshold}% APR`);
+                closeAlertModal();
+            }
+        }
+
+        // Close modal on overlay click
+        document.getElementById('alert-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'alert-modal') closeAlertModal();
+        });
+
+        // ==========================================
+        // CROSS-EXCHANGE ARBITRAGE FUNCTIONS
+        // ==========================================
+
+        // Load cross-exchange data
+        async function loadCrossExchangeData() {
+            try {
+                // Load opportunities and exchange status in parallel
+                const [oppResponse, exchangeResponse] = await Promise.all([
+                    fetch('/api/funding/cross-exchange?minSpread=5'),
+                    fetch('/api/funding/exchanges')
+                ]);
+
+                const oppData = await oppResponse.json();
+                const exchangeData = await exchangeResponse.json();
+
+                // Update exchange status indicators
+                updateExchangeStatus(exchangeData.exchanges || []);
+
+                // Render opportunities
+                if (oppData.success) {
+                    renderCrossExchangeTable(oppData.opportunities || []);
+                } else {
+                    renderCrossExchangeError(oppData.error || 'Failed to load data');
+                }
+
+                // Update last updated time
+                document.getElementById('cross-exchange-last-updated').textContent = 
+                    `Last updated: ${new Date().toLocaleTimeString()}`;
+            } catch (error) {
+                console.error('Failed to load cross-exchange data:', error);
+                renderCrossExchangeError('Failed to load cross-exchange data');
+            }
+        }
+
+        // Update exchange status indicators
+        function updateExchangeStatus(exchanges) {
+            const hlStatus = exchanges.find(e => e.name === 'hyperliquid');
+            const asterStatus = exchanges.find(e => e.name === 'asterdex');
+
+            const hlDot = document.getElementById('hl-status-dot');
+            const asterDot = document.getElementById('aster-status-dot');
+
+            if (hlDot) {
+                hlDot.style.color = hlStatus?.connected ? 'var(--terminal-green)' : '#666';
+            }
+            if (asterDot) {
+                asterDot.style.color = asterStatus?.connected ? 'var(--terminal-green)' : '#666';
+            }
+        }
+
+        // Render cross-exchange table
+        function renderCrossExchangeTable(opportunities) {
+            const tbody = document.getElementById('cross-exchange-tbody');
+            const countBadge = document.getElementById('cross-exchange-count');
+
+            countBadge.textContent = opportunities.length;
+
+            if (opportunities.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="9" class="empty-state">
+                            <div class="empty-state-icon">⚡</div>
+                            <div>No cross-exchange opportunities found</div>
+                            <div style="font-size: 0.85em; margin-top: 8px;">Try lowering the minimum spread threshold</div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = opportunities.map(opp => {
+                const hlRate = (opp.hyperliquidFunding * 100).toFixed(4);
+                const asterRate = (opp.asterdexFunding * 100).toFixed(4);
+                const spread = opp.spreadPercent.toFixed(3);
+                const annualized = opp.annualizedSpread.toFixed(2);
+                const yieldPct = opp.estimatedYearlyYield.toFixed(2);
+                
+                // Determine colors
+                const hlColor = opp.hyperliquidFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
+                const asterColor = opp.asterdexFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
+                const spreadColor = Math.abs(opp.annualizedSpread) > 50 ? 'var(--terminal-red)' : 
+                                   Math.abs(opp.annualizedSpread) > 25 ? 'var(--terminal-amber)' : 'var(--terminal-green)';
+                
+                // Action text
+                const actionText = opp.recommendedAction === 'long_hl_short_aster' 
+                    ? 'Long HL / Short Asterdex'
+                    : opp.recommendedAction === 'short_hl_long_aster'
+                    ? 'Short HL / Long Asterdex'
+                    : 'N/A';
+
+                // Confidence color
+                const confidenceColor = opp.confidence >= 80 ? 'var(--terminal-green)' : 
+                                       opp.confidence >= 50 ? 'var(--terminal-amber)' : 'var(--terminal-red)';
+
+                return `
+                    <tr data-symbol="${opp.symbol}">
+                        <td>
+                            <div class="coin-cell">
+                                <div class="coin-icon">${opp.symbol.slice(0, 2)}</div>
+                                <div class="coin-name">
+                                    <span class="coin-symbol">${opp.symbol}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="rate-display">
+                                <span class="rate-value" style="color: ${hlColor}">${hlRate}%</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="rate-display">
+                                <span class="rate-value" style="color: ${asterColor}">${asterRate}%</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="rate-display">
+                                <span class="rate-value" style="color: ${spreadColor}">${spread}%</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="rate-display">
+                                <span class="rate-value" style="color: ${spreadColor}">${annualized}%</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span style="font-size: 0.8em; color: var(--terminal-cyan);"
+                                  title="${actionText}">
+                                ${actionText.length > 20 ? actionText.substring(0, 20) + '...' : actionText}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="rate-value" style="color: ${spreadColor}; font-weight: 600;">
+                                ${yieldPct}%/yr
+                            </span>
+                        </td>
+                        <td>
+                            <span style="color: ${confidenceColor}; font-weight: 600;">
+                                ${Math.round(opp.confidence)}%
+                            </span>
+                        </td>
+                        <td>
+                            <div class="action-btns">
+                                <button class="action-btn trade" 
+                                        onclick="executeCrossExchangeArbitrage('${opp.symbol}', '${opp.recommendedAction}')" 
+                                        title="Execute Arbitrage"
+                                        ${opp.confidence < 50 ? 'disabled style="opacity: 0.3;"' : ''}>
+                                    ⚡
+                                </button>
+                                <button class="action-btn" 
+                                        onclick="viewCrossExchangeDetails('${opp.symbol}')" 
+                                        title="View Details">
+                                    ℹ️
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Render cross-exchange error state
+        function renderCrossExchangeError(message) {
+            const tbody = document.getElementById('cross-exchange-tbody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="empty-state">
+                        <div class="empty-state-icon">⚠️</div>
+                        <div>${message}</div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        // Execute cross-exchange arbitrage (placeholder)
+        async function executeCrossExchangeArbitrage(symbol, action) {
+            if (!confirm(`Execute ${action.replace(/_/g, ' ')} arbitrage for ${symbol}?`)) {
+                return;
+            }
+
+            // Show notification
+            showNotification(`Executing arbitrage for ${symbol}...`, 'info');
+
+            try {
+                // This would connect to the execution engine
+                // For now, it's a placeholder
+                const response = await fetch('/api/execution/arbitrage', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, action, exchanges: ['hyperliquid', 'asterdex'] })
+                });
+
+                if (response.ok) {
+                    showNotification(`Arbitrage order submitted for ${symbol}`, 'success');
+                } else {
+                    const error = await response.json();
+                    showNotification(`Failed: ${error.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                showNotification('Execution engine not available. This is a placeholder.', 'info');
+                console.log('Cross-exchange execution placeholder:', { symbol, action });
+            }
+        }
+
+        // View cross-exchange details
+        function viewCrossExchangeDetails(symbol) {
+            // Open details in modal or navigate to details page
+            window.open(`/api/funding/cross-exchange/${symbol}`, '_blank');
+        }
+
+        // Show notification
+        function showNotification(message, type = 'info') {
+            const colors = {
+                info: 'var(--terminal-cyan)',
+                success: 'var(--terminal-green)',
+                error: 'var(--terminal-red)',
+                warning: 'var(--terminal-amber)'
+            };
+
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: var(--bg-panel);
+                border: 1px solid ${colors[type]};
+                color: ${colors[type]};
+                padding: 16px 24px;
+                font-family: var(--font-mono);
+                font-size: 0.9em;
+                z-index: 10001;
+                animation: slideIn 0.3s ease;
+            `;
+            notification.textContent = message;
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+
+        // Add slide animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>

@@ -19,6 +19,8 @@ import messageBus, { Channel } from '../shared/message-bus';
 import redisCache from '../shared/redis-cache';
 import pumpfunStore from '../data/pumpfun-store';
 import enhancedApiRoutes from './enhanced-api-routes';
+import marketHeatmapRoutes from './market-heatmap-routes';
+import fundingArbitrageRoutes from './funding-arbitrage-routes';
 
 
 // Get database path from config
@@ -405,6 +407,12 @@ class DashboardServer {
   private setupRoutes() {
     // Mount enhanced API routes
     this.app.use('/api/enhanced', enhancedApiRoutes);
+    
+    // Mount market heatmap API routes
+    this.app.use('/api/heatmap', marketHeatmapRoutes);
+
+    // Mount funding arbitrage API routes
+    this.app.use('/api/funding', fundingArbitrageRoutes);
 
     // Health check
     // Health check
@@ -1307,6 +1315,22 @@ class DashboardServer {
 
     this.app.get('/pools.html', (req, res) => {
       res.sendFile(path.join(__dirname, '../../dashboard/public/pools.html'));
+    });
+
+    this.app.get('/pools', (req, res) => {
+      res.sendFile(path.join(__dirname, '../../dashboard/public/pools.html'));
+    });
+
+    this.app.get('/enhanced-heatmap', (req, res) => {
+      res.sendFile(path.join(__dirname, '../../dashboard/public/enhanced-heatmap.html'));
+    });
+
+    this.app.get('/funding-arbitrage', (req, res) => {
+      res.sendFile(path.join(__dirname, '../../dashboard/public/funding-arbitrage.html'));
+    });
+
+    this.app.get('/funding-arbitrage.html', (req, res) => {
+      res.sendFile(path.join(__dirname, '../../dashboard/public/funding-arbitrage.html'));
     });
 
     // =========================================================================

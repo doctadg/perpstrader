@@ -6,6 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PERPS_TRADER // CONTROL_TERMINAL</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/js/universal-nav.js"></script>
+    <link rel="stylesheet" href="/css/mobile-responsive.css">
+    <link rel="stylesheet" href="/css/mobile-native.css">
+    <script src="/js/mobile-enhancements.js"></script>
+    <script src="/js/mobile-native.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
 
@@ -448,6 +453,12 @@
 
 
 <body>
+    <!-- Swipe Navigation Hint -->
+    <div class="swipe-hint show-mobile">
+        <span class="swipe-hint-icon left">‹</span>
+        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
+        <span class="swipe-hint-icon right">›</span>
+    </div>
     <div class="container">
         <!-- Top Status Bar -->
         <header class="top-bar">

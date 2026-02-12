@@ -56,6 +56,8 @@ const message_bus_1 = __importStar(require("../shared/message-bus"));
 const redis_cache_1 = __importDefault(require("../shared/redis-cache"));
 const pumpfun_store_1 = __importDefault(require("../data/pumpfun-store"));
 const enhanced_api_routes_1 = __importDefault(require("./enhanced-api-routes"));
+const market_heatmap_routes_1 = __importDefault(require("./market-heatmap-routes"));
+const funding_arbitrage_routes_1 = __importDefault(require("./funding-arbitrage-routes"));
 // Get database path from config
 const fullConfig = config_1.default.get();
 const dbPath = fullConfig.database?.connection || './data/trading.db';
@@ -378,6 +380,10 @@ class DashboardServer {
     setupRoutes() {
         // Mount enhanced API routes
         this.app.use('/api/enhanced', enhanced_api_routes_1.default);
+        // Mount market heatmap API routes
+        this.app.use('/api/heatmap', market_heatmap_routes_1.default);
+        // Mount funding arbitrage API routes
+        this.app.use('/api/funding', funding_arbitrage_routes_1.default);
         // Health check
         // Health check
         this.app.get('/api/health', async (req, res) => {
@@ -1234,6 +1240,18 @@ class DashboardServer {
         });
         this.app.get('/pools.html', (req, res) => {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/pools.html'));
+        });
+        this.app.get('/pools', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/pools.html'));
+        });
+        this.app.get('/enhanced-heatmap', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/enhanced-heatmap.html'));
+        });
+        this.app.get('/funding-arbitrage', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/funding-arbitrage.html'));
+        });
+        this.app.get('/funding-arbitrage.html', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/funding-arbitrage.html'));
         });
         // =========================================================================
         // SAFEKEEPING FUND API

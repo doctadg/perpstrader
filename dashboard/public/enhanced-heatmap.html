@@ -6,6 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PERPS_TRADER // ENHANCED_EVENT_HEATMAP</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/js/universal-nav.js"></script>
+    <link rel="stylesheet" href="/css/mobile-responsive.css">
+    <link rel="stylesheet" href="/css/mobile-native.css">
+    <script src="/js/mobile-enhancements.js"></script>
+    <script src="/js/mobile-native.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link
         href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap"
@@ -17,9 +22,16 @@
 </head>
 
 <body>
+    <!-- Swipe Navigation Hint -->
+    <div class="swipe-hint show-mobile">
+        <span class="swipe-hint-icon left">‹</span>
+        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
+        <span class="swipe-hint-icon right">›</span>
+    </div>
+
     <div class="top-bar">
         <div class="system-id">OBSIDIAN_HEATMAP // V.2.0 // ENHANCED</div>
-        <div class="nav-links">
+        <div class="nav-links hide-mobile">
             <a href="/news" class="nav-link">FEED</a>
             <a href="/heatmap" class="nav-link">HEATMAP</a>
             <a href="/enhanced-heatmap" class="nav-link active">ENHANCED</a>

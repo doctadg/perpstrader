@@ -22,9 +22,27 @@ declare class MarketIngester {
     private isFlushing;
     private orderBookLogIntervalMs;
     private lastOrderBookLogAt;
+    private symbolUpdateTimer;
+    private allSymbols;
     constructor();
     private initializeDatabase;
     private prepareStatements;
+    /**
+     * Fetch all available symbols from Hyperliquid and update subscriptions
+     */
+    updateSymbolsList(): Promise<void>;
+    /**
+     * Get all tracked symbols
+     */
+    getAllTrackedSymbols(): string[];
+    /**
+     * Start periodic symbol list updates
+     */
+    startSymbolUpdates(): void;
+    /**
+     * Categorize a symbol
+     */
+    private categorizeSymbol;
     private setupWriteBuffer;
     private maybeFlush;
     private flushWriteBuffers;

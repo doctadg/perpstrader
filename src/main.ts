@@ -12,11 +12,12 @@ import dashboardServer from './dashboard/dashboard-server';
 import { runDailyTraceAnalysis } from './strategy-engine/trace-analyzer';
 import circuitBreaker from './shared/circuit-breaker';
 import positionRecovery from './execution-engine/position-recovery';
+import { getTopVolumeSymbols, getExtremeFundingSymbols } from './shared/dynamic-symbols';
 import cron from 'node-cron';
 import logger from './shared/logger';
 
 // Configuration
-const SYMBOLS = ['BTC', 'ETH', 'SOL'];
+let SYMBOLS: string[] = ['BTC', 'ETH', 'SOL']; // Default, will be updated dynamically
 const TIMEFRAME = '1m';
 const CYCLE_INTERVAL_MS = 60 * 1000;
 
@@ -85,6 +86,29 @@ async function main() {
             }
         });
         logger.info('[Main] Daily trace analysis scheduled for 2:00 AM');
+
+        // Load dynamic trading symbols from Hyperliquid
+        logger.info('[Main] Loading dynamic trading symbols from Hyperliquid...');
+        try {
+            // Get top 50 markets by volume for trading
+            const topSymbols = await getTopVolumeSymbols(50);
+            // Also get symbols with extreme funding rates
+            const { positive, negative } = await getExtremeFundingSymbols(0.0001);
+            const extremeSymbols = [...positive.slice(0, 10), ...negative.slice(0, 10)];
+            
+            // Combine and deduplicate
+            const allSymbols = [...new Set([...topSymbols, ...extremeSymbols])];
+            
+            if (allSymbols.length > 0) {
+                SYMBOLS = allSymbols;
+                logger.info(`[Main] Loaded ${SYMBOLS.length} dynamic symbols: ${SYMBOLS.slice(0, 10).join(', ')}${SYMBOLS.length > 10 ? '...' : ''}`);
+            } else {
+                logger.warn('[Main] Failed to load dynamic symbols, using defaults');
+            }
+        } catch (error) {
+            logger.error('[Main] Error loading dynamic symbols:', error);
+            logger.warn('[Main] Using default symbols');
+        }
 
         // Schedule hourly health check logging
         cron.schedule('0 * * * *', async () => {

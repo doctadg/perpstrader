@@ -541,10 +541,55 @@ class NewsSearchService {
                     'Content-Type': 'application/json',
                 },
             });
+            // Fallback to SearXNG if search server returns no results
+            if (!response.data.results || response.data.results.length === 0) {
+                logger_1.default.debug(`[NewsSearch] Search server returned 0 results, trying SearXNG fallback...`);
+                const searxngResults = await this.searchSearXNG(query, numResults);
+                if (searxngResults.length > 0) {
+                    logger_1.default.info(`[NewsSearch] SearXNG returned ${searxngResults.length} results for "${query}"`);
+                }
+                return searxngResults;
+            }
             return response.data.results;
         }
         catch (error) {
             logger_1.default.error(`Search failed for query "${query}":`, error);
+            // Fallback to SearXNG on error
+            logger_1.default.debug(`[NewsSearch] Search server error, trying SearXNG fallback...`);
+            return this.searchSearXNG(query, numResults);
+        }
+    }
+    /**
+     * Fallback search using SearXNG directly
+     */
+    async searchSearXNG(query, numResults = 25) {
+        const searxngUrl = process.env.SEARXNG_URL || 'http://localhost:8080';
+        try {
+            const params = new URLSearchParams({
+                q: query,
+                format: 'json',
+                categories: 'news',
+                language: 'en-US',
+                safesearch: '0',
+            });
+            const response = await axios_1.default.get(`${searxngUrl}/search?${params.toString()}`, {
+                timeout: 30000,
+                headers: {
+                    'Accept': 'application/json',
+                },
+            });
+            const data = response.data;
+            const results = (data.results || []).slice(0, numResults).map((r) => ({
+                title: r.title || '',
+                link: r.url || '',
+                snippet: r.content || '',
+                position: r.position || 0,
+                date: r.publishedDate,
+            }));
+            return results;
+        }
+        catch (error) {
+            logger_1.default.error(`[NewsSearch] SearXNG fallback failed for "${query}":`, error);
             return [];
         }
     }

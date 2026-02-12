@@ -15,10 +15,11 @@ const dashboard_server_1 = __importDefault(require("./dashboard/dashboard-server
 const trace_analyzer_1 = require("./strategy-engine/trace-analyzer");
 const circuit_breaker_1 = __importDefault(require("./shared/circuit-breaker"));
 const position_recovery_1 = __importDefault(require("./execution-engine/position-recovery"));
+const dynamic_symbols_1 = require("./shared/dynamic-symbols");
 const node_cron_1 = __importDefault(require("node-cron"));
 const logger_1 = __importDefault(require("./shared/logger"));
 // Configuration
-const SYMBOLS = ['BTC', 'ETH', 'SOL'];
+let SYMBOLS = ['BTC', 'ETH', 'SOL']; // Default, will be updated dynamically
 const TIMEFRAME = '1m';
 const CYCLE_INTERVAL_MS = 60 * 1000;
 /**
@@ -85,6 +86,28 @@ async function main() {
             }
         });
         logger_1.default.info('[Main] Daily trace analysis scheduled for 2:00 AM');
+        // Load dynamic trading symbols from Hyperliquid
+        logger_1.default.info('[Main] Loading dynamic trading symbols from Hyperliquid...');
+        try {
+            // Get top 50 markets by volume for trading
+            const topSymbols = await (0, dynamic_symbols_1.getTopVolumeSymbols)(50);
+            // Also get symbols with extreme funding rates
+            const { positive, negative } = await (0, dynamic_symbols_1.getExtremeFundingSymbols)(0.0001);
+            const extremeSymbols = [...positive.slice(0, 10), ...negative.slice(0, 10)];
+            // Combine and deduplicate
+            const allSymbols = [...new Set([...topSymbols, ...extremeSymbols])];
+            if (allSymbols.length > 0) {
+                SYMBOLS = allSymbols;
+                logger_1.default.info(`[Main] Loaded ${SYMBOLS.length} dynamic symbols: ${SYMBOLS.slice(0, 10).join(', ')}${SYMBOLS.length > 10 ? '...' : ''}`);
+            }
+            else {
+                logger_1.default.warn('[Main] Failed to load dynamic symbols, using defaults');
+            }
+        }
+        catch (error) {
+            logger_1.default.error('[Main] Error loading dynamic symbols:', error);
+            logger_1.default.warn('[Main] Using default symbols');
+        }
         // Schedule hourly health check logging
         node_cron_1.default.schedule('0 * * * *', async () => {
             try {

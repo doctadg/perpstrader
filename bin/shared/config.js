@@ -55,7 +55,7 @@ class ConfigManager {
                 emergencyStop: process.env.EMERGENCY_STOP === 'true'
             },
             trading: {
-                symbols: (process.env.TRADING_SYMBOLS || 'BTC,ETH').split(','),
+                symbols: (process.env.TRADING_SYMBOLS || 'BTC,ETH,SOL,AVAX,ARB,OP,LINK,DOGE,PEPE,WIF,RENDER,TAO,SUI,SEI,INJ,BONK,AAVE,UNI,CRV,SNX,JUP,RAY,PENDLE,ZRO,BERA,HYPE,XRP,ZEC').split(','),
                 timeframes: (process.env.TRADING_TIMEFRAMES || '1s,1m,5m,15m,1h').split(','),
                 strategies: (process.env.TRADING_STRATEGIES || 'market_making,trend_following').split(',')
             },
