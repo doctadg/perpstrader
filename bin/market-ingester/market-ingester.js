@@ -42,6 +42,7 @@ const logger_1 = __importDefault(require("../shared/logger"));
 const config_1 = __importDefault(require("../shared/config"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const data_validation_1 = require("../shared/data-validation");
+const hyperliquid_all_markets_1 = __importDefault(require("./hyperliquid-all-markets"));
 dotenv.config();
 class MarketIngester {
     db;
@@ -67,6 +68,8 @@ class MarketIngester {
     isFlushing = false;
     orderBookLogIntervalMs;
     lastOrderBookLogAt = new Map();
+    symbolUpdateTimer = null;
+    allSymbols = [];
     constructor() {
         const hyperliquidConfig = config_1.default.getSection('hyperliquid');
         this.hyperliquidUrl = hyperliquidConfig.baseUrl || 'https://api.hyperliquid.xyz';
@@ -74,6 +77,7 @@ class MarketIngester {
             ? 'wss://api.hyperliquid-testnet.xyz/ws'
             : 'wss://api.hyperliquid.xyz/ws';
         const tradingConfig = config_1.default.getSection('trading');
+        // Start with configured symbols but will expand to all
         this.tradingSymbols = tradingConfig.symbols || ['BTC', 'ETH', 'SOL'];
         this.primaryTimeframe = tradingConfig.timeframes?.[0] || '1s';
         const dbConfig = config_1.default.getSection('database');
@@ -87,7 +91,8 @@ class MarketIngester {
         this.setupWriteBuffer();
         logger_1.default.info('Market Ingester initialized', {
             mode: this.isPaperTrading ? 'PAPER TRADING' : 'LIVE',
-            url: this.hyperliquidUrl
+            url: this.hyperliquidUrl,
+            initialSymbols: this.tradingSymbols.length
         });
     }
     initializeDatabase() {
@@ -139,6 +144,21 @@ class MarketIngester {
 
       CREATE INDEX IF NOT EXISTS idx_market_symbol ON market_data(symbol);
       CREATE INDEX IF NOT EXISTS idx_market_timestamp ON market_data(timestamp);
+
+      CREATE TABLE IF NOT EXISTS tracked_symbols (
+        symbol TEXT PRIMARY KEY,
+        name TEXT,
+        category TEXT,
+        volume24h REAL DEFAULT 0,
+        maxLeverage REAL,
+        szDecimals INTEGER,
+        onlyIsolated INTEGER DEFAULT 0,
+        isActive INTEGER DEFAULT 1,
+        firstSeen INTEGER,
+        lastUpdated INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_tracked_symbols_active ON tracked_symbols(isActive);
     `);
         logger_1.default.info('Database tables created for market data');
     }
@@ -160,6 +180,82 @@ class MarketIngester {
       INSERT INTO funding_rates (symbol, timestamp, fundingRate, nextFundingTime)
       VALUES (?, ?, ?, ?)
     `);
+    }
+    /**
+     * Fetch all available symbols from Hyperliquid and update subscriptions
+     */
+    async updateSymbolsList() {
+        try {
+            const { markets, count } = await hyperliquid_all_markets_1.default.fetchAllMarkets();
+            if (count === 0) {
+                logger_1.default.warn('[MarketIngester] No markets found from Hyperliquid');
+                return;
+            }
+            const timestamp = Date.now();
+            const insertSymbol = this.db.prepare(`
+        INSERT OR REPLACE INTO tracked_symbols 
+        (symbol, name, category, volume24h, maxLeverage, szDecimals, onlyIsolated, isActive, firstSeen, lastUpdated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, COALESCE((SELECT firstSeen FROM tracked_symbols WHERE symbol = ?), ?), ?)
+      `);
+            const txn = this.db.transaction(() => {
+                for (const market of markets) {
+                    const category = this.categorizeSymbol(market.coin);
+                    insertSymbol.run(market.coin, market.coin, category, market.volume24h, market.maxLeverage, market.szDecimals, market.onlyIsolated ? 1 : 0, market.coin, // for COALESCE
+                    timestamp, timestamp);
+                }
+            });
+            txn();
+            // Update local symbol list
+            this.allSymbols = markets.map(m => m.coin);
+            this.tradingSymbols = [...this.allSymbols]; // Use ALL symbols
+            logger_1.default.info(`[MarketIngester] Updated symbols list: ${this.allSymbols.length} markets`);
+        }
+        catch (error) {
+            logger_1.default.error('[MarketIngester] Failed to update symbols list:', error);
+        }
+    }
+    /**
+     * Get all tracked symbols
+     */
+    getAllTrackedSymbols() {
+        return this.allSymbols.length > 0 ? this.allSymbols : this.tradingSymbols;
+    }
+    /**
+     * Start periodic symbol list updates
+     */
+    startSymbolUpdates() {
+        // Update immediately on start
+        this.updateSymbolsList();
+        // Then update every 5 minutes
+        this.symbolUpdateTimer = setInterval(() => {
+            this.updateSymbolsList();
+        }, 5 * 60 * 1000);
+        logger_1.default.info('[MarketIngester] Started symbol list updates (every 5 minutes)');
+    }
+    /**
+     * Categorize a symbol
+     */
+    categorizeSymbol(symbol) {
+        const sym = symbol.toLowerCase();
+        if (['btc', 'eth'].includes(sym))
+            return 'Layer 1';
+        if (['arb', 'op', 'base', 'mnt', 'strk', 'zk'].includes(sym))
+            return 'Layer 2';
+        if (['uni', 'aave', 'crv', 'comp', 'mkr', 'pendle', 'jup', 'ray'].includes(sym))
+            return 'DeFi';
+        if (['doge', 'shib', 'pepe', 'floki', 'bonk', 'wif', 'mog'].includes(sym))
+            return 'Meme';
+        if (['render', 'tao', 'fet', 'wld', 'arkm'].includes(sym))
+            return 'AI';
+        if (['sol', 'jto', 'jup', 'ray', 'bonk', 'wif'].includes(sym))
+            return 'Solana';
+        if (['axs', 'sand', 'mana', 'gala'].includes(sym))
+            return 'Gaming';
+        if (['ondo', 'cfg'].includes(sym))
+            return 'RWA';
+        if (['link', 'grt', 'pyth'].includes(sym))
+            return 'Infrastructure';
+        return 'Altcoin';
     }
     setupWriteBuffer() {
         if (this.writeFlushTimer)
@@ -217,6 +313,10 @@ class MarketIngester {
     }
     async start() {
         try {
+            // Start symbol updates first to get all markets
+            this.startSymbolUpdates();
+            // Wait a moment for symbols to load before connecting websocket
+            await new Promise(resolve => setTimeout(resolve, 2000));
             await this.connectWebSocket();
             this.startCandleFlushTimer();
             if (!this.primaryTimeframe.endsWith('s')) {
@@ -477,6 +577,10 @@ class MarketIngester {
         if (this.writeFlushTimer) {
             clearInterval(this.writeFlushTimer);
             this.writeFlushTimer = null;
+        }
+        if (this.symbolUpdateTimer) {
+            clearInterval(this.symbolUpdateTimer);
+            this.symbolUpdateTimer = null;
         }
         this.flushWriteBuffers();
         logger_1.default.info('Market ingester stopped');

@@ -1,0 +1,12 @@
+[32minfo[39m: [Dashboard] WebSocket namespaces set up {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.897Z"}
+[32minfo[39m: Initializing news database... {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.899Z"}
+[32minfo[39m: News database initialized successfully {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.900Z"}
+[32minfo[39m: Dashboard server started on port 3001 {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.909Z"}
+[32minfo[39m: Access dashboard at: http://0.0.0.0:3001 {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.909Z"}
+[32minfo[39m: Message bus: DISCONNECTED (polling fallback) {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.909Z"}
+[32minfo[39m: [MessageBus] Connected to redis://127.0.0.1:6380/0 {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.926Z"}
+[32minfo[39m: [RedisCache] Connected to redis://127.0.0.1:6380/1 {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.927Z"}
+[32minfo[39m: [RedisCache] Connected to redis://127.0.0.1:6380/1 {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.927Z"}
+[32minfo[39m: [MessageBus] Connected to redis://127.0.0.1:6380/0 {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.928Z"}
+[32minfo[39m: [Dashboard] Connected to Redis message bus {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.928Z"}
+[32minfo[39m: [Dashboard] Subscribed to all message bus channels {"service":"perps-trader","timestamp":"2026-02-03T18:31:33.931Z"}

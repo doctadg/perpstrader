@@ -1,5 +1,5 @@
 "use strict";
-// Prediction Markets Orchestrator
+// Prediction Markets Orchestrator (Hardened)
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -12,6 +12,9 @@ Object.defineProperty(exports, "createInitialPredictionState", { enumerable: tru
 const nodes_1 = require("./nodes");
 const prediction_store_1 = __importDefault(require("../data/prediction-store"));
 const execution_engine_1 = __importDefault(require("./execution-engine"));
+const position_reconciler_1 = __importDefault(require("./position-reconciler"));
+const risk_manager_1 = __importDefault(require("./risk-manager"));
+const alerting_service_1 = __importDefault(require("./alerting-service"));
 const logger_1 = __importDefault(require("../shared/logger"));
 function updateStatus(state, status) {
     const portfolio = execution_engine_1.default.getPortfolio();
@@ -39,11 +42,50 @@ function updateStatus(state, status) {
     });
 }
 class PredictionOrchestrator {
+    stopLossCheckInterval = null;
+    reconciliationInterval = null;
+    constructor() {
+        this.startBackgroundTasks();
+    }
+    startBackgroundTasks() {
+        // Check stop losses every 30 seconds
+        this.stopLossCheckInterval = setInterval(() => {
+            this.checkStopLosses();
+        }, 30000);
+        // Reconcile positions every 5 minutes
+        this.reconciliationInterval = setInterval(() => {
+            position_reconciler_1.default.reconcile();
+        }, 300000);
+    }
+    async checkStopLosses() {
+        try {
+            const exits = execution_engine_1.default.checkStopLosses();
+            for (const exit of exits) {
+                logger_1.default.warn(`[PredictionOrchestrator] Stop loss triggered: ${exit.position.marketTitle}`);
+                // Send alert
+                await alerting_service_1.default.stopLossTriggered(exit.position, exit.exitPrice, exit.pnl);
+                // Execute stop loss (in real implementation)
+                // For now, just log it - would need to create a sell signal
+            }
+        }
+        catch (error) {
+            logger_1.default.error('[PredictionOrchestrator] Stop loss check failed:', error);
+        }
+    }
     async invoke(initialState) {
         let state = { ...initialState };
         updateStatus(state, 'RUNNING');
         try {
             logger_1.default.info(`[PredictionOrchestrator] Starting prediction cycle ${state.cycleId}`);
+            // Check emergency stop
+            if (risk_manager_1.default.isEmergencyStop()) {
+                logger_1.default.error('[PredictionOrchestrator] 🚨 EMERGENCY STOP ACTIVE - skipping cycle');
+                return {
+                    ...state,
+                    currentStep: 'EMERGENCY_STOP',
+                    errors: [...state.errors, 'Emergency stop is active'],
+                };
+            }
             state = { ...state, ...await (0, nodes_1.marketDataNode)(state) };
             updateStatus(state, 'RUNNING');
             if (state.activeMarkets.length === 0) {
@@ -78,12 +120,55 @@ class PredictionOrchestrator {
         }
         catch (error) {
             logger_1.default.error('[PredictionOrchestrator] Cycle failed:', error);
+            // Send error alert
+            await alerting_service_1.default.error(error, 'Prediction cycle');
             updateStatus(state, 'ERROR');
             return {
                 ...state,
                 errors: [...state.errors, `Orchestrator error: ${error}`],
                 currentStep: 'ERROR',
             };
+        }
+    }
+    /**
+     * Trigger emergency stop - halt all trading
+     */
+    triggerEmergencyStop(reason) {
+        risk_manager_1.default.triggerEmergencyStop(reason);
+        alerting_service_1.default.emergencyStop(reason, execution_engine_1.default.getPortfolio());
+    }
+    /**
+     * Reset emergency stop
+     */
+    resetEmergencyStop() {
+        risk_manager_1.default.resetEmergencyStop();
+    }
+    /**
+     * Emergency close all positions
+     */
+    async emergencyCloseAll() {
+        await execution_engine_1.default.emergencyCloseAll();
+    }
+    /**
+     * Get system health status
+     */
+    getHealth() {
+        return {
+            orchestrator: risk_manager_1.default.isEmergencyStop() ? 'CRITICAL' : 'HEALTHY',
+            emergencyStop: risk_manager_1.default.isEmergencyStop(),
+            reconciliation: position_reconciler_1.default.getHealth(),
+            execution: execution_engine_1.default.getHealth(),
+        };
+    }
+    /**
+     * Clean up resources
+     */
+    destroy() {
+        if (this.stopLossCheckInterval) {
+            clearInterval(this.stopLossCheckInterval);
+        }
+        if (this.reconciliationInterval) {
+            clearInterval(this.reconciliationInterval);
         }
     }
 }

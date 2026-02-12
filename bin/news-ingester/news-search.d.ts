@@ -48,6 +48,10 @@ declare class NewsSearchService {
     private mapWithConcurrency;
     private mergeResults;
     search(query: string, numResults?: number): Promise<SearchResult[]>;
+    /**
+     * Fallback search using SearXNG directly
+     */
+    private searchSearXNG;
     research(query: string, maxPages?: number): Promise<ResearchResponse>;
     searchCategory(category: NewsCategory, numResultsPerQuery?: number, maxQueries?: number): Promise<SearchResult[]>;
     scrapeArticle(url: string): Promise<string | null>;

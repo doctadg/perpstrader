@@ -264,6 +264,19 @@ export interface Config {
       glm?: number;
     };
   };
+  asterdex?: {
+    wsEndpoint?: string;
+    restEndpoint?: string;
+    apiKey?: string;
+  };
+  crossExchangeArbitrage?: {
+    minSpreadThreshold?: number;
+    minAnnualizedSpread?: number;
+    highUrgencyThreshold?: number;
+    mediumUrgencyThreshold?: number;
+    priceDiffThreshold?: number;
+    symbolsToTrack?: string[];
+  };
 }
 
 export type NewsCategory = 'CRYPTO' | 'STOCKS' | 'ECONOMICS' | 'GEOPOLITICS' | 'TECH' | 'COMMODITIES' | 'SPORTS' | 'FOOTBALL' | 'BASKETBALL' | 'TENNIS' | 'MMA' | 'GOLF';

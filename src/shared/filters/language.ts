@@ -57,7 +57,7 @@ export function detectLanguage(text: string): string {
   // Check for specific European language characters
   if (NON_ENGLISH_PATTERNS.german.test(sample)) {
     // Could be German, but verify it's not just borrowed words
-    const germanMatchCount = (sample.match(/ß|und|der|die|das|ein/eine/gi) || []).length;
+    const germanMatchCount = (sample.match(/ß|und|der|die|das|ein|eine/gi) || []).length;
     if (germanMatchCount >= 2) return 'de';
   }
 

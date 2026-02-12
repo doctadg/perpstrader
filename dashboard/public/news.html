@@ -6,6 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PERPS_TRADER // NEWS_TERMINAL</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/js/universal-nav.js"></script>
+    <link rel="stylesheet" href="/css/mobile-responsive.css">
+    <link rel="stylesheet" href="/css/mobile-native.css">
+    <script src="/js/mobile-enhancements.js"></script>
+    <script src="/js/mobile-native.js"></script>
     <link
         href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap"
         rel="stylesheet">
@@ -609,35 +614,43 @@
         <div class="system-id" id="liveClock">00:00:00 UTC</div>
     </div>
 
+    <!-- Swipe Navigation Hint -->
+    <div class="swipe-hint show-mobile">
+        <span class="swipe-hint-icon left">‹</span>
+        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
+        <span class="swipe-hint-icon right">›</span>
+    </div>
+
     <div class="main-layout">
-        <!-- Filter Sidebar -->
-        <div class="sidebar">
-            <div class="panel-header">
+        <!-- Filter Sidebar - Collapsible on Mobile -->
+        <div class="sidebar collapsible-section" data-section="news-filters">
+            <div class="panel-header collapsible-header">
                 <span class="panel-title">Navigation_Control</span>
+                <span class="collapsible-icon show-mobile">▼</span>
             </div>
-            <div class="panel-content">
+            <div class="panel-content collapsible-content">
                 <div class="search-container">
-                    <input type="text" class="search-input" id="searchBar" placeholder="Search keywords...">
+                    <input type="text" class="search-input" id="searchBar" placeholder="Search keywords..." style="min-height: 44px;">
                 </div>
 
                 <div class="filter-group">
                     <span class="filter-label">Category_Filter</span>
-                    <div class="filter-buttons" id="categoryFilters">
-                        <button class="filter-btn active" data-category="ALL">ALL_CHANNELS</button>
-                        <button class="filter-btn" data-category="CRYPTO">CRYPTO_DATA</button>
-                        <button class="filter-btn" data-category="STOCKS">EQUITIES</button>
-                        <button class="filter-btn" data-category="ECONOMICS">MACRO_ECON</button>
-                        <button class="filter-btn" data-category="GEOPOLITICS">GEOPOLITICS</button>
-                        <button class="filter-btn" data-category="TECH">TECH_SECTOR</button>
-                        <button class="filter-btn" data-category="COMMODITIES">COMMODITIES</button>
+                    <div class="filter-buttons touch-scroll" id="categoryFilters">
+                        <button class="filter-btn active" data-category="ALL">ALL</button>
+                        <button class="filter-btn" data-category="CRYPTO">CRYPTO</button>
+                        <button class="filter-btn" data-category="STOCKS">STOCKS</button>
+                        <button class="filter-btn" data-category="ECONOMICS">ECON</button>
+                        <button class="filter-btn" data-category="GEOPOLITICS">GEO</button>
+                        <button class="filter-btn" data-category="TECH">TECH</button>
+                        <button class="filter-btn" data-category="COMMODITIES">COMM</button>
                     </div>
                 </div>
 
                 <div class="filter-group">
                     <span class="filter-label">Sentiment_Stream</span>
-                    <div class="filter-buttons">
-                        <button class="filter-btn">BULLISH_ONLY</button>
-                        <button class="filter-btn">BEARISH_ONLY</button>
+                    <div class="filter-buttons touch-scroll">
+                        <button class="filter-btn">BULLISH</button>
+                        <button class="filter-btn">BEARISH</button>
                     </div>
                 </div>
             </div>

@@ -1,20 +1,34 @@
-// Prediction Market Risk Gate Node
+// Prediction Market Risk Gate Node (Hardened)
 
 import { PredictionAgentState } from '../state';
 import predictionExecutionEngine from '../execution-engine';
+import riskManager from '../risk-manager';
 import logger from '../../shared/logger';
-import { PredictionRiskAssessment, PredictionSignal } from '../../shared/types';
-
-const MAX_POSITION_PCT = Number.parseFloat(process.env.PREDICTION_MAX_POSITION_PCT || '0.05');
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
+import { PredictionRiskAssessment } from '../../shared/types';
 
 export async function riskGateNode(state: PredictionAgentState): Promise<Partial<PredictionAgentState>> {
-  logger.info('[PredictionRiskGate] Evaluating risk');
+  logger.info('[PredictionRiskGate] Evaluating risk with comprehensive checks');
 
   const portfolio = state.portfolio || predictionExecutionEngine.getPortfolio();
+
+  // Check emergency stop first
+  if (riskManager.isEmergencyStop()) {
+    logger.error('[PredictionRiskGate] 🚨 EMERGENCY STOP IS ACTIVE - rejecting all trades');
+    return {
+      currentStep: 'RISK_GATE_EMERGENCY_STOP',
+      signal: null,
+      riskAssessment: {
+        approved: false,
+        suggestedSizeUsd: 0,
+        riskScore: 1,
+        warnings: ['EMERGENCY STOP active - all trading halted'],
+        maxLossUsd: 0,
+      },
+      shouldExecute: false,
+      portfolio,
+      thoughts: [...state.thoughts, 'EMERGENCY STOP active - trading halted'],
+    };
+  }
 
   if (!state.selectedIdea || !state.shouldExecute) {
     return {
@@ -34,7 +48,13 @@ export async function riskGateNode(state: PredictionAgentState): Promise<Partial
     return {
       currentStep: 'RISK_GATE_NO_PRICE',
       signal: null,
-      riskAssessment: null,
+      riskAssessment: {
+        approved: false,
+        suggestedSizeUsd: 0,
+        riskScore: 1,
+        warnings: ['Missing market price for risk evaluation'],
+        maxLossUsd: 0,
+      },
       shouldExecute: false,
       portfolio,
       thoughts: [...state.thoughts, 'Missing market price for risk evaluation'],
@@ -42,49 +62,58 @@ export async function riskGateNode(state: PredictionAgentState): Promise<Partial
   }
   const priceValue = price;
 
-  const maxPositionUsd = portfolio.totalValue * MAX_POSITION_PCT;
-  const minSizeUsd = Math.min(10, portfolio.availableBalance);
-  const suggestedSizeUsd = clamp(
-    maxPositionUsd * state.selectedIdea.confidence,
-    minSizeUsd,
-    portfolio.availableBalance
-  );
-
+  // Check for opposing position (this logic is preserved but also handled by risk manager)
   const opposing = portfolio.positions.find(
     position => position.marketId === state.selectedIdea?.marketId && position.outcome !== state.selectedIdea?.outcome
   );
 
-  let action: PredictionSignal['action'] = 'BUY';
-  let outcome: PredictionSignal['outcome'] = state.selectedIdea.outcome;
-  let sizeUsd = suggestedSizeUsd;
+  let action: PredictionRiskAssessment['approved'] extends true ? 'BUY' | 'SELL' : never = 'BUY';
+  let outcome = state.selectedIdea.outcome;
   let reason = state.selectedIdea.rationale;
 
   if (opposing) {
     action = 'SELL';
     outcome = opposing.outcome;
-    sizeUsd = Math.min(opposing.shares * opposing.lastPrice, suggestedSizeUsd);
     reason = 'Reduce opposing position before new entry';
   }
 
-  const riskAssessment: PredictionRiskAssessment = {
-    approved: sizeUsd > 0 && sizeUsd <= portfolio.availableBalance,
-    suggestedSizeUsd: sizeUsd,
-    riskScore: clamp(1 - state.selectedIdea.confidence, 0, 1),
-    warnings: sizeUsd <= 0 ? ['No available balance for prediction trade'] : [],
-    maxLossUsd: sizeUsd,
-  };
+  // Use comprehensive risk manager for assessment
+  const riskAssessment = riskManager.assessTrade(
+    state.selectedIdea,
+    portfolio.totalValue,
+    portfolio.availableBalance,
+    portfolio.positions
+  );
 
-  const signal: PredictionSignal = {
+  // Override with opposing position logic if needed
+  if (opposing && riskAssessment.approved) {
+    const maxCloseSize = opposing.shares * opposing.lastPrice;
+    riskAssessment.suggestedSizeUsd = Math.min(riskAssessment.suggestedSizeUsd, maxCloseSize);
+  }
+
+  const signal = {
     id: state.selectedIdea.id,
     marketId: state.selectedIdea.marketId,
     outcome,
     action,
-    sizeUsd,
+    sizeUsd: riskAssessment.suggestedSizeUsd,
     price: priceValue,
     confidence: state.selectedIdea.confidence,
     reason,
     timestamp: new Date(),
   };
+
+  // Log risk assessment details
+  logger.info({
+    event: 'RISK_ASSESSMENT',
+    approved: riskAssessment.approved,
+    riskScore: riskAssessment.riskScore.toFixed(2),
+    suggestedSize: riskAssessment.suggestedSizeUsd.toFixed(2),
+    warnings: riskAssessment.warnings,
+    portfolioValue: portfolio.totalValue.toFixed(2),
+    availableBalance: portfolio.availableBalance.toFixed(2),
+    positionCount: portfolio.positions.length,
+  }, `[PredictionRiskGate] Risk score ${(riskAssessment.riskScore * 100).toFixed(0)}%, size $${riskAssessment.suggestedSizeUsd.toFixed(2)}`);
 
   return {
     currentStep: riskAssessment.approved ? 'RISK_GATE_APPROVED' : 'RISK_GATE_REJECTED',
@@ -94,7 +123,8 @@ export async function riskGateNode(state: PredictionAgentState): Promise<Partial
     portfolio,
     thoughts: [
       ...state.thoughts,
-      `Risk score ${(riskAssessment.riskScore * 100).toFixed(0)}%, size $${sizeUsd.toFixed(2)}`,
+      `Risk score ${(riskAssessment.riskScore * 100).toFixed(0)}%, size $${riskAssessment.suggestedSizeUsd.toFixed(2)}`,
+      ...riskAssessment.warnings.map(w => `Warning: ${w}`),
     ],
   };
 }
