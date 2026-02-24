@@ -1,7 +1,7 @@
 /**
  * Asterdex Client
  * WebSocket and REST API client for Asterdex perpetual exchange
- * Configurable endpoints for easy updates when API docs are available
+ * Uses Binance-compatible Aster Futures endpoints.
  */
 
 import WebSocket from 'ws';
@@ -48,6 +48,7 @@ interface AsterdexFundingRate {
   nextFundingTime: number;
   markPrice: number;
   indexPrice: number;
+  volume24h?: number;
   predictedFundingRate?: number;
   timestamp: number;
 }
@@ -77,14 +78,15 @@ class AsterdexClient {
   private marketsCache: AsterdexMarket[] = [];
   private lastMarketsUpdate: number = 0;
   private marketsCacheTtlMs: number = 60000; // 1 minute
+  private readonly quoteSuffixes = ['USDT', 'USD', 'USDC', 'FDUSD', 'BUSD'];
 
   constructor() {
     // Load config from environment or use defaults
     const asterdexConfig = config.getSection('asterdex') || {};
     
     this.config = {
-      wsEndpoint: process.env.ASTERDEX_WS_ENDPOINT || asterdexConfig.wsEndpoint || 'wss://api.asterdex.io/ws/v1',
-      restEndpoint: process.env.ASTERDEX_REST_ENDPOINT || asterdexConfig.restEndpoint || 'https://api.asterdex.io/v1',
+      wsEndpoint: process.env.ASTERDEX_WS_ENDPOINT || asterdexConfig.wsEndpoint || 'wss://fstream.asterdex.com/ws',
+      restEndpoint: process.env.ASTERDEX_REST_ENDPOINT || asterdexConfig.restEndpoint || 'https://fapi.asterdex.com/fapi/v1',
       apiKey: process.env.ASTERDEX_API_KEY || asterdexConfig.apiKey,
       reconnectIntervalMs: 5000,
       heartbeatIntervalMs: 30000,
@@ -203,8 +205,11 @@ class AsterdexClient {
   private handleFundingRateUpdate(data: any): void {
     if (!data || !data.symbol) return;
 
+    const symbol = this.normalizeSymbol(data.symbol);
+    if (!symbol) return;
+
     const fundingRate: AsterdexFundingRate = {
-      symbol: data.symbol.toUpperCase(),
+      symbol,
       fundingRate: parseFloat(data.fundingRate) || 0,
       annualizedRate: this.calculateAnnualizedRate(parseFloat(data.fundingRate) || 0),
       nextFundingTime: data.nextFundingTime || Date.now() + (8 * 60 * 60 * 1000),
@@ -267,7 +272,7 @@ class AsterdexClient {
     const subscribeMsg = {
       type: 'subscribe',
       channel: 'ticker',
-      symbol: symbol.toUpperCase(),
+      symbol: this.toPerpSymbol(symbol),
     };
 
     this.ws.send(JSON.stringify(subscribeMsg));
@@ -283,7 +288,7 @@ class AsterdexClient {
     const unsubscribeMsg = {
       type: 'unsubscribe',
       channel: 'ticker',
-      symbol: symbol.toUpperCase(),
+      symbol: this.toPerpSymbol(symbol),
     };
 
     this.ws.send(JSON.stringify(unsubscribeMsg));
@@ -401,16 +406,26 @@ class AsterdexClient {
         return Array.from(this.fundingCache.values());
       }
 
-      // Otherwise, fetch via REST API
-      const response = await axios.get(
-        `${this.config.restEndpoint}/funding/rates`,
-        {
-          headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
-          timeout: this.config.requestTimeoutMs,
-        }
-      );
+      // Aster Futures is Binance-compatible.
+      // Pull premium index for funding + mark data and merge with 24h ticker for volume.
+      const [premiumIndexResponse, tickerResponse] = await Promise.all([
+        axios.get(
+          `${this.config.restEndpoint}/premiumIndex`,
+          {
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+        axios.get(
+          `${this.config.restEndpoint}/ticker/24hr`,
+          {
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+      ]);
 
-      const rates = this.parseFundingRatesResponse(response.data);
+      const rates = this.parseFundingRatesResponse(premiumIndexResponse.data, tickerResponse.data);
       
       // Update cache
       for (const rate of rates) {
@@ -420,6 +435,22 @@ class AsterdexClient {
       return rates;
     } catch (error) {
       logger.error('[AsterdexClient] Failed to get funding rates:', error);
+      try {
+        // Fallback for legacy payload shape if the endpoint schema changes unexpectedly.
+        const fallbackResponse = await axios.get(
+          `${this.config.restEndpoint}/funding/rates`,
+          {
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        );
+        const fallbackRates = this.parseFundingRatesResponse(fallbackResponse.data);
+        if (fallbackRates.length > 0) {
+          return fallbackRates;
+        }
+      } catch (fallbackError) {
+        logger.debug('[AsterdexClient] Legacy funding endpoint fallback failed:', fallbackError);
+      }
       
       // Return cached data if available
       if (this.fundingCache.size > 0) {
@@ -436,24 +467,36 @@ class AsterdexClient {
    * REST API: Get funding rate for specific symbol
    */
   async getFundingRate(symbol: string): Promise<AsterdexFundingRate | null> {
-    const upperSymbol = symbol.toUpperCase();
+    const normalizedSymbol = this.normalizeSymbol(symbol);
+    const exchangeSymbol = this.toPerpSymbol(symbol);
     
     // Check cache first
-    const cached = this.fundingCache.get(upperSymbol);
+    const cached = this.fundingCache.get(normalizedSymbol);
     if (cached && Date.now() - cached.timestamp < 60000) {
       return cached;
     }
 
     try {
-      const response = await axios.get(
-        `${this.config.restEndpoint}/funding/rates/${upperSymbol}`,
-        {
-          headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
-          timeout: this.config.requestTimeoutMs,
-        }
-      );
+      const [premiumIndexResponse, tickerResponse] = await Promise.all([
+        axios.get(
+          `${this.config.restEndpoint}/premiumIndex`,
+          {
+            params: { symbol: exchangeSymbol },
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+        axios.get(
+          `${this.config.restEndpoint}/ticker/24hr`,
+          {
+            params: { symbol: exchangeSymbol },
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+      ]);
 
-      const rate = this.parseFundingRateResponse(response.data);
+      const rate = this.parseFundingRateResponse(premiumIndexResponse.data, tickerResponse.data);
       if (rate) {
         this.fundingCache.set(rate.symbol, rate);
       }
@@ -474,15 +517,35 @@ class AsterdexClient {
     }
 
     try {
-      const response = await axios.get(
-        `${this.config.restEndpoint}/markets`,
-        {
-          headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
-          timeout: this.config.requestTimeoutMs,
-        }
-      );
+      const [exchangeInfoResponse, tickerResponse, premiumIndexResponse] = await Promise.all([
+        axios.get(
+          `${this.config.restEndpoint}/exchangeInfo`,
+          {
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+        axios.get(
+          `${this.config.restEndpoint}/ticker/24hr`,
+          {
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+        axios.get(
+          `${this.config.restEndpoint}/premiumIndex`,
+          {
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+      ]);
 
-      const markets = this.parseMarketsResponse(response.data);
+      const markets = this.parseMarketsResponse(
+        exchangeInfoResponse.data,
+        tickerResponse.data,
+        premiumIndexResponse.data
+      );
       this.marketsCache = markets;
       this.lastMarketsUpdate = Date.now();
       return markets;
@@ -502,24 +565,36 @@ class AsterdexClient {
    * REST API: Get specific market info
    */
   async getMarketInfo(symbol: string): Promise<AsterdexMarket | null> {
-    const upperSymbol = symbol.toUpperCase();
+    const normalizedSymbol = this.normalizeSymbol(symbol);
+    const exchangeSymbol = this.toPerpSymbol(symbol);
     
     // Check cache first
-    const cached = this.marketsCache.find(m => m.symbol === upperSymbol);
+    const cached = this.marketsCache.find(m => m.symbol === normalizedSymbol);
     if (cached && Date.now() - this.lastMarketsUpdate < this.marketsCacheTtlMs) {
       return cached;
     }
 
     try {
-      const response = await axios.get(
-        `${this.config.restEndpoint}/markets/${upperSymbol}`,
-        {
-          headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
-          timeout: this.config.requestTimeoutMs,
-        }
-      );
+      const [tickerResponse, premiumIndexResponse] = await Promise.all([
+        axios.get(
+          `${this.config.restEndpoint}/ticker/24hr`,
+          {
+            params: { symbol: exchangeSymbol },
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+        axios.get(
+          `${this.config.restEndpoint}/premiumIndex`,
+          {
+            params: { symbol: exchangeSymbol },
+            headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
+            timeout: this.config.requestTimeoutMs,
+          }
+        ),
+      ]);
 
-      return this.parseMarketResponse(response.data);
+      return this.parseMarketResponse(tickerResponse.data, premiumIndexResponse.data);
     } catch (error) {
       logger.error(`[AsterdexClient] Failed to get market info for ${symbol}:`, error);
       return cached || null;
@@ -532,9 +607,9 @@ class AsterdexClient {
   async getFundingHistory(symbol: string, limit: number = 100): Promise<AsterdexFundingRate[]> {
     try {
       const response = await axios.get(
-        `${this.config.restEndpoint}/funding/history/${symbol.toUpperCase()}`,
+        `${this.config.restEndpoint}/fundingRate`,
         {
-          params: { limit },
+          params: { symbol: this.toPerpSymbol(symbol), limit },
           headers: this.config.apiKey ? { 'X-API-Key': this.config.apiKey } : {},
           timeout: this.config.requestTimeoutMs,
         }
@@ -556,43 +631,104 @@ class AsterdexClient {
   }
 
   /**
+   * Convert exchange symbol format (e.g. BTCUSDT) to internal base symbol (BTC)
+   */
+  private normalizeSymbol(symbol: string): string {
+    const cleaned = String(symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!cleaned) return '';
+
+    for (const suffix of this.quoteSuffixes) {
+      if (cleaned.endsWith(suffix) && cleaned.length > suffix.length) {
+        return cleaned.slice(0, -suffix.length);
+      }
+    }
+
+    return cleaned;
+  }
+
+  /**
+   * Convert internal/base symbol (BTC) to exchange perp symbol (BTCUSDT)
+   */
+  private toPerpSymbol(symbol: string): string {
+    const cleaned = String(symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!cleaned) return '';
+
+    for (const suffix of this.quoteSuffixes) {
+      if (cleaned.endsWith(suffix)) {
+        return cleaned;
+      }
+    }
+
+    return `${cleaned}USDT`;
+  }
+
+  /**
    * Parse funding rates response
    */
-  private parseFundingRatesResponse(data: any): AsterdexFundingRate[] {
+  private parseFundingRatesResponse(data: any, ticker24hData?: any): AsterdexFundingRate[] {
     if (!data) return [];
 
     // Handle different response formats
-    const rates = Array.isArray(data) ? data : data.rates || data.data || [];
+    const rates = (Array.isArray(data) ? data : data.rates || data.data || []) as any[];
+    const ticker24h = Array.isArray(ticker24hData)
+      ? ticker24hData
+      : Array.isArray(ticker24hData?.data)
+      ? ticker24hData.data
+      : [];
+    const volumeBySymbol = new Map<string, number>();
 
-    return rates.map((item: any) => ({
-      symbol: (item.symbol || item.coin || item.asset || 'UNKNOWN').toUpperCase(),
-      fundingRate: parseFloat(item.fundingRate || item.funding || item.rate || 0),
-      annualizedRate: parseFloat(item.annualizedRate || item.apr || 0) || 
-        this.calculateAnnualizedRate(parseFloat(item.fundingRate || item.funding || 0)),
-      nextFundingTime: item.nextFundingTime || item.nextFunding || Date.now() + (8 * 60 * 60 * 1000),
-      markPrice: parseFloat(item.markPrice || item.markPx || 0),
-      indexPrice: parseFloat(item.indexPrice || item.indexPx || 0),
-      predictedFundingRate: item.predictedFundingRate ? parseFloat(item.predictedFundingRate) : undefined,
-      timestamp: item.timestamp || Date.now(),
-    }));
+    for (const ticker of ticker24h) {
+      const normalizedSymbol = this.normalizeSymbol(String(ticker.symbol || ticker.coin || ticker.asset || ''));
+      if (!normalizedSymbol) continue;
+      const volume = parseFloat(ticker.quoteVolume || ticker.volume || ticker.vol24h || 0);
+      if (Number.isFinite(volume) && volume > 0) {
+        volumeBySymbol.set(normalizedSymbol, volume);
+      }
+    }
+
+    const parsed: AsterdexFundingRate[] = [];
+
+    for (const item of rates) {
+      const symbol = this.normalizeSymbol(item.symbol || item.coin || item.asset || '');
+      if (!symbol) continue;
+
+      parsed.push({
+        symbol,
+        fundingRate: parseFloat(item.fundingRate || item.lastFundingRate || item.funding || item.rate || 0),
+        annualizedRate: parseFloat(item.annualizedRate || item.apr || 0) || 
+          this.calculateAnnualizedRate(parseFloat(item.fundingRate || item.lastFundingRate || item.funding || 0)),
+        nextFundingTime: item.nextFundingTime || item.nextFunding || Date.now() + (8 * 60 * 60 * 1000),
+        markPrice: parseFloat(item.markPrice || item.markPx || item.price || 0),
+        indexPrice: parseFloat(item.indexPrice || item.indexPx || 0),
+        predictedFundingRate: item.predictedFundingRate ? parseFloat(item.predictedFundingRate) : undefined,
+        timestamp: item.timestamp || item.time || Date.now(),
+        volume24h: volumeBySymbol.get(symbol) || 0,
+      });
+    }
+
+    return parsed;
   }
 
   /**
    * Parse single funding rate response
    */
-  private parseFundingRateResponse(data: any): AsterdexFundingRate | null {
+  private parseFundingRateResponse(data: any, ticker24hData?: any): AsterdexFundingRate | null {
     if (!data) return null;
 
     const item = data.data || data;
+    const tickerItem = ticker24hData?.data || ticker24hData || {};
+    const symbol = this.normalizeSymbol(item.symbol || item.coin || '');
+    if (!symbol) return null;
     
     return {
-      symbol: (item.symbol || item.coin || 'UNKNOWN').toUpperCase(),
-      fundingRate: parseFloat(item.fundingRate || item.funding || 0),
+      symbol,
+      fundingRate: parseFloat(item.fundingRate || item.lastFundingRate || item.funding || 0),
       annualizedRate: parseFloat(item.annualizedRate || 0) || 
-        this.calculateAnnualizedRate(parseFloat(item.fundingRate || 0)),
+        this.calculateAnnualizedRate(parseFloat(item.fundingRate || item.lastFundingRate || 0)),
       nextFundingTime: item.nextFundingTime || Date.now() + (8 * 60 * 60 * 1000),
-      markPrice: parseFloat(item.markPrice || 0),
+      markPrice: parseFloat(item.markPrice || tickerItem.lastPrice || tickerItem.markPrice || 0),
       indexPrice: parseFloat(item.indexPrice || 0),
+      volume24h: parseFloat(tickerItem.quoteVolume || tickerItem.volume || 0),
       predictedFundingRate: item.predictedFundingRate ? parseFloat(item.predictedFundingRate) : undefined,
       timestamp: item.timestamp || Date.now(),
     };
@@ -601,58 +737,77 @@ class AsterdexClient {
   /**
    * Parse markets response
    */
-  private parseMarketsResponse(data: any): AsterdexMarket[] {
-    if (!data) return [];
+  private parseMarketsResponse(exchangeInfoData: any, ticker24hData: any, premiumIndexData: any): AsterdexMarket[] {
+    const symbols = Array.isArray(exchangeInfoData?.symbols) ? exchangeInfoData.symbols : [];
+    const ticker24h = Array.isArray(ticker24hData) ? ticker24hData : [];
+    const premiumIndex = Array.isArray(premiumIndexData) ? premiumIndexData : [];
 
-    const markets = Array.isArray(data) ? data : data.markets || data.data || [];
+    const tickerBySymbol = new Map<string, any>();
+    for (const ticker of ticker24h) {
+      tickerBySymbol.set(String(ticker.symbol || '').toUpperCase(), ticker);
+    }
 
-    return markets.map((item: any) => ({
-      symbol: (item.symbol || item.coin || item.name || 'UNKNOWN').toUpperCase(),
-      baseAsset: item.baseAsset || item.base || item.symbol?.split('-')[0] || 'UNKNOWN',
-      quoteAsset: item.quoteAsset || item.quote || 'USD',
-      markPrice: parseFloat(item.markPrice || item.markPx || 0),
-      indexPrice: parseFloat(item.indexPrice || item.indexPx || 0),
-      fundingRate: parseFloat(item.fundingRate || item.funding || 0),
-      nextFundingTime: item.nextFundingTime || Date.now() + (8 * 60 * 60 * 1000),
-      openInterest: parseFloat(item.openInterest || item.oi || 0),
-      volume24h: parseFloat(item.volume24h || item.vol24h || item.dayNtlVlm || 0),
-      high24h: parseFloat(item.high24h || item.high || 0),
-      low24h: parseFloat(item.low24h || item.low || 0),
-      priceChange24h: parseFloat(item.priceChange24h || item.change24h || 0),
-      priceChangePercent24h: parseFloat(item.priceChangePercent24h || item.changePercent24h || 0),
-      maxLeverage: parseFloat(item.maxLeverage || item.maxLvg || 20),
-      minOrderSize: parseFloat(item.minOrderSize || item.minSz || 0),
-      tickSize: parseFloat(item.tickSize || 0.01),
-      isActive: item.isActive !== false && item.status !== 'inactive',
-    }));
+    const premiumBySymbol = new Map<string, any>();
+    for (const premium of premiumIndex) {
+      premiumBySymbol.set(String(premium.symbol || '').toUpperCase(), premium);
+    }
+
+    return symbols.map((item: any) => {
+      const exchangeSymbol = String(item.symbol || '').toUpperCase();
+      const ticker = tickerBySymbol.get(exchangeSymbol) || {};
+      const premium = premiumBySymbol.get(exchangeSymbol) || {};
+
+      return {
+        symbol: this.normalizeSymbol(exchangeSymbol || item.coin || item.name || 'UNKNOWN'),
+        baseAsset: item.baseAsset || item.base || this.normalizeSymbol(exchangeSymbol) || 'UNKNOWN',
+        quoteAsset: item.quoteAsset || item.quote || 'USD',
+        markPrice: parseFloat(premium.markPrice || ticker.lastPrice || 0),
+        indexPrice: parseFloat(premium.indexPrice || 0),
+        fundingRate: parseFloat(premium.lastFundingRate || item.fundingRate || 0),
+        nextFundingTime: premium.nextFundingTime || Date.now() + (8 * 60 * 60 * 1000),
+        openInterest: parseFloat(item.openInterest || item.oi || 0),
+        volume24h: parseFloat(ticker.quoteVolume || ticker.volume || 0),
+        high24h: parseFloat(ticker.highPrice || item.high24h || item.high || 0),
+        low24h: parseFloat(ticker.lowPrice || item.low24h || item.low || 0),
+        priceChange24h: parseFloat(ticker.priceChange || item.priceChange24h || item.change24h || 0),
+        priceChangePercent24h: parseFloat(ticker.priceChangePercent || item.priceChangePercent24h || item.changePercent24h || 0),
+        maxLeverage: parseFloat(item.maxLeverage || item.maxLvg || 20),
+        minOrderSize: parseFloat(item.minOrderSize || item.minSz || 0),
+        tickSize: parseFloat(item.tickSize || 0.01),
+        isActive: item.status === 'TRADING' || (item.isActive !== false && item.status !== 'inactive'),
+      };
+    });
   }
 
   /**
    * Parse single market response
    */
-  private parseMarketResponse(data: any): AsterdexMarket | null {
-    if (!data) return null;
+  private parseMarketResponse(ticker24hData: any, premiumIndexData: any): AsterdexMarket | null {
+    if (!ticker24hData && !premiumIndexData) return null;
 
-    const item = data.data || data;
+    const ticker = ticker24hData?.data || ticker24hData || {};
+    const premium = premiumIndexData?.data || premiumIndexData || {};
+    const exchangeSymbol = String(ticker.symbol || premium.symbol || '');
+    const symbol = this.normalizeSymbol(exchangeSymbol || ticker.coin || premium.coin || 'UNKNOWN');
 
     return {
-      symbol: (item.symbol || item.coin || 'UNKNOWN').toUpperCase(),
-      baseAsset: item.baseAsset || item.base || 'UNKNOWN',
-      quoteAsset: item.quoteAsset || item.quote || 'USD',
-      markPrice: parseFloat(item.markPrice || 0),
-      indexPrice: parseFloat(item.indexPrice || 0),
-      fundingRate: parseFloat(item.fundingRate || 0),
-      nextFundingTime: item.nextFundingTime || Date.now() + (8 * 60 * 60 * 1000),
-      openInterest: parseFloat(item.openInterest || 0),
-      volume24h: parseFloat(item.volume24h || 0),
-      high24h: parseFloat(item.high24h || 0),
-      low24h: parseFloat(item.low24h || 0),
-      priceChange24h: parseFloat(item.priceChange24h || 0),
-      priceChangePercent24h: parseFloat(item.priceChangePercent24h || 0),
-      maxLeverage: parseFloat(item.maxLeverage || 20),
-      minOrderSize: parseFloat(item.minOrderSize || 0),
-      tickSize: parseFloat(item.tickSize || 0.01),
-      isActive: item.isActive !== false,
+      symbol,
+      baseAsset: symbol,
+      quoteAsset: 'USD',
+      markPrice: parseFloat(premium.markPrice || ticker.lastPrice || 0),
+      indexPrice: parseFloat(premium.indexPrice || 0),
+      fundingRate: parseFloat(premium.lastFundingRate || 0),
+      nextFundingTime: premium.nextFundingTime || Date.now() + (8 * 60 * 60 * 1000),
+      openInterest: parseFloat(ticker.openInterest || 0),
+      volume24h: parseFloat(ticker.quoteVolume || ticker.volume || 0),
+      high24h: parseFloat(ticker.highPrice || 0),
+      low24h: parseFloat(ticker.lowPrice || 0),
+      priceChange24h: parseFloat(ticker.priceChange || 0),
+      priceChangePercent24h: parseFloat(ticker.priceChangePercent || 0),
+      maxLeverage: 20,
+      minOrderSize: 0,
+      tickSize: 0.01,
+      isActive: true,
     };
   }
 
@@ -665,10 +820,10 @@ class AsterdexClient {
     const history = Array.isArray(data) ? data : data.history || data.data || [];
 
     return history.map((item: any) => ({
-      symbol: (item.symbol || 'UNKNOWN').toUpperCase(),
+      symbol: this.normalizeSymbol(item.symbol || 'UNKNOWN'),
       fundingRate: parseFloat(item.fundingRate || item.funding || 0),
       annualizedRate: parseFloat(item.annualizedRate || 0),
-      nextFundingTime: item.nextFundingTime || 0,
+      nextFundingTime: item.nextFundingTime || item.fundingTime || 0,
       markPrice: parseFloat(item.markPrice || 0),
       indexPrice: parseFloat(item.indexPrice || 0),
       timestamp: item.timestamp || item.time || Date.now(),

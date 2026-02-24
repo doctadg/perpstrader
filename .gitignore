@@ -1,5 +1,7 @@
 # Database files
 data/
+!src/data/
+!src/data/safety-store.ts
 *.db
 *.sqlite
 *.sqlite3
@@ -11,6 +13,9 @@ logs/
 # Environment
 .env
 .env.local
+config/agent-wallets.json
+config/openclaw/wallets.json
+config/openclaw/clawdbot.wallets.env
 
 # Dependencies
 node_modules/

@@ -377,9 +377,10 @@
             margin-bottom: 10px;
         }
     </style>
+    <link rel="stylesheet" href="/css/terminal-unified.css">
 </head>
 
-<body>
+<body class="unified-theme page-pumpfun">
     <!-- Swipe Navigation Hint -->
     <div class="swipe-hint show-mobile">
         <span class="swipe-hint-icon left">‹</span>
@@ -525,11 +526,11 @@
                         </div>
                         <div class="token-recommendation rec-${t.recommendation}">${t.recommendation.replace('_', ' ')}</div>
                         <div class="token-meta">
-                            <div class="token-meta-item ${t.security.isMintable ? 'inactive' : 'active'}">
-                                ${t.security.isMintable ? '⚠ Mintable' : '✓ Fixed Supply'}
+                            <div class="token-meta-item ${t.websiteScore >= 0.5 ? 'active' : 'inactive'}">
+                                ${t.websiteScore >= 0.5 ? '✓ Website Quality' : '⚠ Weak Website'}
                             </div>
-                            <div class="token-meta-item ${t.security.isFreezable ? 'inactive' : 'active'}">
-                                ${t.security.isFreezable ? '⚠ Freezable' : '✓ Not Freezable'}
+                            <div class="token-meta-item ${t.website?.hasWhitepaper ? 'active' : 'inactive'}">
+                                ${t.website?.hasWhitepaper ? '✓ Whitepaper' : '• No Whitepaper'}
                             </div>
                         </div>
                         <div class="token-meta">
@@ -556,7 +557,7 @@
 
         async function showTokenDetails(mintAddress) {
             try {
-                const res = await fetch(`/api/pumpfun/token/${mint}`);
+                const res = await fetch(`/api/pumpfun/token/${mintAddress}`);
                 const data = await res.json();
                 const token = data.token;
                 if (!token) return;

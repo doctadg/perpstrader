@@ -243,6 +243,15 @@ export interface Config {
     maxLeverage: number;
     emergencyStop: boolean;
   };
+  safety: {
+    dailyLossLimit: number;
+    maxDrawdownPercent: number;
+    consecutiveLossLimit: number;
+    maxTradesPerDay: number;
+    maxTradesPerSymbol: number;
+    volatilityReduceThreshold: number;
+    volatilityStopThreshold: number;
+  };
   trading: {
     symbols: string[];
     timeframes: string[];
@@ -382,6 +391,25 @@ export interface PredictionMarketSnapshot {
   liquidity?: number | null;
 }
 
+export interface PredictionMarketIntel {
+  marketId: string;
+  marketSlug?: string;
+  marketTitle: string;
+  linkedNewsCount: number;
+  linkedClusterCount: number;
+  avgClusterHeat: number;
+  maxClusterHeat: number;
+  trendDirection: 'UP' | 'DOWN' | 'NEUTRAL';
+  urgency: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  sentimentScore: number;
+  bullishCount: number;
+  bearishCount: number;
+  neutralCount: number;
+  weightedImportance: number;
+  topTopics: string[];
+  catalysts: string[];
+}
+
 export interface PredictionIdea {
   id: string;
   marketId: string;
@@ -394,6 +422,14 @@ export interface PredictionIdea {
   timeHorizon: string;
   catalysts: string[];
   rationale: string;
+  name?: string;
+  type?: 'NEWS_MOMENTUM' | 'EVENT_DRIVEN' | 'MEAN_REVERSION' | 'PROBABILITY_DISLOCATION' | 'PREDICTION_MARKET' | string;
+  summary?: string;
+  strategyId?: string;
+  linkedNewsCount?: number;
+  linkedClusterCount?: number;
+  heatScore?: number;
+  sentimentScore?: number;
 }
 
 export interface PredictionBacktestResult {
@@ -406,6 +442,9 @@ export interface PredictionBacktestResult {
   maxDrawdown: number;
   tradesSimulated: number;
   sharpeRatio: number;
+  strategyId?: string;
+  strategyName?: string;
+  totalTrades?: number;
 }
 
 export interface PredictionSignal {

@@ -1,7 +1,7 @@
 // Position Recovery Service
 // Handles automatic recovery of stuck, orphaned, or problematic positions
 
-import { Position, Portfolio, TradingSignal } from '../shared/types';
+import { Position, Portfolio, TradingSignal, RiskAssessment } from '../shared/types';
 import logger from '../shared/logger';
 import executionEngine from './execution-engine';
 import riskManager from '../risk-manager/risk-manager';
@@ -94,6 +94,33 @@ export class PositionRecoveryService {
         const issues: PositionIssue[] = [];
 
         for (const position of portfolio.positions) {
+            try {
+                const positionRisk = await riskManager.checkPositionRisk(position, portfolio);
+                if (!positionRisk.approved || riskManager.shouldClosePosition(position)) {
+                    const priority: RecoveryAction['priority'] = positionRisk.warnings.some(
+                        warning => warning.includes('CRITICAL') || warning.includes('Large unrealized loss')
+                    ) ? 'CRITICAL' : 'HIGH';
+
+                    const riskReason = positionRisk.warnings.length > 0
+                        ? positionRisk.warnings.join('; ')
+                        : `Risk score ${positionRisk.riskScore.toFixed(2)} exceeded threshold`;
+
+                    issues.push({
+                        position,
+                        issue: 'RISK_LIMIT',
+                        action: {
+                            type: 'CLOSE',
+                            reason: `Risk manager exit trigger: ${riskReason}`,
+                            priority,
+                        },
+                        detectedAt: new Date(),
+                    });
+                    continue;
+                }
+            } catch (riskError) {
+                logger.warn(`[PositionRecovery] Risk check failed for ${position.symbol}:`, riskError);
+            }
+
             // Check for orphaned positions (no matching strategy)
             if (await this.isOrphanedPosition(position)) {
                 issues.push({
@@ -111,7 +138,7 @@ export class PositionRecoveryService {
 
             // Check for excessive unrealized loss
             const lossPercent = position.unrealizedPnL / (position.size * position.entryPrice);
-            if (lossPercent < -0.15) { // 15% loss
+            if (lossPercent < -0.05) { // 5% loss hard fallback
                 issues.push({
                     position,
                     issue: 'EXCESSIVE_LOSS',
@@ -298,14 +325,18 @@ export class PositionRecoveryService {
                 reason: `Recovery: ${reason}`,
             };
 
-            const riskAssessment = await riskManager.evaluateSignal(signal, await executionEngine.getPortfolio());
+            const riskAssessment: RiskAssessment = {
+                approved: true,
+                suggestedSize: Math.abs(position.size),
+                riskScore: 0,
+                warnings: ['Exit signal', 'Position recovery close'],
+                stopLoss: 0,
+                takeProfit: 0,
+                leverage: position.leverage,
+            };
 
-            if (riskAssessment.approved) {
-                await executionEngine.executeSignal(signal, riskAssessment);
-                logger.info(`[PositionRecovery] Successfully closed position ${position.symbol}`);
-            } else {
-                logger.error(`[PositionRecovery] Risk manager rejected recovery close for ${position.symbol}`);
-            }
+            await executionEngine.executeSignal(signal, riskAssessment);
+            logger.info(`[PositionRecovery] Successfully closed position ${position.symbol}`);
 
         } catch (error) {
             logger.error(`[PositionRecovery] Failed to close position ${position.symbol}:`, error);
@@ -329,17 +360,23 @@ export class PositionRecoveryService {
                 price: position.markPrice,
                 type: 'MARKET',
                 timestamp: new Date(),
-                confidence: 0.8,
+                confidence: 1.0,
                 strategyId: 'position-recovery',
                 reason: `Recovery: ${reason}`,
             };
 
-            const riskAssessment = await riskManager.evaluateSignal(signal, portfolio);
+            const riskAssessment: RiskAssessment = {
+                approved: true,
+                suggestedSize: newSize,
+                riskScore: 0,
+                warnings: ['Exit signal', 'Position recovery reduce'],
+                stopLoss: 0,
+                takeProfit: 0,
+                leverage: position.leverage,
+            };
 
-            if (riskAssessment.approved) {
-                await executionEngine.executeSignal(signal, riskAssessment);
-                logger.info(`[PositionRecovery] Successfully reduced position ${position.symbol} by 50%`);
-            }
+            await executionEngine.executeSignal(signal, riskAssessment);
+            logger.info(`[PositionRecovery] Successfully reduced position ${position.symbol} by 50%`);
 
         } catch (error) {
             logger.error(`[PositionRecovery] Failed to reduce position ${position.symbol}:`, error);

@@ -3,6 +3,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { PumpFunAgentState, TokenRecommendation } from '../shared/types';
+import configManager from '../shared/config';
 
 // Re-export for convenience
 export type { PumpFunAgentState, TokenRecommendation };
@@ -71,6 +72,7 @@ export function calculateAverageScore(state: PumpFunAgentState): number {
  */
 export function updateStats(state: PumpFunAgentState): PumpFunAgentState {
   const analyzedTokens = state.analyzedTokens;
+  const minScoreThreshold = configManager.get().pumpfun?.minScoreThreshold ?? 0.7;
 
   // Count by recommendation
   const byRecommendation: Record<TokenRecommendation, number> = {
@@ -86,7 +88,7 @@ export function updateStats(state: PumpFunAgentState): PumpFunAgentState {
   }
 
   // Calculate high confidence tokens
-  const highConfidenceTokens = analyzedTokens.filter(t => t.overallScore >= 0.7);
+  const highConfidenceTokens = analyzedTokens.filter(t => t.overallScore >= minScoreThreshold);
 
   return {
     ...state,

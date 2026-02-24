@@ -35,8 +35,8 @@ cat > /home/d/PerpsTrader/config/config.json << EOF
     "logLevel": "info"
   },
   "hyperliquid": {
-    "apiKey": "",
-    "apiSecret": "",
+    "privateKey": "",
+    "mainAddress": "",
     "testnet": true,
     "baseUrl": "https://api.hyperliquid.xyz"
   },
@@ -65,10 +65,10 @@ EOF
 # Create Hyperliquid keys file template
 echo "🔑 Creating Hyperliquid keys template..."
 cat > /home/d/PerpsTrader/config/hyperliquid.keys << EOF
-# Hyperliquid API Credentials
+# Hyperliquid Credentials
 # IMPORTANT: Keep this file secure and never commit to version control
-HYPERLIQUID_API_KEY=your_api_key_here
-HYPERLIQUID_API_SECRET=your_api_secret_here
+HYPERLIQUID_PRIVATE_KEY=your_private_key_here
+HYPERLIQUID_MAIN_ADDRESS=your_main_wallet_address_here
 HYPERLIQUID_TESTNET=true
 EOF
 
@@ -92,6 +92,6 @@ echo "4. Enable services on boot: sudo systemctl enable perps-agent perps-dashbo
 echo "5. Check status: systemctl status perps-*"
 echo "6. View logs: journalctl -u perps-agent -f"
 echo ""
-echo "🌐 Dashboard will be available at: http://localhost:3000"
+echo "🌐 Dashboard will be available at: http://localhost:3001"
 echo ""
 echo "⚠️  IMPORTANT: Start with testnet=true until you're confident in the system!"

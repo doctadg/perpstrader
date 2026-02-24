@@ -689,7 +689,17 @@ class NewsSearchService {
             return response.data.text || null;
         }
         catch (error) {
-            logger_1.default.error(`Failed to scrape ${url}:`, error);
+            const status = error?.response?.status;
+            const detail = error?.response?.data?.detail ||
+                error?.message ||
+                String(error);
+            // Common upstream denials (403/paywall, 422 unsupported pages) are expected at internet scale.
+            if (status && [401, 403, 404, 410, 422, 429].includes(status)) {
+                logger_1.default.warn(`[NewsSearch] Skipping scrape for ${url} (${status}): ${detail}`);
+            }
+            else {
+                logger_1.default.error(`[NewsSearch] Failed to scrape ${url}: ${detail}`);
+            }
             return null;
         }
     }

@@ -1,835 +1,1092 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PERPS_TRADER // CONTROL_TERMINAL</title>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="/js/universal-nav.js"></script>
-    <!-- Mobile Stability Fixes (load first) -->
-    <link rel="stylesheet" href="/css/mobile-stability.css">
-    <script src="/js/mobile-stability.js"></script>
-    <!-- Existing mobile styles -->
-    <link rel="stylesheet" href="/css/mobile-responsive.css">
-    <link rel="stylesheet" href="/css/mobile-native.css">
-    <script src="/js/mobile-enhancements.js"></script>
-    <script src="/js/mobile-native.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PerpsTrader Terminal</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="/js/universal-nav.js"></script>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap");
 
-        :root {
-            --bg-obsidian: #050507;
-            --bg-panel: rgba(12, 12, 18, 0.85);
-            --terminal-green: #00ff9d;
-            --terminal-cyan: #00f2ff;
-            --terminal-amber: #ffb300;
-            --terminal-red: #ff3e3e;
-            --border-low: rgba(0, 242, 255, 0.15);
-            --border-med: rgba(0, 242, 255, 0.4);
-            --font-mono: 'JetBrains Mono', monospace;
-            --font-sans: 'Inter', sans-serif;
-            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
-        }
+    :root {
+      --bg-base: #0a0d0f;
+      --bg-panel: rgba(12, 18, 22, 0.92);
+      --bg-panel-alt: rgba(18, 24, 30, 0.92);
+      --line: rgba(83, 136, 166, 0.32);
+      --line-strong: rgba(92, 185, 201, 0.78);
+      --text: #e8f1f5;
+      --text-dim: #8fa0ac;
+      --good: #6df7b2;
+      --bad: #ff796e;
+      --warn: #ffc264;
+      --accent: #5cc9d7;
+      --accent-soft: rgba(92, 201, 215, 0.2);
+      --mono: "IBM Plex Mono", monospace;
+      --sans: "Space Grotesk", sans-serif;
+      --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+    }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            scrollbar-width: thin;
-            scrollbar-color: var(--terminal-cyan) transparent;
-        }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-        body {
-            font-family: var(--font-sans);
-            background: var(--bg-obsidian);
-            color: #e0e0e0;
-            min-height: 100vh;
-            overflow-x: hidden;
-            position: relative;
-        }
+    body {
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 700px at 10% -10%, rgba(92, 201, 215, 0.16), transparent 50%),
+        radial-gradient(900px 560px at 105% 10%, rgba(255, 194, 100, 0.1), transparent 60%),
+        linear-gradient(170deg, #06080a 0%, #0a0d0f 100%);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
 
-        /* CRT Scanline Effect */
-        body::before {
-            content: " ";
-            display: block;
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            z-index: 1000;
-            background-size: 100% 4px, 3px 100%;
-            pointer-events: none;
-            opacity: 0.15;
-        }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      background-size: 42px 42px, 42px 42px;
+      opacity: 0.3;
+      z-index: 0;
+    }
 
-        .container {
-            max-width: 1800px;
-            margin: 0 auto;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
+    .terminal {
+      position: relative;
+      z-index: 1;
+      width: min(1800px, 96vw);
+      margin: 18px auto 26px;
+      display: grid;
+      gap: 14px;
+    }
 
-        /* Top Bar */
-        .top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 24px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            border-left: 4px solid var(--terminal-cyan);
-            backdrop-filter: blur(8px);
-        }
+    .header {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 14px;
+    }
 
-        .system-id {
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            letter-spacing: 2px;
-            color: var(--terminal-cyan);
-            text-transform: uppercase;
-        }
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      border-radius: 14px;
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+    }
 
-        .system-title {
-            font-weight: 800;
-            font-size: 1.4em;
-            letter-spacing: -0.5px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, rgba(92, 201, 215, 0.08), transparent);
+    }
 
-        .system-title span {
-            color: var(--terminal-cyan);
-            text-shadow: var(--glow-cyan);
-        }
+    .panel-head h2 {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-weight: 700;
+      color: var(--accent);
+      font-family: var(--mono);
+    }
 
-        .status-module {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-        }
+    .panel-head .meta {
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
 
-        .connection-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 4px 12px;
-            background: rgba(0, 255, 157, 0.1);
-            border: 1px solid var(--terminal-green);
-            color: var(--terminal-green);
-        }
+    .hero {
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+      background:
+        radial-gradient(120% 160% at 0 0, rgba(92, 201, 215, 0.12), transparent 55%),
+        radial-gradient(100% 140% at 100% 100%, rgba(255, 194, 100, 0.08), transparent 60%);
+    }
 
-        .live-dot {
-            width: 6px;
-            height: 6px;
-            background: var(--terminal-green);
-            border-radius: 50%;
-            box-shadow: 0 0 8px var(--terminal-green);
-            animation: flicker 1.5s infinite;
-        }
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
 
-        @keyframes flicker {
+    .brand {
+      display: grid;
+      gap: 4px;
+    }
 
-            0%,
-            100% {
-                opacity: 1;
-            }
+    .brand-title {
+      font-family: var(--mono);
+      font-size: 1.18rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #dff9ff;
+    }
 
-            50% {
-                opacity: 0.4;
-            }
-        }
+    .brand-sub {
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.76rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
 
-        /* Data Strip */
-        .data-strip {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1px;
-            background: var(--border-low);
-            border: 1px solid var(--border-low);
-        }
+    .status-strip {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
 
-        .data-module {
-            background: var(--bg-panel);
-            padding: 16px 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      font-family: var(--mono);
+      color: var(--text-dim);
+      background: rgba(0, 0, 0, 0.25);
+      white-space: nowrap;
+    }
 
-        .module-label {
-            font-family: var(--font-mono);
-            font-size: 0.65em;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
+    .chip strong {
+      color: var(--text);
+      margin-left: 6px;
+      font-weight: 700;
+    }
 
-        .module-value {
-            font-family: var(--font-mono);
-            font-size: 1.4em;
-            font-weight: 700;
-        }
+    .chip.online strong {
+      color: var(--good);
+    }
 
-        .module-value.green {
-            color: var(--terminal-green);
-        }
+    .chip.offline strong {
+      color: var(--bad);
+    }
 
-        .module-value.cyan {
-            color: var(--terminal-cyan);
-        }
+    .link-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
 
-        .module-value.red {
-            color: var(--terminal-red);
-        }
+    .terminal-link {
+      border: 1px solid var(--line);
+      padding: 7px 11px;
+      border-radius: 9px;
+      text-decoration: none;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(9, 15, 19, 0.9);
+      transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+    }
 
-        /* Pipeline HUD */
-        .pipeline-hud {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            padding: 24px;
-            position: relative;
-            overflow: hidden;
-        }
+    .terminal-link:hover {
+      border-color: var(--line-strong);
+      background: rgba(20, 32, 38, 0.95);
+      transform: translateY(-1px);
+    }
 
-        .pipeline-hud::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image: radial-gradient(var(--border-low) 1px, transparent 1px);
-            background-size: 30px 30px;
-            opacity: 0.1;
-            pointer-events: none;
-        }
+    .system-map {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(80px, 1fr));
+      gap: 8px;
+    }
 
-        .hud-header {
-            font-family: var(--font-mono);
-            font-size: 0.7em;
-            color: var(--terminal-cyan);
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-        }
+    .stage {
+      border: 1px solid var(--line);
+      background: rgba(6, 9, 12, 0.9);
+      border-radius: 9px;
+      padding: 8px 6px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      transition: 0.25s ease;
+    }
 
-        .pipeline-visual {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            position: relative;
-            z-index: 1;
-        }
+    .stage.active {
+      color: var(--accent);
+      border-color: var(--line-strong);
+      background: rgba(19, 40, 45, 0.8);
+      transform: translateY(-1px);
+    }
 
-        .hud-node {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 8px;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--border-low);
-            min-width: 110px;
-            transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
-            filter: grayscale(0.8);
-            opacity: 0.6;
-        }
+    .stage.done {
+      color: var(--good);
+      border-color: rgba(109, 247, 178, 0.7);
+      background: rgba(18, 48, 36, 0.72);
+    }
 
-        .hud-node.active {
-            filter: grayscale(0);
-            opacity: 1;
-            border-color: var(--terminal-cyan);
-            box-shadow: var(--glow-cyan);
-            transform: translateY(-4px);
-            background: rgba(0, 242, 255, 0.05);
-        }
+    .command {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      align-content: center;
+    }
 
-        .hud-node.completed {
-            filter: grayscale(0);
-            opacity: 0.9;
-            border-color: var(--terminal-green);
-        }
+    .health-pill {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      background: rgba(8, 13, 17, 0.8);
+    }
 
-        .node-icon {
-            font-size: 1.5em;
-        }
+    .health-pill .label {
+      color: var(--text-dim);
+    }
 
-        .node-name {
-            font-family: var(--font-mono);
-            font-size: 0.65em;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
+    .health-pill .value {
+      font-weight: 700;
+      color: var(--text);
+    }
 
-        .hud-connector {
-            flex-grow: 1;
-            height: 2px;
-            background: var(--border-low);
-            position: relative;
-        }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(120px, 1fr));
+      gap: 10px;
+    }
 
-        .hud-connector::after {
-            content: "";
-            position: absolute;
-            top: -2px;
-            left: 0;
-            width: 0%;
-            height: 100%;
-            background: var(--terminal-cyan);
-            box-shadow: var(--glow-cyan);
-            transition: width 0.5s ease;
-        }
+    .metric {
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: grid;
+      gap: 4px;
+    }
 
-        .hud-connector.active::after {
-            width: 100%;
-        }
+    .metric .label {
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
 
-        /* Main Grid */
-        .main-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            grid-template-rows: auto auto;
-            gap: 20px;
-        }
+    .metric .value {
+      font-family: var(--mono);
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-        /* Tech Panel */
-        .tech-panel {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
+    .value.good {
+      color: var(--good);
+    }
 
-        .panel-title-bar {
-            background: rgba(0, 242, 255, 0.05);
-            border-bottom: 1px solid var(--border-low);
-            padding: 8px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+    .value.bad {
+      color: var(--bad);
+    }
 
-        .panel-label {
-            font-family: var(--font-mono);
-            font-size: 0.7em;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: #aaa;
-        }
+    .value.warn {
+      color: var(--warn);
+    }
 
-        .panel-meta {
-            font-family: var(--font-mono);
-            font-size: 0.6em;
-            color: var(--terminal-cyan);
-        }
+    .good {
+      color: var(--good);
+    }
 
-        .panel-body {
-            padding: 0;
-            max-height: 400px;
-            overflow-y: auto;
-        }
+    .bad {
+      color: var(--bad);
+    }
 
-        /* Tables & Lists */
-        .terminal-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: var(--font-mono);
-        }
+    .warn {
+      color: var(--warn);
+    }
 
-        .terminal-table th {
-            text-align: left;
-            padding: 12px 16px;
-            font-size: 0.65em;
-            color: #666;
-            text-transform: uppercase;
-            border-bottom: 1px solid var(--border-low);
-            background: rgba(0, 0, 0, 0.2);
-        }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.45fr 1.1fr 1fr;
+      gap: 14px;
+    }
 
-        .terminal-table td {
-            padding: 12px 16px;
-            font-size: 0.8em;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-        }
+    .column {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
 
-        .terminal-table tr:hover {
-            background: rgba(0, 242, 255, 0.03);
-        }
+    .table-wrap {
+      max-height: 300px;
+      overflow: auto;
+    }
 
-        /* Activity Console */
-        .activity-console {
-            background: rgba(0, 0, 0, 0.5);
-            padding: 16px;
-            height: 100%;
-            font-family: var(--font-mono);
-            font-size: 0.75em;
-            line-height: 1.6;
-        }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--mono);
+      font-size: 0.76rem;
+    }
 
-        .console-line {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 6px;
-            padding-bottom: 6px;
-            border-bottom: 1px hidden rgba(255, 255, 255, 0.05);
-            animation: slideIn 0.3s ease-out;
-        }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(140, 171, 186, 0.12);
+      vertical-align: top;
+    }
 
-        @keyframes slideIn {
-            from {
-                transform: translateX(-10px);
-                opacity: 0;
-            }
+    th {
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.66rem;
+      position: sticky;
+      top: 0;
+      background: rgba(8, 14, 17, 0.95);
+      z-index: 1;
+    }
 
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
+    tbody tr:hover {
+      background: rgba(92, 201, 215, 0.07);
+    }
 
-        .timestamp {
-            color: #555;
-            min-width: 80px;
-        }
+    .list {
+      list-style: none;
+      max-height: 300px;
+      overflow: auto;
+    }
 
-        .log-tag {
-            min-width: 60px;
-            color: var(--terminal-cyan);
-        }
+    .list li {
+      border-bottom: 1px solid rgba(140, 171, 186, 0.12);
+      padding: 10px 12px;
+      display: grid;
+      gap: 4px;
+      font-family: var(--mono);
+    }
 
-        .log-msg {
-            color: #ccc;
-        }
+    .list .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.74rem;
+    }
 
-        .tag-info {
-            color: var(--terminal-cyan);
-        }
+    .list .sub {
+      color: var(--text-dim);
+      font-size: 0.68rem;
+      line-height: 1.35;
+    }
 
-        .tag-success {
-            color: var(--terminal-green);
-        }
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      white-space: nowrap;
+      background: rgba(5, 9, 12, 0.7);
+    }
 
-        .tag-warn {
-            color: var(--terminal-amber);
-        }
+    .health-grid {
+      display: grid;
+      gap: 8px;
+      padding: 10px 12px;
+    }
 
-        .tag-error {
-            color: var(--terminal-red);
-        }
+    .health-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(6, 10, 13, 0.75);
+    }
 
-        /* Scrollbar */
-        ::-webkit-scrollbar {
-            width: 4px;
-        }
+    .health-item .name {
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
 
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
+    .health-item .state.good {
+      color: var(--good);
+    }
 
-        ::-webkit-scrollbar-thumb {
-            background: var(--border-low);
-        }
+    .health-item .state.bad {
+      color: var(--bad);
+    }
 
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--terminal-cyan);
-        }
+    .health-item .state.warn {
+      color: var(--warn);
+    }
 
-        @media (max-width: 1200px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-    <!-- Conversational Agent Widget -->
-    <link rel="stylesheet" href="/agent-widget.css">
-    <meta name="agent-widget" content="true">
+    .log-box {
+      min-height: 230px;
+      max-height: 230px;
+      overflow: auto;
+      padding: 10px 12px;
+      background: rgba(5, 8, 10, 0.8);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      line-height: 1.4;
+    }
+
+    .log-line {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      padding: 4px 0;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+    }
+
+    .log-time {
+      color: var(--text-dim);
+      min-width: 75px;
+    }
+
+    .log-kind {
+      min-width: 56px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .kind-info {
+      color: var(--accent);
+    }
+
+    .kind-good {
+      color: var(--good);
+    }
+
+    .kind-bad {
+      color: var(--bad);
+    }
+
+    .kind-warn {
+      color: var(--warn);
+    }
+
+    .log-text {
+      color: var(--text);
+      overflow-wrap: anywhere;
+    }
+
+    .empty {
+      padding: 18px 12px;
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    @media (max-width: 1460px) {
+      .header {
+        grid-template-columns: 1fr;
+      }
+
+      .system-map {
+        grid-template-columns: repeat(4, minmax(100px, 1fr));
+      }
+
+      .metrics {
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+      }
+
+      .grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 980px) {
+      .terminal {
+        width: min(100vw, 100%);
+        margin: 8px auto 18px;
+        padding: 0 8px;
+      }
+
+      .metrics {
+        grid-template-columns: repeat(2, minmax(130px, 1fr));
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .system-map {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+      }
+
+      .brand-title {
+        font-size: 1rem;
+      }
+    }
+  </style>
+    <link rel="stylesheet" href="/css/terminal-unified.css">
 </head>
-
-
-<body>
-    <!-- Swipe Navigation Hint -->
-    <div class="swipe-hint show-mobile">
-        <span class="swipe-hint-icon left">‹</span>
-        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
-        <span class="swipe-hint-icon right">›</span>
-    </div>
-    <div class="container">
-        <!-- Top Status Bar -->
-        <header class="top-bar">
-            <div class="system-id">[ SYS_NODE.012 ]</div>
-            <div class="system-title"><span>PERPS</span>_TRADER.ai</div>
-            <div style="flex: 1; margin-left: 20px; display: flex; gap: 10px;">
-                <a href="/trace"
-                    style="color: var(--terminal-cyan); font-family: var(--font-mono); font-size: 0.7em; text-decoration: none; border: 1px solid var(--border-low); padding: 4px 10px;">➔
-                    OPEN_TRACE_INVESTIGATOR</a>
-                <a href="/predictions"
-                    style="color: var(--terminal-cyan); font-family: var(--font-mono); font-size: 0.7em; text-decoration: none; border: 1px solid var(--border-low); padding: 4px 10px;">➔
-                    OPEN_PREDICTIONS_NODE</a>
-                <a href="/pools.html"
-                    style="color: var(--terminal-green); font-family: var(--font-mono); font-size: 0.7em; text-decoration: none; border: 1px solid var(--border-low); padding: 4px 10px;">➔
-                    OPEN_SAFEKEEPING_POOLS</a>
-            </div>
-            <div class="status-module">
-                <div class="connection-indicator">
-                    <span class="live-dot"></span>
-                    <span id="connection-status">INITIALIZING...</span>
-                </div>
-                <div id="system-time">00:00:00</div>
-            </div>
-        </header>
-
-        <!-- Global Data Strip -->
-        <div class="data-strip">
-            <div class="data-module">
-                <span class="module-label">NAV_EQUITY</span>
-                <span class="module-value cyan" id="portfolio-value">$0.00</span>
-            </div>
-            <div class="data-module">
-                <span class="module-label">AVBL_LIQUIDITY</span>
-                <span class="module-value" id="available-balance">$0.00</span>
-            </div>
-            <div class="data-module">
-                <span class="module-label">REALIZED_PNL</span>
-                <span class="module-value" id="realized-pnl">$0.00</span>
-            </div>
-            <div class="data-module">
-                <span class="module-label">UNREALIZED_PNL</span>
-                <span class="module-value" id="unrealized-pnl">$0.00</span>
-            </div>
-            <div class="data-module">
-                <span class="module-label">24H_PERF</span>
-                <span class="module-value" id="daily-pnl">$0.00</span>
-            </div>
-            <div class="data-module">
-                <span class="module-label">CYCLE_COUNT</span>
-                <span class="module-value cyan" id="total-trades">0</span>
-            </div>
-            <div class="data-module">
-                <span class="module-label">PRED_AGENT</span>
-                <span class="module-value" id="predictions-status">UNKNOWN</span>
-            </div>
-            <div class="data-module">
-                <span class="module-label">PRED_POSITIONS</span>
-                <span class="module-value cyan" id="predictions-open">0</span>
-            </div>
+<body class="unified-theme page-index">
+  <main class="terminal">
+    <section class="header">
+      <article class="panel hero">
+        <div class="hero-top">
+          <div class="brand">
+            <div class="brand-title">PerpsTrader Unified Terminal</div>
+            <div class="brand-sub">Monolithic Trading, News, Heatmap, Prediction, Risk, Monitoring</div>
+          </div>
+          <div class="status-strip">
+            <div class="chip online">Socket<strong id="chip-conn">BOOTING</strong></div>
+            <div class="chip">Mode<strong id="chip-mode">PAPER</strong></div>
+            <div class="chip">Time<strong id="chip-time">--:--:--</strong></div>
+          </div>
         </div>
-
-        <!-- Pipeline HUD -->
-        <section class="pipeline-hud">
-            <div class="hud-header">
-                <div class="hud-label">// TRADING_PIPELINE_FLOW</div>
-                <div class="hud-stats">MOD_LATENCY: 42ms</div>
-            </div>
-            <div class="pipeline-visual" id="pipeline">
-                <div class="hud-node" id="node-market">
-                    <span class="node-icon">📊</span>
-                    <span class="node-name">MARKET</span>
-                </div>
-                <div class="hud-connector" id="conn-1"></div>
-                <div class="hud-node" id="node-pattern">
-                    <span class="node-icon">🧠</span>
-                    <span class="node-name">PATTERN</span>
-                </div>
-                <div class="hud-connector" id="conn-2"></div>
-                <div class="hud-node" id="node-strategy">
-                    <span class="node-icon">💡</span>
-                    <span class="node-name">STRATEGY</span>
-                </div>
-                <div class="hud-connector" id="conn-3"></div>
-                <div class="hud-node" id="node-backtest">
-                    <span class="node-icon">📈</span>
-                    <span class="node-name">BACKTEST</span>
-                </div>
-                <div class="hud-connector" id="conn-4"></div>
-                <div class="hud-node" id="node-select">
-                    <span class="node-icon">🎯</span>
-                    <span class="node-name">SELECT</span>
-                </div>
-                <div class="hud-connector" id="conn-5"></div>
-                <div class="hud-node" id="node-risk">
-                    <span class="node-icon">🛡️</span>
-                    <span class="node-name">RISK</span>
-                </div>
-                <div class="hud-connector" id="conn-6"></div>
-                <div class="hud-node" id="node-execute">
-                    <span class="node-icon">🚀</span>
-                    <span class="node-name">EXECUTE</span>
-                </div>
-                <div class="hud-connector" id="conn-7"></div>
-                <div class="hud-node" id="node-learn">
-                    <span class="node-icon">📚</span>
-                    <span class="node-name">LEARN</span>
-                </div>
-            </div>
-        </section>
-
-        <!-- Main Workspace -->
-        <div class="main-grid">
-            <!-- Table Panel -->
-            <div class="tech-panel">
-                <div class="panel-title-bar">
-                    <span class="panel-label">ACTIVE_EXPOSURE</span>
-                    <span class="panel-meta">LIVE_ORACLE_FEED</span>
-                </div>
-                <div class="panel-body">
-                    <table class="terminal-table">
-                        <thead>
-                            <tr>
-                                <th>ASSET</th>
-                                <th>DIRECTION</th>
-                                <th>MAGNITUDE</th>
-                                <th>ENTRY_PX</th>
-                                <th>MKT_PNL</th>
-                            </tr>
-                        </thead>
-                        <tbody id="positions-tbody">
-                            <tr class="empty-state">
-                                <td colspan="5" style="text-align: center; color: #555; padding: 40px;">//
-                                    NO_ACTIVE_POSITIONS_DETECTED</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Log Panel -->
-            <div class="tech-panel">
-                <div class="panel-title-bar">
-                    <span class="panel-label">SYSTEM_LOG</span>
-                    <span class="panel-meta">SECURE_CHANNEL_v4</span>
-                </div>
-                <div class="panel-body">
-                    <div class="activity-console" id="activity-log">
-                        <!-- Logs inject here -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- Recent Executions (Span width) -->
-            <div class="tech-panel" style="grid-column: 1 / -1;">
-                <div class="panel-title-bar">
-                    <span class="panel-label">EXECUTION_HISTORY</span>
-                    <span class="panel-meta">LATENCY_STAMPED</span>
-                </div>
-                <div class="panel-body">
-                    <table class="terminal-table" id="trades-table">
-                        <thead>
-                            <tr>
-                                <th>SIG_TIME</th>
-                                <th>EXEC_TYPE</th>
-                                <th>ASSET</th>
-                                <th>SIZE</th>
-                                <th>EXIT_PNL</th>
-                            </tr>
-                        </thead>
-                        <tbody id="trades-tbody">
-                            <!-- Trades inject here -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        <div class="link-row">
+          <a class="terminal-link" href="/trace">Trace Investigator</a>
+          <a class="terminal-link" href="/research">Research Lab</a>
+          <a class="terminal-link" href="/predictions">Prediction Node</a>
+          <a class="terminal-link" href="/news">News Desk</a>
+          <a class="terminal-link" href="/heatmap">Heatmap Matrix</a>
+          <a class="terminal-link" href="/funding-arbitrage">Funding Scanner</a>
+          <a class="terminal-link" href="/pools">Safekeeping Pools</a>
         </div>
-    </div>
+        <div class="system-map" id="pipeline-map">
+          <div class="stage" data-step="MARKET">Market</div>
+          <div class="stage" data-step="PATTERN">Pattern</div>
+          <div class="stage" data-step="STRATEGY">Strategy</div>
+          <div class="stage" data-step="BACKTEST">Backtest</div>
+          <div class="stage" data-step="SELECT">Select</div>
+          <div class="stage" data-step="RISK">Risk</div>
+          <div class="stage" data-step="EXECUTE">Execute</div>
+          <div class="stage" data-step="LEARN">Learn</div>
+        </div>
+      </article>
 
-    <script>
-        let socket;
+      <article class="panel command">
+        <div class="health-pill">
+          <span class="label">Terminal Health</span>
+          <span class="value" id="health-overall">UNKNOWN</span>
+        </div>
+        <div class="health-pill">
+          <span class="label">Prediction Agent</span>
+          <span class="value" id="pred-status">UNKNOWN</span>
+        </div>
+        <div class="health-pill">
+          <span class="label">Open Positions</span>
+          <span class="value" id="pred-open">0</span>
+        </div>
+        <div class="health-pill">
+          <span class="label">Cycle Step</span>
+          <span class="value" id="cycle-step">IDLE</span>
+        </div>
+        <div class="health-pill">
+          <span class="label">Message Bus</span>
+          <span class="value" id="bus-status">UNKNOWN</span>
+        </div>
+      </article>
+    </section>
 
-        function initSocket() {
-            socket = io();
-            socket.on('connect', () => {
-                addActivityLog('UPLINK_ESTABLISHED', 'success');
-            });
-            socket.on('disconnect', () => {
-                addActivityLog('UPLINK_LOST', 'error');
-                document.getElementById('connection-status').textContent = 'OFFLINE';
-            });
-            socket.on('cycle_update', (data) => {
-                updatePipeline(data.step);
-                addActivityLog(`PROCESS: ${data.step}`, 'info');
-            });
-            socket.on('cycle_complete', (data) => {
-                resetPipeline();
-                const type = data.success ? (data.tradeExecuted ? 'success' : 'info') : 'warn';
-                addActivityLog(`CYCLE_COMPLETE // EXEC: ${data.tradeExecuted ? 'YES' : 'NO'}`, type);
-                fetchData();
-            });
-        }
+    <section class="metrics">
+      <article class="metric"><span class="label">NAV Equity</span><strong class="value" id="m-nav">$0.00</strong></article>
+      <article class="metric"><span class="label">Available Balance</span><strong class="value" id="m-avail">$0.00</strong></article>
+      <article class="metric"><span class="label">Realized PnL</span><strong class="value" id="m-realized">$0.00</strong></article>
+      <article class="metric"><span class="label">Unrealized PnL</span><strong class="value" id="m-unrealized">$0.00</strong></article>
+      <article class="metric"><span class="label">Daily PnL</span><strong class="value" id="m-daily">$0.00</strong></article>
+      <article class="metric"><span class="label">Recent Trades</span><strong class="value" id="m-trade-count">0</strong></article>
+      <article class="metric"><span class="label">News Clusters</span><strong class="value" id="m-news-count">0</strong></article>
+      <article class="metric"><span class="label">Prediction Markets</span><strong class="value" id="m-pred-count">0</strong></article>
+    </section>
 
-        function updatePipeline(step) {
-            document.querySelectorAll('.hud-node').forEach(n => n.classList.remove('active', 'completed'));
-            document.querySelectorAll('.hud-connector').forEach(c => c.classList.remove('active'));
-
-            const stepMap = {
-                'MARKET_DATA': 'node-market', 'MARKET_DATA_READY': 'node-market',
-                'PATTERN_RECALL': 'node-pattern', 'PATTERN_RECALL_COMPLETE': 'node-pattern',
-                'STRATEGY_IDEATION': 'node-strategy', 'STRATEGY_IDEATION_COMPLETE': 'node-strategy',
-                'BACKTEST': 'node-backtest', 'BACKTEST_COMPLETE': 'node-backtest',
-                'STRATEGY_SELECTED': 'node-select', 'STRATEGY_SELECTION': 'node-select',
-                'RISK_GATE': 'node-risk', 'RISK_GATE_APPROVED': 'node-risk',
-                'EXECUTION': 'node-execute', 'EXECUTION_COMPLETE': 'node-execute',
-                'LEARNING': 'node-learn', 'LEARNING_COMPLETE': 'node-learn',
-            };
-
-            const nodeId = stepMap[step];
-            if (nodeId) {
-                const node = document.getElementById(nodeId);
-                if (node) {
-                    node.classList.add('active');
-                    const nodes = Array.from(document.querySelectorAll('.hud-node'));
-                    const connectors = Array.from(document.querySelectorAll('.hud-connector'));
-                    const idx = nodes.indexOf(node);
-
-                    nodes.slice(0, idx).forEach(n => n.classList.add('completed'));
-                    connectors.slice(0, idx).forEach(c => c.classList.add('active'));
-                }
-            }
-        }
-
-        function resetPipeline() {
-            document.querySelectorAll('.hud-node').forEach(n => n.classList.remove('active', 'completed'));
-            document.querySelectorAll('.hud-connector').forEach(c => c.classList.remove('active'));
-        }
-
-        function formatMoney(val, showSign = false) {
-            const num = parseFloat(val) || 0;
-            const formatted = '$' + Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            if (showSign && num !== 0) return (num >= 0 ? '+' : '-') + formatted;
-            return num < 0 ? '-' + formatted : formatted;
-        }
-
-        function updateValueStyle(element, value) {
-            element.classList.remove('cyan', 'green', 'red');
-            const num = parseFloat(value) || 0;
-            if (num > 0) element.classList.add('green');
-            else if (num < 0) element.classList.add('red');
-            else element.classList.add('cyan');
-        }
-
-        async function fetchData() {
-            try {
-                const [portfolioData, status, predictionStatus] = await Promise.all([
-                    fetch('/api/portfolio').then(r => r.json()),
-                    fetch('/api/status').then(r => r.json()),
-                    fetch('/api/predictions/status').then(r => r.json()),
-                ]);
-
-                const p = portfolioData.portfolio || {};
-                const valEl = document.getElementById('portfolio-value');
-                valEl.textContent = formatMoney(p.totalValue);
-
-                document.getElementById('available-balance').textContent = formatMoney(p.availableBalance);
-
-                const realizedEl = document.getElementById('realized-pnl');
-                realizedEl.textContent = formatMoney(portfolioData.realizedPnL, true);
-                updateValueStyle(realizedEl, portfolioData.realizedPnL);
-
-                const unrealizedEl = document.getElementById('unrealized-pnl');
-                unrealizedEl.textContent = formatMoney(p.unrealizedPnL, true);
-                updateValueStyle(unrealizedEl, p.unrealizedPnL);
-
-                const dailyEl = document.getElementById('daily-pnl');
-                dailyEl.textContent = formatMoney(p.dailyPnL, true);
-                updateValueStyle(dailyEl, p.dailyPnL);
-
-                document.getElementById('total-trades').textContent = portfolioData.recentTrades?.length || 0;
-                document.getElementById('connection-status').textContent = (portfolioData.environment || 'PAPER').toUpperCase();
-
-                updatePositions(portfolioData.positions || []);
-                updateTrades(portfolioData.recentTrades || []);
-
-                const predStatusEl = document.getElementById('predictions-status');
-                if (predStatusEl && predictionStatus) {
-                    const statusText = (predictionStatus.status || 'UNKNOWN').toUpperCase();
-                    predStatusEl.textContent = statusText;
-                    predStatusEl.classList.remove('cyan', 'green', 'red');
-                    if (statusText === 'RUNNING') predStatusEl.classList.add('green');
-                    else if (statusText === 'ERROR') predStatusEl.classList.add('red');
-                    else predStatusEl.classList.add('cyan');
-                }
-
-                const predOpenEl = document.getElementById('predictions-open');
-                if (predOpenEl) {
-                    predOpenEl.textContent = predictionStatus?.openPositions ?? 0;
-                }
-
-            } catch (error) {
-                console.error('FETCH_FAILURE:', error);
-            }
-        }
-
-        function updatePositions(positions) {
-            const tbody = document.getElementById('positions-tbody');
-            if (!positions.length) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #555; padding: 40px;">// NO_ACTIVE_POSITIONS_DETECTED</td></tr>';
-                return;
-            }
-            tbody.innerHTML = positions.map(p => `
+    <section class="grid">
+      <div class="column">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Active Exposure</h2>
+            <span class="meta">Live Positions</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                    <td><span style="color:var(--terminal-cyan)">${p.symbol}</span></td>
-                    <td style="color:${p.side === 'LONG' ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${p.side}</td>
-                    <td>${parseFloat(p.size).toFixed(4)}</td>
-                    <td>$${parseFloat(p.entryPrice).toLocaleString()}</td>
-                    <td style="color:${p.unrealizedPnL >= 0 ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${formatMoney(p.unrealizedPnL, true)}</td>
+                  <th>Asset</th>
+                  <th>Side</th>
+                  <th>Size</th>
+                  <th>Entry</th>
+                  <th>Mark</th>
+                  <th>PnL</th>
                 </tr>
-            `).join('');
-        }
+              </thead>
+              <tbody id="positions-body">
+                <tr><td colspan="6" class="empty">No Active Positions</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
 
-        function updateTrades(trades) {
-            const tbody = document.getElementById('trades-tbody');
-            if (!trades.length) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #555; padding: 20px;">// HISTORY_EMPTY</td></tr>';
-                return;
-            }
-            tbody.innerHTML = trades.slice().reverse().slice(0, 10).map(t => `
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Execution Tape</h2>
+            <span class="meta">Latest Trades</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                    <td class="timestamp">${new Date(t.timestamp).toLocaleTimeString()}</td>
-                    <td style="color:${t.side === 'BUY' ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${t.side}</td>
-                    <td>${t.symbol}</td>
-                    <td>${parseFloat(t.size).toFixed(4)}</td>
-                    <td style="color:${(t.pnl || 0) >= 0 ? 'var(--terminal-green)' : 'var(--terminal-red)'}">${formatMoney(t.pnl || 0, true)}</td>
+                  <th>Time</th>
+                  <th>Asset</th>
+                  <th>Side</th>
+                  <th>Size</th>
+                  <th>Status</th>
+                  <th>PnL</th>
                 </tr>
-            `).join('');
-        }
+              </thead>
+              <tbody id="trades-body">
+                <tr><td colspan="6" class="empty">No Recent Trades</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
 
-        function addActivityLog(message, type = 'info') {
-            const log = document.getElementById('activity-log');
-            const line = document.createElement('div');
-            line.className = 'console-line';
-            line.innerHTML = `
-                <span class="timestamp">[${new Date().toLocaleTimeString()}]</span>
-                <span class="log-tag tag-${type}">[${type.toUpperCase()}]</span>
-                <span class="log-msg">${message}</span>
-            `;
-            log.insertBefore(line, log.firstChild);
-            if (log.children.length > 50) log.removeChild(log.lastChild);
-        }
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Terminal Log</h2>
+            <span class="meta">Event Stream</span>
+          </div>
+          <div class="log-box" id="log-box"></div>
+        </article>
+      </div>
 
-        function updateClock() {
-            const now = new Date();
-            document.getElementById('system-time').textContent = now.toLocaleTimeString('en-GB');
-        }
+      <div class="column">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>News Clusters</h2>
+            <span class="meta">Top Heat Topics</span>
+          </div>
+          <ul class="list" id="news-list">
+            <li class="empty">Waiting for clusters...</li>
+          </ul>
+        </article>
 
-        document.addEventListener('DOMContentLoaded', () => {
-            initSocket();
-            fetchData();
-            setInterval(fetchData, 5000);
-            setInterval(updateClock, 1000);
-            updateClock();
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Prediction Markets</h2>
+            <span class="meta">High Volume Markets</span>
+          </div>
+          <ul class="list" id="prediction-list">
+            <li class="empty">Waiting for markets...</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Market Heat + Funding</h2>
+            <span class="meta">Cross-Market Signal</span>
+          </div>
+          <ul class="list" id="heat-list">
+            <li class="empty">Waiting for heatmap/funding data...</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="column">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>System Health Matrix</h2>
+            <span class="meta">Component Probes</span>
+          </div>
+          <div class="health-grid" id="component-health">
+            <div class="health-item"><span class="name">Loading</span><span class="state warn">...</span></div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Circuit Breakers</h2>
+            <span class="meta">Runtime Guards</span>
+          </div>
+          <div class="health-grid" id="breaker-health">
+            <div class="health-item"><span class="name">Loading</span><span class="state warn">...</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const STEP_ORDER = ["MARKET", "PATTERN", "STRATEGY", "BACKTEST", "SELECT", "RISK", "EXECUTE", "LEARN"];
+    const STEP_MAP = {
+      MARKET_DATA: "MARKET",
+      MARKET_DATA_READY: "MARKET",
+      PATTERN_RECALL: "PATTERN",
+      PATTERN_RECALL_COMPLETE: "PATTERN",
+      STRATEGY_IDEATION: "STRATEGY",
+      STRATEGY_IDEATION_COMPLETE: "STRATEGY",
+      BACKTEST: "BACKTEST",
+      BACKTEST_COMPLETE: "BACKTEST",
+      STRATEGY_SELECTION: "SELECT",
+      STRATEGY_SELECTED: "SELECT",
+      RISK_GATE: "RISK",
+      RISK_GATE_APPROVED: "RISK",
+      EXECUTION: "EXECUTE",
+      EXECUTION_COMPLETE: "EXECUTE",
+      LEARNING: "LEARN",
+      LEARNING_COMPLETE: "LEARN",
+    };
+
+    let socket = null;
+
+    function byId(id) {
+      return document.getElementById(id);
+    }
+
+    function fmtMoney(value, signed = false) {
+      const n = Number(value || 0);
+      const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (!signed) return `${n < 0 ? "-" : ""}$${abs}`;
+      if (n > 0) return `+$${abs}`;
+      if (n < 0) return `-$${abs}`;
+      return `$${abs}`;
+    }
+
+    function classForNumeric(value) {
+      const n = Number(value || 0);
+      if (n > 0) return "good";
+      if (n < 0) return "bad";
+      return "warn";
+    }
+
+    function setMetric(id, text, cls) {
+      const el = byId(id);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.remove("good", "bad", "warn");
+      if (cls) el.classList.add(cls);
+    }
+
+    function logEvent(message, kind = "info") {
+      const box = byId("log-box");
+      if (!box) return;
+      const line = document.createElement("div");
+      const stamp = new Date().toLocaleTimeString("en-GB");
+      line.className = "log-line";
+      line.innerHTML = `
+        <span class="log-time">${stamp}</span>
+        <span class="log-kind kind-${kind}">${kind}</span>
+        <span class="log-text">${message}</span>
+      `;
+      box.prepend(line);
+      while (box.children.length > 120) {
+        box.removeChild(box.lastChild);
+      }
+    }
+
+    function updateClock() {
+      const t = new Date().toLocaleTimeString("en-GB");
+      byId("chip-time").textContent = t;
+    }
+
+    function updatePipeline(stepName) {
+      const normalized = STEP_MAP[stepName] || null;
+      const stages = Array.from(document.querySelectorAll(".stage"));
+      stages.forEach((stage) => stage.classList.remove("active", "done"));
+
+      if (!normalized) return;
+      const targetIdx = STEP_ORDER.indexOf(normalized);
+      if (targetIdx < 0) return;
+
+      stages.forEach((stage, idx) => {
+        if (idx < targetIdx) stage.classList.add("done");
+        if (idx === targetIdx) stage.classList.add("active");
+      });
+    }
+
+    function renderPositions(positions) {
+      const body = byId("positions-body");
+      if (!Array.isArray(positions) || positions.length === 0) {
+        body.innerHTML = `<tr><td colspan="6" class="empty">No Active Positions</td></tr>`;
+        return;
+      }
+      body.innerHTML = positions.slice(0, 16).map((p) => `
+        <tr>
+          <td>${p.symbol || "-"}</td>
+          <td class="${(p.side || "").toUpperCase() === "LONG" ? "good" : "bad"}">${p.side || "-"}</td>
+          <td>${Number(p.size || 0).toFixed(4)}</td>
+          <td>${fmtMoney(p.entryPrice)}</td>
+          <td>${fmtMoney(p.markPrice)}</td>
+          <td class="${classForNumeric(p.unrealizedPnL)}">${fmtMoney(p.unrealizedPnL, true)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderTrades(trades) {
+      const body = byId("trades-body");
+      if (!Array.isArray(trades) || trades.length === 0) {
+        body.innerHTML = `<tr><td colspan="6" class="empty">No Recent Trades</td></tr>`;
+        return;
+      }
+      body.innerHTML = trades.slice().reverse().slice(0, 20).map((t) => `
+        <tr>
+          <td>${new Date(t.timestamp || Date.now()).toLocaleTimeString("en-GB")}</td>
+          <td>${t.symbol || "-"}</td>
+          <td class="${(t.side || "").toUpperCase() === "BUY" ? "good" : "bad"}">${t.side || "-"}</td>
+          <td>${Number(t.size || 0).toFixed(4)}</td>
+          <td><span class="tag">${t.status || "UNKNOWN"}</span></td>
+          <td class="${classForNumeric(t.pnl)}">${fmtMoney(t.pnl || 0, true)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderNews(clusters) {
+      const list = byId("news-list");
+      if (!Array.isArray(clusters) || clusters.length === 0) {
+        list.innerHTML = `<li class="empty">No hot clusters yet</li>`;
+        return;
+      }
+      list.innerHTML = clusters.slice(0, 12).map((c) => `
+        <li>
+          <div class="top">
+            <strong>${(c.topic || "Untitled").slice(0, 72)}</strong>
+            <span class="tag">${c.category || "GEN"}</span>
+          </div>
+          <div class="sub">Heat ${Number(c.heatScore || 0).toFixed(1)} | Articles ${c.articleCount || 0} | Trend ${(c.trendDirection || "NEUTRAL")}</div>
+        </li>
+      `).join("");
+    }
+
+    function renderPredictionMarkets(markets) {
+      const list = byId("prediction-list");
+      if (!Array.isArray(markets) || markets.length === 0) {
+        list.innerHTML = `<li class="empty">No prediction markets loaded</li>`;
+        return;
+      }
+      list.innerHTML = markets.slice(0, 10).map((m) => `
+        <li>
+          <div class="top">
+            <strong>${(m.title || m.question || "Market").slice(0, 70)}</strong>
+            <span class="tag">${m.source || "PM"}</span>
+          </div>
+          <div class="sub">
+            YES ${Number(m.yesPrice || 0).toFixed(3)} | NO ${Number(m.noPrice || 0).toFixed(3)} |
+            Vol ${fmtMoney(m.volume24hr || m.volume || 0)}
+          </div>
+        </li>
+      `).join("");
+    }
+
+    function renderHeatAndFunding(heatTop, fundingOpps) {
+      const list = byId("heat-list");
+      const rows = [];
+
+      if (Array.isArray(heatTop)) {
+        heatTop.slice(0, 6).forEach((h) => {
+          rows.push({
+            title: `${h.symbol || h.marketSymbol || h.marketName || "Market"} heat`,
+            meta: `Mentions ${h.mentionCount || 0} | Heat ${Number(h.heatScore || 0).toFixed(2)} | Trend ${h.trendDirection || "NEUTRAL"}`,
+            tag: "HEAT",
+          });
         });
-    </script>
-    <!-- Conversational Agent Widget -->
-    <script src="/agent-widget.js"></script>
+      }
+
+      if (Array.isArray(fundingOpps)) {
+        fundingOpps.slice(0, 6).forEach((f) => {
+          rows.push({
+            title: `${f.symbol || "Pair"} funding spread`,
+            meta: `Long ${Number(f.longRate || 0).toFixed(6)} | Short ${Number(f.shortRate || 0).toFixed(6)} | Edge ${Number(f.edge || 0).toFixed(6)}`,
+            tag: "FUND",
+          });
+        });
+      }
+
+      if (rows.length === 0) {
+        list.innerHTML = `<li class="empty">No heatmap/funding opportunities right now</li>`;
+        return;
+      }
+
+      list.innerHTML = rows.map((r) => `
+        <li>
+          <div class="top">
+            <strong>${r.title}</strong>
+            <span class="tag">${r.tag}</span>
+          </div>
+          <div class="sub">${r.meta}</div>
+        </li>
+      `).join("");
+    }
+
+    function renderHealthComponents(health) {
+      const compBox = byId("component-health");
+      const breakerBox = byId("breaker-health");
+      const components = health?.summary?.components || [];
+      const breakers = health?.summary?.breakers || [];
+
+      if (!Array.isArray(components) || components.length === 0) {
+        compBox.innerHTML = `<div class="health-item"><span class="name">Unavailable</span><span class="state warn">N/A</span></div>`;
+      } else {
+        compBox.innerHTML = components.map((c) => {
+          const state = String(c.status || "UNKNOWN").toUpperCase();
+          const cls = state === "HEALTHY" ? "good" : (state === "DEGRADED" ? "warn" : "bad");
+          return `<div class="health-item"><span class="name">${c.component}</span><span class="state ${cls}">${state}</span></div>`;
+        }).join("");
+      }
+
+      if (!Array.isArray(breakers) || breakers.length === 0) {
+        breakerBox.innerHTML = `<div class="health-item"><span class="name">Unavailable</span><span class="state warn">N/A</span></div>`;
+      } else {
+        breakerBox.innerHTML = breakers.map((b) => {
+          const open = !!b.isOpen;
+          const state = open ? "OPEN" : "CLOSED";
+          const cls = open ? "bad" : "good";
+          return `<div class="health-item"><span class="name">${b.name}</span><span class="state ${cls}">${state}</span></div>`;
+        }).join("");
+      }
+    }
+
+    async function refreshDashboard() {
+      try {
+        const [portfolioRes, statusRes, predStatusRes, predMarketsRes, newsRes, heatRes, fundingRes, healthRes] = await Promise.all([
+          fetch("/api/portfolio"),
+          fetch("/api/status"),
+          fetch("/api/predictions/status"),
+          fetch("/api/predictions/markets"),
+          fetch("/api/news/clusters?limit=12"),
+          fetch("/api/heatmap/top?hours=24&limit=8"),
+          fetch("/api/funding/opportunities?limit=8"),
+          fetch("/api/health"),
+        ]);
+
+        const portfolio = await portfolioRes.json();
+        const status = await statusRes.json();
+        const prediction = await predStatusRes.json();
+        const predictionMarkets = await predMarketsRes.json();
+        const clusters = await newsRes.json();
+        const heat = await heatRes.json();
+        const funding = await fundingRes.json();
+        const health = await healthRes.json();
+
+        const p = portfolio?.portfolio || {};
+        setMetric("m-nav", fmtMoney(p.totalValue), "good");
+        setMetric("m-avail", fmtMoney(p.availableBalance), "warn");
+        setMetric("m-realized", fmtMoney(portfolio.realizedPnL || 0, true), classForNumeric(portfolio.realizedPnL));
+        setMetric("m-unrealized", fmtMoney(p.unrealizedPnL || 0, true), classForNumeric(p.unrealizedPnL));
+        setMetric("m-daily", fmtMoney(p.dailyPnL || 0, true), classForNumeric(p.dailyPnL));
+        setMetric("m-trade-count", String((portfolio.recentTrades || []).length), "warn");
+
+        const marketList = Array.isArray(predictionMarkets) ? predictionMarkets : [];
+        setMetric("m-pred-count", String(marketList.length), "warn");
+        setMetric("m-news-count", String(Array.isArray(clusters) ? clusters.length : 0), "warn");
+
+        byId("chip-mode").textContent = String(portfolio.environment || "PAPER").toUpperCase();
+        byId("pred-status").textContent = String(prediction.status || "UNKNOWN").toUpperCase();
+        byId("pred-open").textContent = String(prediction.openPositions || 0);
+        byId("cycle-step").textContent = status?.cycles?.currentStep || "IDLE";
+        byId("bus-status").textContent = String(status.messageBus || "UNKNOWN").toUpperCase();
+
+        const overall = String(health?.status || health?.summary?.overall || "UNKNOWN").toUpperCase();
+        byId("health-overall").textContent = overall;
+        byId("health-overall").className = `value ${overall === "HEALTHY" ? "good" : (overall === "DEGRADED" ? "warn" : "bad")}`;
+
+        renderPositions(portfolio.positions || []);
+        renderTrades(portfolio.recentTrades || []);
+        renderNews(Array.isArray(clusters) ? clusters : []);
+        renderPredictionMarkets(marketList);
+        renderHeatAndFunding(heat?.markets || heat?.data || [], funding?.opportunities || []);
+        renderHealthComponents(health);
+
+        updatePipeline(status?.cycles?.currentStep || prediction?.currentStep || "IDLE");
+      } catch (error) {
+        logEvent(`refresh failed: ${error.message || error}`, "bad");
+      }
+    }
+
+    function initSocket() {
+      socket = io();
+
+      socket.on("connect", () => {
+        byId("chip-conn").textContent = "ONLINE";
+        byId("chip-conn").parentElement.classList.remove("offline");
+        byId("chip-conn").parentElement.classList.add("online");
+        logEvent("socket connected", "good");
+      });
+
+      socket.on("disconnect", () => {
+        byId("chip-conn").textContent = "OFFLINE";
+        byId("chip-conn").parentElement.classList.remove("online");
+        byId("chip-conn").parentElement.classList.add("offline");
+        logEvent("socket disconnected", "bad");
+      });
+
+      socket.on("cycle_update", (data) => {
+        if (data?.step) updatePipeline(data.step);
+        if (data?.step) logEvent(`cycle step: ${data.step}`, "info");
+      });
+
+      socket.on("cycle_start", (data) => {
+        const sym = data?.symbol ? ` ${data.symbol}` : "";
+        logEvent(`cycle start${sym}`, "info");
+      });
+
+      socket.on("cycle_complete", (data) => {
+        logEvent(`cycle complete (trade=${data?.tradeExecuted ? "yes" : "no"})`, data?.success ? "good" : "warn");
+        refreshDashboard();
+      });
+
+      socket.on("cycle_error", (data) => {
+        logEvent(`cycle error: ${data?.error || "unknown"}`, "bad");
+      });
+
+      socket.on("execution_filled", (data) => {
+        logEvent(`execution filled ${data?.symbol || ""} ${data?.side || ""}`.trim(), "good");
+        refreshDashboard();
+      });
+
+      socket.on("execution_failed", (data) => {
+        logEvent(`execution failed ${data?.symbol || ""}`.trim(), "bad");
+      });
+
+      socket.on("news_clustered", () => {
+        logEvent("news clusters updated", "info");
+        refreshDashboard();
+      });
+
+      socket.on("prediction_generated", () => {
+        logEvent("news prediction generated", "info");
+      });
+
+      socket.on("anomaly_detected", () => {
+        logEvent("news anomaly detected", "warn");
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      initSocket();
+      updateClock();
+      setInterval(updateClock, 1000);
+
+      logEvent("terminal booting", "info");
+      await refreshDashboard();
+      setInterval(refreshDashboard, 6000);
+    });
+  </script>
 </body>
-
-
 </html>

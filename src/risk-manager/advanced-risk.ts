@@ -57,9 +57,9 @@ class AdvancedRiskEngine {
       maxLeverage: 40,  // Increased from 5x to 40x for aggressive trading
       maxCorrelation: 0.8,
       maxDailyLoss: 0.10,  // Increased from 5% to 10%
-      stopLossThreshold: 0.04,  // Increased from 2% to 4%
-      takeProfitThreshold: 0.08,  // Increased from 4% to 8%
-      maxPositionSize: 0.25  // Increased from 10% to 25%
+      stopLossThreshold: 0.022,  // tighter default stop (~2.2%)
+      takeProfitThreshold: 0.075,  // wider default target (~7.5%) for stronger R:R
+      maxPositionSize: 0.18  // reduce concentration when edge is uncertain
     };
 
     logger.info('Advanced Risk Engine initialized');
@@ -195,10 +195,16 @@ class AdvancedRiskEngine {
       const lossProbability = losses.length / trades.length;
 
       const averageWin = wins.length > 0
-        ? wins.reduce((sum, t) => sum + t.pnl, 0) / wins.length / (wins[0].price * wins[0].size)
+        ? wins.reduce((sum, t) => {
+          const notional = Math.max(Math.abs((t.price || 0) * (t.size || 0)), Number.EPSILON);
+          return sum + ((t.pnl || 0) / notional);
+        }, 0) / wins.length
         : 0;
       const averageLoss = losses.length > 0
-        ? Math.abs(losses.reduce((sum, t) => sum + t.pnl, 0)) / losses.length / (losses[0].price * losses[0].size)
+        ? Math.abs(losses.reduce((sum, t) => {
+          const notional = Math.max(Math.abs((t.price || 0) * (t.size || 0)), Number.EPSILON);
+          return sum + ((t.pnl || 0) / notional);
+        }, 0) / losses.length)
         : 0.01;
 
       const expectedReturn = (winProbability * averageWin) - (lossProbability * averageLoss);
@@ -307,10 +313,14 @@ Format as JSON with fields: type, level (0-1), message, recommendations[]`;
 
   getRecommendedPositionSize(riskMetrics: RiskMetrics, availableCapital: number): number {
     const kellyFraction = riskMetrics.KellyCriterion.f;
-    const riskAdjusted = kellyFraction * (1 - riskMetrics.overallRisk);
+    const payoffRatio = riskMetrics.KellyCriterion.averageLoss > 0
+      ? riskMetrics.KellyCriterion.averageWin / riskMetrics.KellyCriterion.averageLoss
+      : 0;
+    const payoffAdjustment = Math.max(0.25, Math.min(1, payoffRatio / 2));
+    const riskAdjusted = kellyFraction * (1 - riskMetrics.overallRisk) * payoffAdjustment;
     const maxAllowed = availableCapital * this.riskThresholds.maxPositionSize;
 
-    return Math.min(maxAllowed, availableCapital * riskAdjusted);
+    return Math.max(0, Math.min(maxAllowed, availableCapital * riskAdjusted));
   }
 
   getStopLossLevel(entryPrice: number, isLong: boolean): number {

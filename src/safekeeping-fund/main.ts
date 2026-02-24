@@ -6,6 +6,7 @@ import { SafekeepingFundOrchestrator, createSafekeepingFundOrchestrator } from '
 import { MultiChainWalletManager } from './dex/multi-chain-wallet-manager';
 import { DEFAULT_CYCLE_INTERVAL } from './constants';
 import type { MultiChainWalletConfig } from './types';
+import { bootstrapSafekeepingWalletConfig } from './wallet-bootstrap';
 import messageBus from '../shared/message-bus';
 
 /**
@@ -233,30 +234,34 @@ export async function main(): Promise<void> {
   logger.info('[SafekeepingAgent] Safekeeping Fund Agent Starting');
   logger.info('[SafekeepingAgent] ==================================================');
 
-  // Load configuration from environment or config file
-  const config: MultiChainWalletConfig = {
-    ethereum: process.env.ETH_PRIVATE_KEY ? {
-      privateKey: process.env.ETH_PRIVATE_KEY as `0x${string}`,
-      rpcUrl: process.env.ETH_RPC_URL || 'https://eth.llamarpc.com',
-      chainId: 1, // Ethereum mainnet
-    } : undefined,
-    bsc: process.env.BSC_PRIVATE_KEY ? {
-      privateKey: process.env.BSC_PRIVATE_KEY as `0x${string}`,
-      rpcUrl: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org',
-      chainId: 56, // BSC mainnet
-    } : undefined,
-    solana: process.env.SOLANA_SECRET_KEY ? {
-      secretKey: Uint8Array.from(JSON.parse(process.env.SOLANA_SECRET_KEY)),
-      rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-    } : undefined,
-  };
+  // Load configuration from env/local wallet store, auto-generating wallets when missing.
+  const walletBootstrap = bootstrapSafekeepingWalletConfig();
+  const config: MultiChainWalletConfig = walletBootstrap.config;
 
   // Check if at least one chain is configured
   const hasConfig = config.ethereum || config.bsc || config.solana;
 
   if (!hasConfig) {
-    logger.error('[SafekeepingAgent] No chain configured. Please set ETH_PRIVATE_KEY, BSC_PRIVATE_KEY, or SOLANA_SECRET_KEY environment variables.');
+    logger.error(
+      '[SafekeepingAgent] No chain configured. ' +
+      'Set ETH_PRIVATE_KEY/BSC_PRIVATE_KEY/SOLANA_SECRET_KEY or enable SAFEKEEPING_AUTO_CREATE_WALLETS=true.'
+    );
     process.exit(1);
+  }
+
+  logger.info(`[SafekeepingAgent] Wallet store path: ${walletBootstrap.walletStorePath}`);
+  for (const chain of Object.keys(walletBootstrap.addresses) as Array<'ethereum' | 'bsc' | 'solana'>) {
+    const address = walletBootstrap.addresses[chain];
+    const source = walletBootstrap.chainSources[chain] || 'missing';
+    logger.info(`[SafekeepingAgent] ${chain} funding address (${source}): ${address}`);
+  }
+
+  if (walletBootstrap.generatedChains.length > 0) {
+    logger.warn(
+      '[SafekeepingAgent] Generated new wallet(s) for: ' +
+      `${walletBootstrap.generatedChains.join(', ')}. ` +
+      'Fund these addresses before enabling active liquidity operations.'
+    );
   }
 
   // Create and start agent

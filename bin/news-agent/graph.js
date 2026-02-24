@@ -112,7 +112,8 @@ class NewsOrchestrator {
             state = { ...state, ...await this.safeExecute('store', () => (0, nodes_1.storeNode)(state), true) };
             // Step 8: Cluster related articles
             // Check if enhanced clustering is enabled
-            const useEnhancedClustering = process.env.ENHANCED_CLUSTERING_ENABLED === 'true';
+            const useEnhancedClustering = process.env.ENHANCED_CLUSTERING_ENABLED === 'true' ||
+                process.env.USE_ENHANCED_CLUSTERING === 'true';
             if (useEnhancedClustering) {
                 logger_1.default.info('[NewsOrchestrator] Using ENHANCED clustering mode');
                 try {

@@ -24,7 +24,13 @@ async function ideaSelectorNode(state) {
         const winRate = backtest?.winRate ?? 50;
         const avgReturn = backtest?.averageReturn ?? 0;
         const sharpe = backtest?.sharpeRatio ?? 0;
-        const score = (winRate * 0.6) + (avgReturn * 0.3) + (sharpe * 4 * 0.1);
+        const edgePct = Math.abs(idea.edge || 0) * 100;
+        const heatScore = idea.heatScore ?? state.marketIntel[idea.marketId]?.avgClusterHeat ?? 0;
+        const score = (winRate * 0.45)
+            + (avgReturn * 0.2)
+            + (sharpe * 4 * 0.1)
+            + (edgePct * 0.15)
+            + (heatScore * 0.1);
         return { idea, backtest, score };
     });
     scored.sort((a, b) => b.score - a.score);
@@ -47,7 +53,7 @@ async function ideaSelectorNode(state) {
         thoughts: [
             ...state.thoughts,
             `Top idea: ${best.idea.marketTitle} (${best.idea.outcome})`,
-            `Score ${best.score.toFixed(2)} | WinRate ${winRate.toFixed(1)}% | AvgRet ${avgReturn.toFixed(2)}%`,
+            `Score ${best.score.toFixed(2)} | WinRate ${winRate.toFixed(1)}% | AvgRet ${avgReturn.toFixed(2)}% | Heat ${(best.idea.heatScore ?? 0).toFixed(1)}`,
             eligible ? 'Idea approved for risk check' : 'Idea held due to backtest thresholds',
         ],
     };

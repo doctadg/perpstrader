@@ -399,7 +399,7 @@ class MessageBus extends EventEmitter {
 }
 
 // Singleton instance
-const messageBus = new MessageBus();
+export const messageBus = new MessageBus();
 
 // Auto-connect on import in production
 if (process.env.NODE_ENV === 'production') {

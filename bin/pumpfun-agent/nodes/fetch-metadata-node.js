@@ -74,25 +74,35 @@ async function fetchMetadataNode(state) {
         const results = await Promise.allSettled(batch.map(async (token) => {
             try {
                 const metadata = await solanaRPC.getTokenMetadata(token.mintAddress);
+                const tokenExtras = token;
                 return {
                     token,
                     metadata: metadata || {
                         name: token.name,
                         symbol: token.symbol,
-                        description: '',
-                        image: '',
+                        description: tokenExtras.description || '',
+                        image: tokenExtras.image || '',
+                        website: tokenExtras.website || undefined,
+                        twitter: tokenExtras.twitter || undefined,
+                        telegram: tokenExtras.telegram || undefined,
+                        discord: tokenExtras.discord || undefined,
                     },
                 };
             }
             catch (error) {
                 logger_1.default.debug(`[FetchMetadataNode] Failed to fetch metadata for ${token.symbol}: ${error}`);
+                const tokenExtras = token;
                 return {
                     token,
                     metadata: {
                         name: token.name,
                         symbol: token.symbol,
-                        description: '',
-                        image: '',
+                        description: tokenExtras.description || '',
+                        image: tokenExtras.image || '',
+                        website: tokenExtras.website || undefined,
+                        twitter: tokenExtras.twitter || undefined,
+                        telegram: tokenExtras.telegram || undefined,
+                        discord: tokenExtras.discord || undefined,
                     },
                 };
             }

@@ -45,24 +45,34 @@ export async function fetchMetadataNode(state: PumpFunAgentState): Promise<Parti
       batch.map(async (token) => {
         try {
           const metadata = await solanaRPC.getTokenMetadata(token.mintAddress);
+          const tokenExtras = token as any;
           return {
             token,
             metadata: metadata || {
               name: token.name,
               symbol: token.symbol,
-              description: '',
-              image: '',
+              description: tokenExtras.description || '',
+              image: tokenExtras.image || '',
+              website: tokenExtras.website || undefined,
+              twitter: tokenExtras.twitter || undefined,
+              telegram: tokenExtras.telegram || undefined,
+              discord: tokenExtras.discord || undefined,
             },
           };
         } catch (error) {
           logger.debug(`[FetchMetadataNode] Failed to fetch metadata for ${token.symbol}: ${error}`);
+          const tokenExtras = token as any;
           return {
             token,
             metadata: {
               name: token.name,
               symbol: token.symbol,
-              description: '',
-              image: '',
+              description: tokenExtras.description || '',
+              image: tokenExtras.image || '',
+              website: tokenExtras.website || undefined,
+              twitter: tokenExtras.twitter || undefined,
+              telegram: tokenExtras.telegram || undefined,
+              discord: tokenExtras.discord || undefined,
             },
           };
         }

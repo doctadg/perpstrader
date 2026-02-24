@@ -1,4 +1,4 @@
-import { PredictionMarket, PredictionIdea, PredictionBacktestResult, PredictionSignal, PredictionRiskAssessment, PredictionTrade, PredictionPortfolio, NewsItem } from '../shared/types';
+import { PredictionMarket, PredictionIdea, PredictionBacktestResult, PredictionSignal, PredictionRiskAssessment, PredictionTrade, PredictionPortfolio, NewsItem, PredictionMarketIntel } from '../shared/types';
 export interface PredictionAgentState {
     cycleId: string;
     cycleStartTime: Date;
@@ -6,6 +6,7 @@ export interface PredictionAgentState {
     marketUniverse: PredictionMarket[];
     activeMarkets: PredictionMarket[];
     marketNews: Record<string, NewsItem[]>;
+    marketIntel: Record<string, PredictionMarketIntel>;
     ideas: PredictionIdea[];
     backtestResults: PredictionBacktestResult[];
     selectedIdea: PredictionIdea | null;

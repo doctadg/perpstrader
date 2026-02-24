@@ -1,23 +1,28 @@
 /**
  * Cross-Exchange Arbitrage Detector
- * Compares funding rates between Hyperliquid and Asterdex
- * Identifies arbitrage opportunities for cross-exchange funding rate arbitrage
+ * Compares funding rates pairwise across Hyperliquid, Asterdex, and Binance.
  */
+type ExchangeName = 'hyperliquid' | 'asterdex' | 'binance';
+type Urgency = 'high' | 'medium' | 'low';
 interface CrossExchangeOpportunity {
     id?: number;
     symbol: string;
-    hyperliquidFunding: number;
-    asterdexFunding: number;
+    exchangeA: ExchangeName;
+    exchangeB: ExchangeName;
+    exchangeAFunding: number;
+    exchangeBFunding: number;
     spread: number;
     spreadPercent: number;
     annualizedSpread: number;
-    recommendedAction: 'long_hl_short_aster' | 'short_hl_long_aster' | null;
+    recommendedAction: string | null;
+    longExchange: ExchangeName | null;
+    shortExchange: ExchangeName | null;
     estimatedYearlyYield: number;
-    urgency: 'high' | 'medium' | 'low';
+    urgency: Urgency;
     timestamp: number;
     isActive: boolean;
-    hyperliquidMarkPrice: number;
-    asterdexMarkPrice: number;
+    exchangeAMarkPrice: number;
+    exchangeBMarkPrice: number;
     priceDiffPercent: number;
     confidence: number;
 }
@@ -36,71 +41,31 @@ interface ArbitrageConfig {
     symbolsToTrack: string[];
 }
 declare class CrossExchangeArbitrage {
+    private readonly opportunitiesTable;
     private db;
     private dbPath;
     private initialized;
     private config;
+    private readonly exchangeOrder;
     constructor();
-    /**
-     * Initialize database connection
-     */
     initialize(): Promise<void>;
-    /**
-     * Create database tables
-     */
     private createTables;
-    /**
-     * Scan for cross-exchange arbitrage opportunities
-     */
     scanForOpportunities(): Promise<CrossExchangeOpportunity[]>;
-    /**
-     * Fetch Hyperliquid market data
-     */
     private fetchHyperliquidData;
-    /**
-     * Fetch Asterdex funding rates
-     */
     private fetchAsterdexData;
-    /**
-     * Calculate arbitrage opportunity for a symbol
-     */
+    private fetchBinanceData;
+    private mapAsterdexFundingRates;
+    private mapBinanceFundingRates;
+    private normalizeSymbol;
     private calculateOpportunity;
-    /**
-     * Calculate annualized spread
-     * Assumes funding paid 3 times per day (every 8 hours)
-     */
     private calculateAnnualizedSpread;
-    /**
-     * Store opportunities in database
-     */
     private storeOpportunities;
-    /**
-     * Deactivate old opportunities
-     */
     private deactivateOldOpportunities;
-    /**
-     * Update exchange status in database
-     */
     private updateExchangeStatus;
-    /**
-     * Get all active cross-exchange opportunities
-     */
     getActiveOpportunities(minSpread?: number): Promise<CrossExchangeOpportunity[]>;
-    /**
-     * Get opportunities by urgency level
-     */
-    getOpportunitiesByUrgency(urgency: 'high' | 'medium' | 'low'): Promise<CrossExchangeOpportunity[]>;
-    /**
-     * Get opportunity by symbol
-     */
+    getOpportunitiesByUrgency(urgency: Urgency): Promise<CrossExchangeOpportunity[]>;
     getOpportunityBySymbol(symbol: string): Promise<CrossExchangeOpportunity | null>;
-    /**
-     * Get connected exchanges info
-     */
     getExchangeInfo(): Promise<ExchangeInfo[]>;
-    /**
-     * Get arbitrage statistics
-     */
     getStatistics(): Promise<{
         totalOpportunities: number;
         highUrgencyCount: number;
@@ -113,20 +78,12 @@ declare class CrossExchangeArbitrage {
         avgSpread: number;
         connectedExchanges: number;
     }>;
-    /**
-     * Get historical opportunities for a symbol
-     */
     getHistoricalOpportunities(symbol: string, hours?: number): Promise<CrossExchangeOpportunity[]>;
-    /**
-     * Update configuration
-     */
     updateConfig(newConfig: Partial<ArbitrageConfig>): void;
-    /**
-     * Clean up old data
-     */
     cleanupOldData(days?: number): Promise<void>;
+    private mapRowToOpportunity;
 }
 export declare const crossExchangeArbitrage: CrossExchangeArbitrage;
 export default crossExchangeArbitrage;
-export type { CrossExchangeOpportunity, ExchangeInfo, ArbitrageConfig };
+export type { CrossExchangeOpportunity, ExchangeInfo, ArbitrageConfig, ExchangeName, };
 //# sourceMappingURL=cross-exchange-arbitrage.d.ts.map

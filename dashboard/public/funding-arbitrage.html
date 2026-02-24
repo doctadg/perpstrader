@@ -637,8 +637,9 @@
             background: rgba(0, 242, 255, 0.05);
         }
     </style>
+    <link rel="stylesheet" href="/css/terminal-unified.css">
 </head>
-<body>
+<body class="unified-theme page-funding-arbitrage">
     <div class="container">
         <!-- Top Status Bar -->
         <header class="top-bar">
@@ -788,6 +789,7 @@
                     <div class="exchange-status" id="exchange-status">
                         <span class="status-dot" id="hl-status-dot" style="color: var(--terminal-green);">● HL</span>
                         <span class="status-dot" id="aster-status-dot" style="color: #666;">● ASTERDEX</span>
+                        <span class="status-dot" id="binance-status-dot" style="color: #666;">● BINANCE</span>
                     </div>
                     <button class="filter-btn" onclick="loadCrossExchangeData()">🔄 Refresh</button>
                 </div>
@@ -797,8 +799,9 @@
                     <thead>
                         <tr>
                             <th>Coin</th>
-                            <th>Hyperliquid</th>
-                            <th>Asterdex</th>
+                            <th>Pair</th>
+                            <th>Exchange A</th>
+                            <th>Exchange B</th>
                             <th>Spread</th>
                             <th>Annualized</th>
                             <th>Action</th>
@@ -809,7 +812,7 @@
                     </thead>
                     <tbody id="cross-exchange-tbody">
                         <tr>
-                            <td colspan="9" class="loading">
+                            <td colspan="10" class="loading">
                                 <div class="loading-spinner"></div>
                                 <span>Loading cross-exchange data...</span>
                             </td>
@@ -1121,7 +1124,7 @@
             try {
                 // Load opportunities and exchange status in parallel
                 const [oppResponse, exchangeResponse] = await Promise.all([
-                    fetch('/api/funding/cross-exchange?minSpread=5'),
+                    fetch('/api/funding/cross-exchange?minSpread=5&refresh=true'),
                     fetch('/api/funding/exchanges')
                 ]);
 
@@ -1151,15 +1154,20 @@
         function updateExchangeStatus(exchanges) {
             const hlStatus = exchanges.find(e => e.name === 'hyperliquid');
             const asterStatus = exchanges.find(e => e.name === 'asterdex');
+            const binanceStatus = exchanges.find(e => e.name === 'binance');
 
             const hlDot = document.getElementById('hl-status-dot');
             const asterDot = document.getElementById('aster-status-dot');
+            const binanceDot = document.getElementById('binance-status-dot');
 
             if (hlDot) {
                 hlDot.style.color = hlStatus?.connected ? 'var(--terminal-green)' : '#666';
             }
             if (asterDot) {
                 asterDot.style.color = asterStatus?.connected ? 'var(--terminal-green)' : '#666';
+            }
+            if (binanceDot) {
+                binanceDot.style.color = binanceStatus?.connected ? 'var(--terminal-green)' : '#666';
             }
         }
 
@@ -1173,7 +1181,7 @@
             if (opportunities.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="9" class="empty-state">
+                        <td colspan="10" class="empty-state">
                             <div class="empty-state-icon">⚡</div>
                             <div>No cross-exchange opportunities found</div>
                             <div style="font-size: 0.85em; margin-top: 8px;">Try lowering the minimum spread threshold</div>
@@ -1184,24 +1192,25 @@
             }
 
             tbody.innerHTML = opportunities.map(opp => {
-                const hlRate = (opp.hyperliquidFunding * 100).toFixed(4);
-                const asterRate = (opp.asterdexFunding * 100).toFixed(4);
+                const rateA = (opp.exchangeAFunding * 100).toFixed(4);
+                const rateB = (opp.exchangeBFunding * 100).toFixed(4);
                 const spread = opp.spreadPercent.toFixed(3);
                 const annualized = opp.annualizedSpread.toFixed(2);
                 const yieldPct = opp.estimatedYearlyYield.toFixed(2);
+                const exchangeAName = formatExchangeName(opp.exchangeA);
+                const exchangeBName = formatExchangeName(opp.exchangeB);
+                const pairLabel = `${exchangeAName} / ${exchangeBName}`;
                 
                 // Determine colors
-                const hlColor = opp.hyperliquidFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
-                const asterColor = opp.asterdexFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
+                const rateAColor = opp.exchangeAFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
+                const rateBColor = opp.exchangeBFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
                 const spreadColor = Math.abs(opp.annualizedSpread) > 50 ? 'var(--terminal-red)' : 
                                    Math.abs(opp.annualizedSpread) > 25 ? 'var(--terminal-amber)' : 'var(--terminal-green)';
                 
                 // Action text
-                const actionText = opp.recommendedAction === 'long_hl_short_aster' 
-                    ? 'Long HL / Short Asterdex'
-                    : opp.recommendedAction === 'short_hl_long_aster'
-                    ? 'Short HL / Long Asterdex'
-                    : 'N/A';
+                const actionText = opp.longExchange && opp.shortExchange
+                    ? `Long ${formatExchangeName(opp.longExchange)} / Short ${formatExchangeName(opp.shortExchange)}`
+                    : (opp.recommendedAction || 'N/A');
 
                 // Confidence color
                 const confidenceColor = opp.confidence >= 80 ? 'var(--terminal-green)' : 
@@ -1218,13 +1227,18 @@
                             </div>
                         </td>
                         <td>
+                            <span style="font-size: 0.8em; color: #9aa4ad;">${pairLabel}</span>
+                        </td>
+                        <td>
                             <div class="rate-display">
-                                <span class="rate-value" style="color: ${hlColor}">${hlRate}%</span>
+                                <span style="display: block; font-size: 0.72em; color: #7f8b97; margin-bottom: 3px;">${exchangeAName}</span>
+                                <span class="rate-value" style="color: ${rateAColor}">${rateA}%</span>
                             </div>
                         </td>
                         <td>
                             <div class="rate-display">
-                                <span class="rate-value" style="color: ${asterColor}">${asterRate}%</span>
+                                <span style="display: block; font-size: 0.72em; color: #7f8b97; margin-bottom: 3px;">${exchangeBName}</span>
+                                <span class="rate-value" style="color: ${rateBColor}">${rateB}%</span>
                             </div>
                         </td>
                         <td>
@@ -1256,7 +1270,7 @@
                         <td>
                             <div class="action-btns">
                                 <button class="action-btn trade" 
-                                        onclick="executeCrossExchangeArbitrage('${opp.symbol}', '${opp.recommendedAction}')" 
+                                        onclick="executeCrossExchangeArbitrage('${opp.symbol}', '${opp.recommendedAction || ''}', '${opp.shortExchange || ''}', '${opp.longExchange || ''}', '${opp.exchangeA}', '${opp.exchangeB}')" 
                                         title="Execute Arbitrage"
                                         ${opp.confidence < 50 ? 'disabled style="opacity: 0.3;"' : ''}>
                                     ⚡
@@ -1278,7 +1292,7 @@
             const tbody = document.getElementById('cross-exchange-tbody');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" class="empty-state">
+                    <td colspan="10" class="empty-state">
                         <div class="empty-state-icon">⚠️</div>
                         <div>${message}</div>
                     </td>
@@ -1287,8 +1301,12 @@
         }
 
         // Execute cross-exchange arbitrage (placeholder)
-        async function executeCrossExchangeArbitrage(symbol, action) {
-            if (!confirm(`Execute ${action.replace(/_/g, ' ')} arbitrage for ${symbol}?`)) {
+        async function executeCrossExchangeArbitrage(symbol, action, shortExchange, longExchange, exchangeA, exchangeB) {
+            const actionLabel = shortExchange && longExchange
+                ? `short ${formatExchangeName(shortExchange)} / long ${formatExchangeName(longExchange)}`
+                : action.replace(/_/g, ' ');
+
+            if (!confirm(`Execute ${actionLabel} arbitrage for ${symbol}?`)) {
                 return;
             }
 
@@ -1301,7 +1319,13 @@
                 const response = await fetch('/api/execution/arbitrage', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol, action, exchanges: ['hyperliquid', 'asterdex'] })
+                    body: JSON.stringify({
+                        symbol,
+                        action,
+                        shortExchange,
+                        longExchange,
+                        exchanges: [exchangeA, exchangeB].filter(Boolean)
+                    })
                 });
 
                 if (response.ok) {
@@ -1314,6 +1338,16 @@
                 showNotification('Execution engine not available. This is a placeholder.', 'info');
                 console.log('Cross-exchange execution placeholder:', { symbol, action });
             }
+        }
+
+        function formatExchangeName(exchange) {
+            if (!exchange) return 'Unknown';
+            const mapping = {
+                hyperliquid: 'Hyperliquid',
+                asterdex: 'Asterdex',
+                binance: 'Binance'
+            };
+            return mapping[exchange] || exchange;
         }
 
         // View cross-exchange details

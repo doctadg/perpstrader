@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PERPS_TRADER // RESEARCH</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/js/universal-nav.js"></script>
+  <link rel="stylesheet" href="/css/mobile-responsive.css">
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap");
+
+    :root {
+      --bg-base: #0a0d0f;
+      --bg-panel: rgba(12, 18, 22, 0.92);
+      --bg-panel-alt: rgba(18, 24, 30, 0.92);
+      --line: rgba(83, 136, 166, 0.32);
+      --line-strong: rgba(92, 185, 201, 0.78);
+      --text: #e8f1f5;
+      --text-dim: #8fa0ac;
+      --good: #6df7b2;
+      --bad: #ff796e;
+      --warn: #ffc264;
+      --accent: #5cc9d7;
+      --accent-soft: rgba(92, 201, 215, 0.2);
+      --mono: "IBM Plex Mono", monospace;
+      --sans: "Space Grotesk", sans-serif;
+      --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 700px at 10% -10%, rgba(92, 201, 215, 0.16), transparent 50%),
+        radial-gradient(900px 560px at 105% 10%, rgba(255, 194, 100, 0.1), transparent 60%),
+        linear-gradient(170deg, #06080a 0%, #0a0d0f 100%);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      background-size: 42px 42px, 42px 42px;
+      opacity: 0.3;
+      z-index: 0;
+    }
+
+    .terminal {
+      position: relative;
+      z-index: 1;
+      width: min(1800px, 96vw);
+      margin: 18px auto 26px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      border-radius: 14px;
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, rgba(92, 201, 215, 0.08), transparent);
+    }
+
+    .panel-head h2 {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-weight: 700;
+      color: var(--accent);
+      font-family: var(--mono);
+    }
+
+    .panel-head .meta {
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
+
+    .hero {
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+      background:
+        radial-gradient(120% 160% at 0 0, rgba(92, 201, 215, 0.12), transparent 55%),
+        radial-gradient(100% 140% at 100% 100%, rgba(255, 194, 100, 0.08), transparent 60%);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: grid;
+      gap: 4px;
+    }
+
+    .brand-title {
+      font-family: var(--mono);
+      font-size: 1.18rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #dff9ff;
+    }
+
+    .brand-sub {
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.76rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status-strip {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      font-family: var(--mono);
+      color: var(--text-dim);
+      background: rgba(0, 0, 0, 0.25);
+      white-space: nowrap;
+    }
+
+    .chip strong {
+      color: var(--text);
+      margin-left: 6px;
+      font-weight: 700;
+    }
+
+    .chip.online strong {
+      color: var(--good);
+    }
+
+    .chip.offline strong {
+      color: var(--bad);
+    }
+
+    .link-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .terminal-link {
+      border: 1px solid var(--line);
+      padding: 7px 11px;
+      border-radius: 9px;
+      text-decoration: none;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(9, 15, 19, 0.9);
+      transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+    }
+
+    .terminal-link:hover {
+      border-color: var(--line-strong);
+      background: rgba(20, 32, 38, 0.95);
+      transform: translateY(-1px);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr;
+      gap: 14px;
+    }
+
+    .column {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .table-wrap {
+      max-height: 400px;
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--mono);
+      font-size: 0.76rem;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(140, 171, 186, 0.12);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.66rem;
+      position: sticky;
+      top: 0;
+      background: rgba(8, 14, 17, 0.95);
+      z-index: 1;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    th:hover {
+      color: var(--accent);
+    }
+
+    th.sortable::after {
+      content: ' ⇅';
+      opacity: 0.5;
+      font-size: 0.6rem;
+    }
+
+    th.sorted-asc::after {
+      content: ' ▲';
+      opacity: 1;
+      color: var(--accent);
+    }
+
+    th.sorted-desc::after {
+      content: ' ▼';
+      opacity: 1;
+      color: var(--accent);
+    }
+
+    tbody tr:hover {
+      background: rgba(92, 201, 215, 0.07);
+    }
+
+    .list {
+      list-style: none;
+      max-height: 400px;
+      overflow: auto;
+    }
+
+    .list li {
+      border-bottom: 1px solid rgba(140, 171, 186, 0.12);
+      padding: 10px 12px;
+      display: grid;
+      gap: 4px;
+      font-family: var(--mono);
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .list .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.74rem;
+    }
+
+    .list .sub {
+      color: var(--text-dim);
+      font-size: 0.68rem;
+      line-height: 1.35;
+    }
+
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      white-space: nowrap;
+      background: rgba(5, 9, 12, 0.7);
+    }
+
+    .tag.new {
+      background: rgba(109, 247, 178, 0.15);
+      border-color: rgba(109, 247, 178, 0.4);
+      color: var(--good);
+    }
+
+    .tag.running {
+      background: rgba(92, 201, 215, 0.15);
+      border-color: rgba(92, 201, 215, 0.4);
+      color: var(--accent);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .tag.completed {
+      background: rgba(109, 247, 178, 0.1);
+      border-color: rgba(109, 247, 178, 0.3);
+      color: var(--good);
+    }
+
+    .tag.failed {
+      background: rgba(255, 121, 110, 0.15);
+      border-color: rgba(255, 121, 110, 0.4);
+      color: var(--bad);
+    }
+
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .warn { color: var(--warn); }
+    .accent { color: var(--accent); }
+
+    /* Progress Bar */
+    .progress-container {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .progress-item {
+      display: grid;
+      gap: 6px;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+    }
+
+    .progress-bar-bg {
+      height: 8px;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--good));
+      border-radius: 4px;
+      transition: width 0.5s ease;
+      position: relative;
+    }
+
+    .progress-bar-fill::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      animation: shimmer 2s infinite;
+    }
+
+    @keyframes shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    /* Market Regime Indicator */
+    .regime-panel {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .regime-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .regime-title {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .regime-value {
+      font-family: var(--mono);
+      font-size: 1.2rem;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: 1px solid;
+    }
+
+    .regime-trending {
+      background: rgba(109, 247, 178, 0.1);
+      border-color: rgba(109, 247, 178, 0.4);
+      color: var(--good);
+    }
+
+    .regime-ranging {
+      background: rgba(255, 194, 100, 0.1);
+      border-color: rgba(255, 194, 100, 0.4);
+      color: var(--warn);
+    }
+
+    .regime-volatile {
+      background: rgba(255, 121, 110, 0.1);
+      border-color: rgba(255, 121, 110, 0.4);
+      color: var(--bad);
+    }
+
+    .regime-unknown {
+      background: rgba(143, 160, 172, 0.1);
+      border-color: rgba(143, 160, 172, 0.4);
+      color: var(--text-dim);
+    }
+
+    .regime-factors {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .regime-factor {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      padding: 3px 8px;
+      background: rgba(92, 201, 215, 0.1);
+      border: 1px solid rgba(92, 201, 215, 0.25);
+      border-radius: 4px;
+      color: var(--accent);
+    }
+
+    /* Chart Container */
+    .chart-container {
+      padding: 14px;
+      height: 300px;
+      position: relative;
+    }
+
+    .empty {
+      padding: 18px 12px;
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      text-align: center;
+    }
+
+    /* Evolution Timeline */
+    .evolution-timeline {
+      padding: 14px;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line) transparent;
+    }
+
+    .evolution-timeline::-webkit-scrollbar {
+      height: 4px;
+    }
+
+    .evolution-timeline::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .evolution-timeline::-webkit-scrollbar-thumb {
+      background: var(--line);
+      border-radius: 2px;
+    }
+
+    .gen-node {
+      min-width: 80px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      text-align: center;
+      font-family: var(--mono);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .gen-node:hover {
+      border-color: var(--line-strong);
+      background: rgba(92, 201, 215, 0.05);
+    }
+
+    .gen-node.active {
+      border-color: var(--accent);
+      background: rgba(92, 201, 215, 0.1);
+    }
+
+    .gen-number {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+
+    .gen-fitness {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--good);
+    }
+
+    .gen-count {
+      font-size: 0.6rem;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .gen-arrow {
+      display: flex;
+      align-items: center;
+      color: var(--line);
+      font-size: 1rem;
+    }
+
+    /* Idea Card */
+    .idea-card {
+      padding: 12px;
+      border-bottom: 1px solid rgba(140, 171, 186, 0.12);
+    }
+
+    .idea-card:last-child {
+      border-bottom: none;
+    }
+
+    .idea-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .idea-name {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .idea-meta {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .idea-desc {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    .idea-metrics {
+      display: flex;
+      gap: 12px;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+    }
+
+    .idea-metric {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .idea-metric-label {
+      color: var(--text-dim);
+    }
+
+    .idea-metric-value {
+      font-weight: 700;
+    }
+
+    @media (max-width: 1460px) {
+      .header {
+        grid-template-columns: 1fr;
+      }
+
+      .grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 980px) {
+      .terminal {
+        width: min(100vw, 100%);
+        margin: 8px auto 18px;
+        padding: 0 8px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body class="unified-theme page-research">
+  <main class="terminal">
+    <section class="header">
+      <article class="panel hero">
+        <div class="hero-top">
+          <div class="brand">
+            <div class="brand-title">Research Laboratory</div>
+            <div class="brand-sub">Strategy Evolution & Backtesting Engine</div>
+          </div>
+          <div class="status-strip">
+            <div class="chip online">Socket<strong id="chip-conn">BOOTING</strong></div>
+            <div class="chip">Mode<strong id="chip-mode">EVOLUTION</strong></div>
+            <div class="chip">Gen<strong id="chip-gen">--</strong></div>
+            <div class="chip">Time<strong id="chip-time">--:--:--</strong></div>
+          </div>
+        </div>
+        <div class="link-row">
+          <a class="terminal-link" href="/">Dashboard</a>
+          <a class="terminal-link" href="/trace">Trace Viewer</a>
+          <a class="terminal-link" href="/predictions">Prediction Node</a>
+          <a class="terminal-link" href="/news">News Desk</a>
+          <a class="terminal-link" href="/heatmap">Heatmap Matrix</a>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Market Regime</h2>
+          <span class="meta">Current Conditions</span>
+        </div>
+        <div class="regime-panel" id="regime-panel">
+          <div class="regime-header">
+            <span class="regime-title">Detected Regime</span>
+            <span class="regime-value regime-unknown" id="regime-value">ANALYZING...</span>
+          </div>
+          <div class="regime-factors" id="regime-factors">
+            <span class="regime-factor">Loading...</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <div class="column">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Strategy Ideas Feed</h2>
+            <span class="meta" id="ideas-count">0 Ideas</span>
+          </div>
+          <div class="list" id="ideas-list">
+            <li class="empty">Waiting for strategy ideas...</li>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Evolution Progress</h2>
+            <span class="meta">Generations Over Time</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="evolution-chart"></canvas>
+          </div>
+        </article>
+      </div>
+
+      <div class="column">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Backtest Queue</h2>
+            <span class="meta" id="backtest-count">0 Jobs</span>
+          </div>
+          <div class="progress-container" id="backtest-queue">
+            <div class="empty">No active backtests</div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Generation Timeline</h2>
+            <span class="meta">Click to Explore</span>
+          </div>
+          <div class="evolution-timeline" id="evolution-timeline">
+            <div class="empty">No evolution data</div>
+          </div>
+        </article>
+      </div>
+
+      <div class="column">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Strategy Leaderboard</h2>
+            <span class="meta">Top Performers</span>
+          </div>
+          <div class="table-wrap">
+            <table id="leaderboard-table">
+              <thead>
+                <tr>
+                  <th class="sortable" data-sort="rank">#</th>
+                  <th class="sortable" data-sort="name">Strategy</th>
+                  <th class="sortable" data-sort="sharpe">Sharpe</th>
+                  <th class="sortable" data-sort="winRate">Win %</th>
+                  <th class="sortable" data-sort="pnl">PnL</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body">
+                <tr><td colspan="5" class="empty">No strategies ranked yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/research-dashboard.js"></script>
+</body>
+</html>

@@ -1,7 +1,6 @@
 // Subscribe Node - Discover new pump.fun tokens via pump.fun API
 // Fetches recent tokens from pump.fun platform
 
-import configManager from '../../shared/config';
 import logger from '../../shared/logger';
 import { PumpFunAgentState } from '../../shared/types';
 import { addThought, updateStep } from '../state';
@@ -9,15 +8,20 @@ import axios from 'axios';
 
 // pump.fun API endpoints
 const PUMPFUN_API_BASE = 'https://api.pump.fun';
+const PUMPFUN_FRONTEND_API_BASE = 'https://frontend-api-v3.pump.fun';
+
+const PUMPFUN_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; PerpsTrader/1.0)',
+  'Accept': 'application/json',
+  'Origin': 'https://pump.fun',
+  'Referer': 'https://pump.fun/',
+};
 
 /**
  * Subscribe to pump.fun token creation events via HTTP API
  * Collects tokens over a time window
  */
 export async function subscribeNode(state: PumpFunAgentState): Promise<Partial<PumpFunAgentState>> {
-  const config = configManager.get();
-  const subscribeDurationMs = config.pumpfun?.subscribeDurationMs || 30000;
-
   logger.info(`[SubscribeNode] Fetching tokens from pump.fun API`);
 
   const discoveredTokens: any[] = [];
@@ -57,16 +61,29 @@ export async function subscribeNode(state: PumpFunAgentState): Promise<Partial<P
 async function fetchTokensFromPumpFun(limit: number = 20): Promise<any[]> {
   const tokens: any[] = [];
 
-  // Strategy 1: Try the new coins endpoint (most recent)
+  // Strategy 1: Use frontend-api-v3 endpoints used by pump.fun web app.
+  try {
+    const frontendTokens = await fetchFrontendCoins(limit);
+    tokens.push(...frontendTokens);
+    logger.info(`[SubscribeNode] Frontend API: ${frontendTokens.length} tokens`);
+  } catch (error) {
+    logger.debug('[SubscribeNode] Frontend API endpoints failed');
+  }
+
+  // Strategy 2: Try legacy api.pump.fun endpoints.
   try {
     const recentTokens = await fetchNewCoins(limit);
-    tokens.push(...recentTokens);
-    logger.info(`[SubscribeNode] New coins: ${recentTokens.length} tokens`);
+    for (const token of recentTokens) {
+      if (!tokens.find((t: any) => t.mintAddress === token.mintAddress)) {
+        tokens.push(token);
+      }
+    }
+    logger.info(`[SubscribeNode] Legacy new coins: ${recentTokens.length} tokens`);
   } catch (error) {
     logger.debug('[SubscribeNode] New coins endpoint failed');
   }
 
-  // Strategy 2: Try the coins with bonding curve endpoint (trending)
+  // Strategy 3: Try legacy trending endpoints.
   if (tokens.length < limit) {
     try {
       const trendingTokens = await fetchBondingCurveCoins(limit);
@@ -82,13 +99,86 @@ async function fetchTokensFromPumpFun(limit: number = 20): Promise<any[]> {
     }
   }
 
-  // Strategy 3: If still no tokens, add sample tokens for testing
+  // Strategy 4: Optional sample fallback for development.
   if (tokens.length === 0) {
-    logger.warn('[SubscribeNode] No tokens found from API, adding sample tokens for testing');
-    tokens.push(...getSampleTokens());
+    const allowSampleTokens = process.env.PUMPFUN_ALLOW_SAMPLE_TOKENS === 'true';
+    if (allowSampleTokens) {
+      logger.warn('[SubscribeNode] No tokens from API, adding sample tokens (PUMPFUN_ALLOW_SAMPLE_TOKENS=true)');
+      tokens.push(...getSampleTokens());
+    } else {
+      logger.warn('[SubscribeNode] No tokens from API and sample fallback disabled');
+    }
   }
 
   return tokens.slice(0, limit);
+}
+
+/**
+ * Fetch coins from current pump.fun frontend API (v3).
+ */
+async function fetchFrontendCoins(limit: number = 20): Promise<any[]> {
+  const endpoints = [
+    `${PUMPFUN_FRONTEND_API_BASE}/coins?offset=0&limit=${limit}`,
+    `${PUMPFUN_FRONTEND_API_BASE}/coins/recommended?limit=${limit}`,
+    `${PUMPFUN_FRONTEND_API_BASE}/coins/top-runners`,
+    `${PUMPFUN_FRONTEND_API_BASE}/coins/trending-search-v2?limit=${limit}`,
+  ];
+
+  const merged: any[] = [];
+  const seenMints = new Set<string>();
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await axios.get(endpoint, {
+        timeout: 10000,
+        headers: PUMPFUN_HEADERS,
+      });
+
+      const payload = normalizeFrontendPayload(response.data);
+      if (payload.length > 0) {
+        const parsed = payload
+          .map((item: any) => unwrapFrontendToken(item))
+          .slice(0, limit)
+          .map((item: any) => parsePumpFunToken(item))
+          .filter((t: any) => t !== null);
+
+        for (const token of parsed) {
+          if (!seenMints.has(token.mintAddress)) {
+            seenMints.add(token.mintAddress);
+            merged.push(token);
+          }
+        }
+      }
+    } catch (error: any) {
+      logger.debug(`[SubscribeNode] Frontend endpoint ${endpoint} failed: ${error.message}`);
+    }
+  }
+
+  return merged.slice(0, limit);
+}
+
+/**
+ * Normalize frontend API payload shape to a flat array.
+ */
+function normalizeFrontendPayload(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.coins)) return data.coins;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
+
+/**
+ * Unwrap alternate frontend endpoint item shapes (e.g. { coin: {...} }).
+ */
+function unwrapFrontendToken(item: any): any {
+  if (item?.coin && typeof item.coin === 'object') {
+    return {
+      ...item.coin,
+      description: item.description || item.coin.description || '',
+    };
+  }
+  return item;
 }
 
 /**
@@ -188,23 +278,28 @@ function parsePumpFunToken(data: any): any {
   if (!data) return null;
 
   // Extract mint address - could be in different fields
-  const mint = data.mint || data.address || data.mint_address || '';
+  const mint = data.mint || data.address || data.mint_address || data.token_address || '';
   if (!mint) return null;
+
+  const createdRaw = data.created_at || data.created_timestamp || data.createdAt;
+  const createdAt = typeof createdRaw === 'number'
+    ? new Date(createdRaw < 1e12 ? createdRaw * 1000 : createdRaw)
+    : (createdRaw ? new Date(createdRaw) : new Date());
 
   return {
     mintAddress: mint,
     name: data.name || data.token_name || 'Unknown',
     symbol: data.symbol || data.ticker || data.token_symbol || 'UNKNOWN',
     metadataUri: data.metadata_uri || data.uri || data.metadata || '',
-    bondingCurveKey: data.bonding_curve_key || data.bondingCurve || '',
-    createdAt: data.created_at ? new Date(data.created_at) : new Date(),
+    bondingCurveKey: data.bonding_curve_key || data.bonding_curve || data.bondingCurve || '',
+    createdAt,
     txSignature: data.signature || data.tx_signature || '',
     // Include extra data for analysis
-    image: data.image || data.img || '',
-    twitter: data.twitter || data.twitter_handle || '',
-    telegram: data.telegram || data.tg || '',
+    image: data.image || data.image_uri || data.img || '',
+    twitter: data.twitter || data.twitter_handle || data.twitter_username || data.twitter_url || '',
+    telegram: data.telegram || data.telegram_url || data.tg || '',
     discord: data.discord || '',
-    website: data.website || '',
+    website: data.website || data.website_url || '',
     description: data.description || data.desc || '',
   };
 }

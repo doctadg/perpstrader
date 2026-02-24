@@ -16,6 +16,7 @@ declare class FundingArbitrageJob {
     private checkAndAlert;
     private checkCrossExchangeAlerts;
     private sendCrossExchangeNotification;
+    private formatExchangeName;
     private sendNotification;
     private runCleanup;
 }

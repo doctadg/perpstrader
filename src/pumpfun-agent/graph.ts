@@ -5,8 +5,6 @@ import { PumpFunAgentState, createInitialPumpFunState } from './state';
 import {
   subscribeNode,
   fetchMetadataNode,
-  scrapeNode,
-  securityNode,
   analyzeNode,
   scoreNode,
   storeNode,
@@ -49,13 +47,7 @@ export class PumpFunOrchestrator {
         };
       }
 
-      // Step 3: Scrape websites
-      state = { ...state, ...await scrapeNode(state) };
-
-      // Step 4: Analyze contract security
-      state = { ...state, ...await securityNode(state) };
-
-      // Step 5: Run GLM comprehensive analysis
+      // Step 3: Run OpenRouter website-first analysis
       state = { ...state, ...await analyzeNode(state) };
 
       if (state.analyzedTokens.length === 0) {
@@ -66,13 +58,13 @@ export class PumpFunOrchestrator {
         };
       }
 
-      // Step 6: Calculate confidence scores
+      // Step 4: Calculate confidence scores
       state = { ...state, ...await scoreNode(state) };
 
-      // Step 7: Store results to database
+      // Step 5: Store results to database
       state = { ...state, ...await storeNode(state) };
 
-      // Step 8: Cleanup and publish events
+      // Step 6: Cleanup and publish events
       state = { ...state, ...await cleanupNode(state) };
 
       return state;

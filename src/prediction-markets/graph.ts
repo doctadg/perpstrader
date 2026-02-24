@@ -22,6 +22,10 @@ export { PredictionAgentState, createInitialPredictionState };
 
 function updateStatus(state: PredictionAgentState, status: 'RUNNING' | 'IDLE' | 'ERROR') {
   const portfolio = predictionExecutionEngine.getPortfolio();
+  const selectedIntel = state.selectedIdea ? state.marketIntel[state.selectedIdea.marketId] : null;
+  const intelList = Object.values(state.marketIntel || {});
+  const marketsWithNews = intelList.filter(intel => intel.linkedNewsCount > 0).length;
+  const marketsWithHeat = intelList.filter(intel => intel.linkedClusterCount > 0).length;
   predictionStore.updateAgentStatus({
     status,
     currentCycleId: state.cycleId,
@@ -36,6 +40,13 @@ function updateStatus(state: PredictionAgentState, status: 'RUNNING' | 'IDLE' | 
     metadata: {
       selectedMarket: state.selectedIdea?.marketTitle,
       tradeOutcome: state.executionResult?.outcome,
+      marketIntel: {
+        selected: selectedIntel,
+        coverage: {
+          marketsWithNews,
+          marketsWithHeat,
+        },
+      },
       portfolio: {
         totalValue: portfolio.totalValue,
         availableBalance: portfolio.availableBalance,
