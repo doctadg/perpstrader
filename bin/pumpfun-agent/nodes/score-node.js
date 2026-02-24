@@ -1,6 +1,6 @@
 "use strict";
 // Score Node - Calculate final confidence scores
-// Combines all analysis components into weighted confidence scores
+// Combines website quality and AI recommendation into confidence scores
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -23,30 +23,27 @@ async function scoreNode(state) {
     }
     logger_1.default.info(`[ScoreNode] Calculating scores for ${state.analyzedTokens.length} tokens`);
     const config = config_1.default.get();
-    const weights = config.pumpfun?.weights || {
-        website: 0.25,
-        social: 0.25,
-        security: 0.35,
-        glm: 0.15,
-    };
+    const minScoreThreshold = config.pumpfun?.minScoreThreshold ?? 0.7;
+    const configuredWeights = config.pumpfun?.weights || {};
+    const websiteWeight = Math.max(0, configuredWeights.website ?? 0.7);
+    const aiWeight = Math.max(0, configuredWeights.glm ?? 0.3);
+    const totalWeight = websiteWeight + aiWeight || 1;
     const scoredTokens = state.analyzedTokens.map(token => {
-        // Calculate GLM score from recommendation
-        const glmScore = recommendationToScore(token.recommendation);
-        // Calculate weighted overall score
-        const overallScore = token.websiteScore * (weights.website || 0.25) +
-            token.socialScore * (weights.social || 0.25) +
-            token.securityScore * (weights.security || 0.35) +
-            glmScore * (weights.glm || 0.15);
+        // Convert AI recommendation to numeric score.
+        const aiScore = recommendationToScore(token.recommendation);
+        // Security and social checks are intentionally not used in score calculation.
+        const overallScore = (token.websiteScore * websiteWeight +
+            aiScore * aiWeight) / totalWeight;
         return {
             ...token,
             overallScore: Math.min(1, Math.max(0, overallScore)),
         };
     });
     // Get high confidence tokens
-    const highConfidenceTokens = scoredTokens.filter(t => t.overallScore >= 0.7);
+    const highConfidenceTokens = scoredTokens.filter(t => t.overallScore >= minScoreThreshold);
     logger_1.default.info(`[ScoreNode] Scored ${scoredTokens.length} tokens, ${highConfidenceTokens.length} high confidence`);
     return {
-        ...(0, state_1.addThought)(state, `Scored ${scoredTokens.length} tokens, ${highConfidenceTokens.length} with >=0.7 confidence`),
+        ...(0, state_1.addThought)(state, `Scored ${scoredTokens.length} tokens, ${highConfidenceTokens.length} with >=${minScoreThreshold.toFixed(2)} confidence`),
         ...(0, state_1.updateStep)(state, 'SCORING_COMPLETE'),
         analyzedTokens: scoredTokens,
         highConfidenceTokens,

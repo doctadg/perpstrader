@@ -8,18 +8,27 @@ import riskManager from '../../risk-manager/risk-manager';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../../shared/logger';
 
-// OPTIMIZED FOR PAPER TRADING BASED ON TRACE ANALYSIS
-// Key finding: Overbought RSI (>75) in LOW_VOLATILITY = $1.92M profit
-const DEFAULT_OVERSOLD = 25;  // Lowered from 30 - more aggressive entry
-const DEFAULT_OVERBOUGHT = 75;  // Raised from 70 - wait for true overbought
-const RSI_EXIT_NEUTRAL = 50;  // Exit when RSI crosses back to neutral
-const MAX_HOLD_TIME_MS = 30 * 60 * 1000;  // 30 minutes max hold time
-const MIN_HOLD_TIME_MS = 2 * 60 * 1000;  // 2 minutes min hold time (to avoid whipsaws)
+// ENHANCED: Stricter thresholds to reduce signal spam
+const DEFAULT_OVERSOLD = 25;
+const DEFAULT_OVERBOUGHT = 75;
+const RSI_EXIT_NEUTRAL = 50;
+const MAX_HOLD_TIME_MS = 30 * 60 * 1000;
+const MIN_HOLD_TIME_MS = 2 * 60 * 1000;
 const COOLDOWN_FACTOR = 0.5;
-const MIN_ENTRY_COOLDOWN_MS = 1000;  // Reduced for faster trading
-const MIN_REENTRY_COOLDOWN_MS = 2000;  // Reduced for faster re-entry
-const MIN_REENTRY_MOVE_PCT = 0.0002;  // Reduced from 0.0005 - easier re-entry
+const MIN_ENTRY_COOLDOWN_MS = 5000; // Increased from 1000ms
+const MIN_REENTRY_COOLDOWN_MS = 10000; // Increased from 2000ms
+const MIN_REENTRY_MOVE_PCT = 0.001; // Increased from 0.0002 (0.1% vs 0.02%)
 const FEE_PCT_ROUND_TRIP = 0.0004;
+
+// NEW: Minimum confidence thresholds by signal type
+const MIN_CONFIDENCE_EXTREME_RSI = 0.80; // RSI <= 25 or >= 75
+const MIN_CONFIDENCE_MODERATE_RSI = 0.75; // RSI <= 35 or >= 65
+const MIN_CONFIDENCE_BAND_TOUCH = 0.72; // Bollinger Band touches
+const MIN_CONFIDENCE_DEFAULT = 0.75; // Default minimum
+
+// NEW: Signal quality thresholds
+const MIN_RSI_DIVERGENCE = 5; // Minimum RSI points from threshold for quality signal
+const MAX_SIGNALS_PER_CYCLE = 1; // Only one signal per cycle per symbol
 
 function getLatestValue(values: number[] | undefined, fallback: number): number {
     if (!values || values.length === 0) return fallback;
@@ -59,11 +68,9 @@ function getRsiThresholds(strategy: Strategy | null, regime: AgentState['regime'
     let oversold = Number.isFinite(rawOversold) ? rawOversold : DEFAULT_OVERSOLD;
     let overbought = Number.isFinite(rawOverbought) ? rawOverbought : DEFAULT_OVERBOUGHT;
 
-    // OPTIMIZED: Based on trace analysis, LOW_VOLATILITY + high RSI overbought = most profitable
-    // In low vol, wait for true extremes before entering
     const regimeAdjust = (regime === 'LOW_VOLATILITY') ? 0 : 5;
-    oversold = Math.max(15, oversold - regimeAdjust);  // Floor at 15
-    overbought = Math.min(85, overbought + regimeAdjust);  // Cap at 85
+    oversold = Math.max(15, oversold - regimeAdjust);
+    overbought = Math.min(85, overbought + regimeAdjust);
 
     return { oversold, overbought };
 }
@@ -90,9 +97,55 @@ function computeSmaAt(candles: AgentState['candles'], endIndex: number, period: 
 }
 
 function getMinExpectedMovePct(regime: AgentState['regime']): number {
-    // ULTRA-AGGRESSIVE for paper trading - execute on almost any signal
-    // Based on trace analysis: overbought RSI in low vol was profitable even with small moves
-    return FEE_PCT_ROUND_TRIP * 1.01;  // Just 101% of round-trip fee - essentially zero threshold
+    // INCREASED: Require more edge to justify trades
+    return FEE_PCT_ROUND_TRIP * 1.5; // 150% of fees (was 101%)
+}
+
+/**
+ * Calculate confidence score based on signal quality factors
+ */
+function calculateConfidence(
+    baseConfidence: number,
+    factors: {
+        rsiDivergence?: number;
+        macdAlignment?: boolean;
+        volumeConfirmation?: boolean;
+        trendAlignment?: boolean;
+        regime?: AgentState['regime'];
+    }
+): number {
+    let confidence = baseConfidence;
+
+    // Boost for strong RSI divergence
+    if (factors.rsiDivergence) {
+        const divergenceBoost = Math.min(factors.rsiDivergence * 0.01, 0.1);
+        confidence += divergenceBoost;
+    }
+
+    // Boost for MACD alignment
+    if (factors.macdAlignment) {
+        confidence += 0.05;
+    }
+
+    // Boost for volume confirmation
+    if (factors.volumeConfirmation) {
+        confidence += 0.03;
+    }
+
+    // Penalty for trading against trend
+    if (factors.trendAlignment === false) {
+        confidence -= 0.15;
+    }
+
+    // Regime-based adjustments
+    if (factors.regime === 'LOW_VOLATILITY') {
+        confidence += 0.02; // Slight boost in low vol
+    } else if (factors.regime === 'HIGH_VOLATILITY') {
+        confidence -= 0.05; // Penalty in high vol
+    }
+
+    // Cap at 0.95 (leave room for uncertainty)
+    return Math.min(Math.max(confidence, 0), 0.95);
 }
 
 /**
@@ -132,13 +185,10 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
         const bbLower = getLatestValue(state.indicators.bollinger.lower, 0);
         const atr = getLatestValue(state.indicators.volatility.atr, 0);
 
-        // ULTRA-AGGRESSIVE: Enhanced expected move calculation
-        // When BB is flat, use ATR with a multiplier to ensure trades aren't blocked
         const bbWidth = bbUpper > 0 && bbLower > 0 && bbUpper > bbLower ? (bbUpper - bbLower) / latestPrice : 0;
         const atrMovePct = atr / latestPrice;
-        // Use ATR with multiplier when BB width is negligible, otherwise use max of both
-        const bbAdjustedWidth = bbWidth < 0.0001 ? atrMovePct * 10 : bbWidth;  // 10x multiplier when flat
-        const expectedMovePct = latestPrice > 0 ? Math.max(atrMovePct, bbAdjustedWidth) : 0.001;  // Minimum 0.1% to ensure trades flow
+        const bbAdjustedWidth = bbWidth < 0.0001 ? atrMovePct * 10 : bbWidth;
+        const expectedMovePct = latestPrice > 0 ? Math.max(atrMovePct, bbAdjustedWidth) : 0.001;
         const minExpectedMovePct = getMinExpectedMovePct(state.regime);
 
         const recentTrades = await dataManager.getTrades(undefined, state.symbol, 1);
@@ -146,56 +196,52 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
         const positionStrategy = lastTrade?.strategyId ? await dataManager.getStrategy(lastTrade.strategyId) : null;
         const activeStrategy = positionStrategy || state.selectedStrategy;
 
-        // Determine signal action based on strategy type and current indicators
         let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
-        let confidence = 0.5;
+        let baseConfidence = 0.5;
         let reason = 'No clear signal';
         let isExitSignal = false;
+        let signalFactors: Parameters<typeof calculateConfidence>[1] = {
+            macdAlignment: false,
+            volumeConfirmation: false,
+            trendAlignment: true,
+            regime: state.regime
+        };
 
         if (openPosition) {
             const stopLoss = activeStrategy?.riskParameters.stopLoss ?? 0.03;
             const takeProfit = activeStrategy?.riskParameters.takeProfit ?? 0.06;
             const pnlPct = openPosition.side === 'LONG'
                 ? (latestPrice - openPosition.entryPrice) / openPosition.entryPrice
-                : (openPosition.entryPrice - latestPrice) / openPosition.entryPrice;
+                : (openPosition.entryPrice - latestPrice) / latestPrice;
 
-            // Calculate position hold time
             const positionAgeMs = Date.now() - new Date(openPosition.entryTime || Date.now()).getTime();
 
-            // 1. Stop loss check
             if (pnlPct <= -stopLoss) {
                 action = openPosition.side === 'LONG' ? 'SELL' : 'BUY';
-                confidence = 0.9;
+                baseConfidence = 0.9;
                 reason = 'Stop loss hit';
                 isExitSignal = true;
-            }
-            // 2. Take profit check
-            else if (pnlPct >= takeProfit) {
+            } else if (pnlPct >= takeProfit) {
                 action = openPosition.side === 'LONG' ? 'SELL' : 'BUY';
-                confidence = 0.85;
+                baseConfidence = 0.85;
                 reason = 'Take profit hit';
                 isExitSignal = true;
-            }
-            // 3. NEW: RSI-based exit for profitable positions (trail out with RSI)
-            // Exit SHORT when RSI drops below neutral, exit LONG when RSI rises above neutral
-            else if (positionAgeMs > MIN_HOLD_TIME_MS) {
-                const rsiExitThreshold = RSI_EXIT_NEUTRAL;  // Exit at RSI 50
+            } else if (positionAgeMs > MIN_HOLD_TIME_MS) {
+                const rsiExitThreshold = RSI_EXIT_NEUTRAL;
 
                 if (openPosition.side === 'SHORT' && latestRSI < rsiExitThreshold && pnlPct > 0) {
-                    action = 'BUY';  // Cover short
-                    confidence = 0.75;
+                    action = 'BUY';
+                    baseConfidence = 0.75;
                     reason = `RSI mean reversion exit (${latestRSI.toFixed(1)} < ${rsiExitThreshold})`;
                     isExitSignal = true;
                 } else if (openPosition.side === 'LONG' && latestRSI > rsiExitThreshold && pnlPct > 0) {
-                    action = 'SELL';  // Sell long
-                    confidence = 0.75;
+                    action = 'SELL';
+                    baseConfidence = 0.75;
                     reason = `RSI mean reversion exit (${latestRSI.toFixed(1)} > ${rsiExitThreshold})`;
                     isExitSignal = true;
-                }
-                // 4. NEW: Time-based exit - force close after max hold time
-                else if (positionAgeMs > MAX_HOLD_TIME_MS) {
+                } else if (positionAgeMs > MAX_HOLD_TIME_MS) {
                     action = openPosition.side === 'LONG' ? 'SELL' : 'BUY';
-                    confidence = 0.7;
+                    baseConfidence = 0.7;
                     reason = `Max hold time reached (${(positionAgeMs / 60000).toFixed(1)}min)`;
                     isExitSignal = true;
                 }
@@ -217,12 +263,14 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
                         if (fastPrev !== null && slowPrev !== null && fastNow !== null && slowNow !== null) {
                             if (fastNow > slowNow && fastPrev <= slowPrev) {
                                 action = 'BUY';
-                                confidence = 0.7;
+                                baseConfidence = 0.72;
                                 reason = 'SMA crossover up';
+                                signalFactors.macdAlignment = latestMACD > 0;
                             } else if (fastNow < slowNow && fastPrev >= slowPrev) {
                                 action = 'SELL';
-                                confidence = 0.7;
+                                baseConfidence = 0.72;
                                 reason = 'SMA crossover down';
+                                signalFactors.macdAlignment = latestMACD < 0;
                             }
                         }
                     }
@@ -230,103 +278,126 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
 
                 case 'MEAN_REVERSION':
                     const { oversold, overbought } = getRsiThresholds(activeStrategy, state.regime);
-                    const hasBands = bbUpper > 0 && bbLower > 0 && bbUpper !== bbLower;  // Check bands are valid
-                    const bandBufferPct = hasBands ? Math.min(0.005, expectedMovePct * 0.5) : 0;  // Increased buffer
+                    const hasBands = bbUpper > 0 && bbLower > 0 && bbUpper !== bbLower;
+                    const bandBufferPct = hasBands ? Math.min(0.005, expectedMovePct * 0.5) : 0;
                     const belowLowerBand = hasBands ? latestPrice <= bbLower * (1 + bandBufferPct) : false;
                     const aboveUpperBand = hasBands ? latestPrice >= bbUpper * (1 - bandBufferPct) : false;
 
-                    // OPTIMIZED BASED ON TRACE ANALYSIS:
-                    // Key finding: Overbought RSI (>75) in LOW_VOLATILITY = $1.92M profit
-                    // Focus on TRUE extremes - use strict thresholds
-                    const rsiVeryOversold = latestRSI <= oversold;  // Strict: <= 25
-                    const rsiVeryOverbought = latestRSI >= overbought;  // Strict: >= 75
-                    const rsiModeratelyOversold = latestRSI <= 35;  // Moderate: <= 35
-                    const rsiModeratelyOverbought = latestRSI >= 65;  // Moderate: >= 65
+                    // Strict thresholds for quality signals
+                    const rsiVeryOversold = latestRSI <= oversold;
+                    const rsiVeryOverbought = latestRSI >= overbought;
+                    const rsiModeratelyOversold = latestRSI <= oversold + 10;
+                    const rsiModeratelyOverbought = latestRSI >= overbought - 10;
 
-                    // In LOW_VOLATILITY, be MORE selective for higher quality signals
-                    // This was the winning pattern from trace analysis
                     const isLowVol = state.regime === 'LOW_VOLATILITY';
-                    const buyThreshold = isLowVol ? oversold : oversold + 5;  // Stricter in low vol
-                    const sellThreshold = isLowVol ? overbought : overbought - 5;  // Stricter in low vol
+                    const buyThreshold = isLowVol ? oversold : oversold + 5;
+                    const sellThreshold = isLowVol ? overbought : overbought - 5;
 
-                    // BUY conditions: Use strict thresholds in low volatility
+                    // Check trend alignment
+                    const isDowntrend = state.regime === 'TRENDING_DOWN';
+                    const isUptrend = state.regime === 'TRENDING_UP';
+
+                    // BUY conditions
                     if (latestRSI <= buyThreshold || belowLowerBand || (rsiModeratelyOversold && latestMACD > 0)) {
-                        if (state.regime !== 'TRENDING_DOWN') {  // Skip only in strong downtrend
+                        if (!isDowntrend) {
                             action = 'BUY';
-                            confidence = latestRSI <= buyThreshold ? 0.85 : belowLowerBand ? 0.75 : 0.65;
-                            reason = latestRSI <= buyThreshold ? `RSI oversold (${latestRSI.toFixed(1)} <= ${buyThreshold})` :
-                                     belowLowerBand ? 'Price at lower BB band' :
-                                     'RSI moderate oversold + MACD positive';
+                            
+                            // Calculate confidence based on signal quality
+                            if (latestRSI <= buyThreshold) {
+                                baseConfidence = MIN_CONFIDENCE_EXTREME_RSI;
+                                reason = `RSI oversold (${latestRSI.toFixed(1)} <= ${buyThreshold})`;
+                                signalFactors.rsiDivergence = buyThreshold - latestRSI;
+                            } else if (belowLowerBand) {
+                                baseConfidence = MIN_CONFIDENCE_BAND_TOUCH;
+                                reason = 'Price at lower BB band';
+                            } else {
+                                baseConfidence = MIN_CONFIDENCE_MODERATE_RSI;
+                                reason = 'RSI moderate oversold + MACD positive';
+                            }
+                            
+                            signalFactors.macdAlignment = latestMACD > 0;
+                            signalFactors.trendAlignment = !isDowntrend;
                         }
                     }
-                    // SELL conditions: Use strict thresholds in low volatility (THE WINNING PATTERN)
+                    // SELL conditions
                     else if (latestRSI >= sellThreshold || aboveUpperBand || (rsiModeratelyOverbought && latestMACD < 0)) {
-                        if (state.regime !== 'TRENDING_UP') {  // Skip only in strong uptrend
+                        if (!isUptrend) {
                             action = 'SELL';
-                            confidence = latestRSI >= sellThreshold ? 0.85 : aboveUpperBand ? 0.75 : 0.65;
-                            reason = latestRSI >= sellThreshold ? `RSI overbought (${latestRSI.toFixed(1)} >= ${sellThreshold})` :
-                                     aboveUpperBand ? 'Price at upper BB band' :
-                                     'RSI moderate overbought + MACD negative';
+                            
+                            if (latestRSI >= sellThreshold) {
+                                baseConfidence = MIN_CONFIDENCE_EXTREME_RSI;
+                                reason = `RSI overbought (${latestRSI.toFixed(1)} >= ${sellThreshold})`;
+                                signalFactors.rsiDivergence = latestRSI - sellThreshold;
+                            } else if (aboveUpperBand) {
+                                baseConfidence = MIN_CONFIDENCE_BAND_TOUCH;
+                                reason = 'Price at upper BB band';
+                            } else {
+                                baseConfidence = MIN_CONFIDENCE_MODERATE_RSI;
+                                reason = 'RSI moderate overbought + MACD negative';
+                            }
+                            
+                            signalFactors.macdAlignment = latestMACD < 0;
+                            signalFactors.trendAlignment = !isUptrend;
                         }
                     }
                     break;
 
                 case 'AI_PREDICTION':
-                    // Use pattern memory for AI prediction
                     if (state.similarPatterns.length > 0) {
                         const bullishPatterns = state.similarPatterns.filter(p => p.outcome === 'BULLISH');
                         const bearishPatterns = state.similarPatterns.filter(p => p.outcome === 'BEARISH');
 
                         if (bullishPatterns.length > bearishPatterns.length * 1.5) {
                             action = 'BUY';
-                            confidence = 0.65;
+                            baseConfidence = 0.72;
                             reason = 'Historical patterns suggest bullish outcome';
                         } else if (bearishPatterns.length > bullishPatterns.length * 1.5) {
                             action = 'SELL';
-                            confidence = 0.65;
+                            baseConfidence = 0.72;
                             reason = 'Historical patterns suggest bearish outcome';
                         }
                     }
                     break;
 
                 default:
-                    // OPTIMIZED BASED ON TRACE ANALYSIS:
-                    // Use the same RSI thresholds that generated $1.96M profit
-                    // Focus on RSI extremes, especially overbought for shorts
-
-                    // 1. RSI extremes (THE PRIMARY WINNING PATTERN)
-                    if (latestRSI <= DEFAULT_OVERSOLD) {  // <= 25
+                    // Default strategy with strict thresholds
+                    if (latestRSI <= DEFAULT_OVERSOLD) {
                         action = 'BUY';
-                        confidence = 0.8;
+                        baseConfidence = MIN_CONFIDENCE_EXTREME_RSI;
                         reason = `RSI extremely oversold (${latestRSI.toFixed(1)})`;
-                    } else if (latestRSI >= DEFAULT_OVERBOUGHT) {  // >= 75
+                        signalFactors.rsiDivergence = DEFAULT_OVERSOLD - latestRSI;
+                        signalFactors.macdAlignment = latestMACD > 0;
+                    } else if (latestRSI >= DEFAULT_OVERBOUGHT) {
                         action = 'SELL';
-                        confidence = 0.85;  // Higher confidence for overbought shorts (the winning pattern)
+                        baseConfidence = MIN_CONFIDENCE_EXTREME_RSI;
                         reason = `RSI extremely overbought (${latestRSI.toFixed(1)})`;
-                    }
-                    // 2. RSI + MACD combo (secondary pattern)
-                    else if (latestRSI < 35 && latestMACD > 0) {
+                        signalFactors.rsiDivergence = latestRSI - DEFAULT_OVERBOUGHT;
+                        signalFactors.macdAlignment = latestMACD < 0;
+                    } else if (latestRSI < 35 && latestMACD > 0) {
                         action = 'BUY';
-                        confidence = 0.7;
+                        baseConfidence = MIN_CONFIDENCE_MODERATE_RSI;
                         reason = 'RSI oversold + MACD positive';
+                        signalFactors.macdAlignment = true;
                     } else if (latestRSI > 65 && latestMACD < 0) {
                         action = 'SELL';
-                        confidence = 0.75;
+                        baseConfidence = MIN_CONFIDENCE_MODERATE_RSI;
                         reason = 'RSI overbought + MACD negative';
-                    }
-                    // 3. Bollinger Band touches
-                    else if (bbLower > 0 && latestPrice <= bbLower * 1.005) {
+                        signalFactors.macdAlignment = true;
+                    } else if (bbLower > 0 && latestPrice <= bbLower * 1.005) {
                         action = 'BUY';
-                        confidence = 0.7;
+                        baseConfidence = MIN_CONFIDENCE_BAND_TOUCH;
                         reason = 'Price at lower Bollinger Band';
                     } else if (bbUpper > 0 && latestPrice >= bbUpper * 0.995) {
                         action = 'SELL';
-                        confidence = 0.75;
+                        baseConfidence = MIN_CONFIDENCE_BAND_TOUCH;
                         reason = 'Price at upper Bollinger Band';
                     }
                     break;
             }
         }
+
+        // Calculate final confidence with quality factors
+        let confidence = calculateConfidence(baseConfidence, signalFactors);
 
         if (!openPosition && !isExitSignal && action !== 'HOLD' && expectedMovePct < minExpectedMovePct) {
             return {
@@ -341,6 +412,7 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
             };
         }
 
+        // ENHANCED: Stricter cooldown checks
         if (!openPosition && lastTrade) {
             const baseCooldownMs = parseTimeframeMs(state.timeframe) * COOLDOWN_FACTOR;
             const entryCooldownMs = Math.max(baseCooldownMs, MIN_ENTRY_COOLDOWN_MS);
@@ -359,7 +431,7 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
                     shouldExecute: false,
                     thoughts: [
                         ...state.thoughts,
-                        `Cooldown active for ${state.symbol}, skipping new entry`,
+                        `Cooldown active for ${state.symbol} (${(lastTradeAgeMs / 1000).toFixed(0)}s/${(cooldownMs / 1000).toFixed(0)}s), skipping new entry`,
                     ],
                 };
             }
@@ -372,7 +444,7 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
                     shouldExecute: false,
                     thoughts: [
                         ...state.thoughts,
-                        `Price has not moved enough since last exit, skipping re-entry`,
+                        `Price has not moved enough since last exit (${(reentryPriceMove * 100).toFixed(3)}% < ${(MIN_REENTRY_MOVE_PCT * 100).toFixed(3)}%), skipping re-entry`,
                     ],
                 };
             }
@@ -405,7 +477,21 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
             };
         }
 
-        // Create preliminary signal
+        // ENHANCED: Final confidence check before creating signal
+        if (confidence < MIN_CONFIDENCE_DEFAULT) {
+            return {
+                currentStep: 'RISK_GATE_LOW_CONFIDENCE',
+                signal: null,
+                riskAssessment: null,
+                shouldExecute: false,
+                thoughts: [
+                    ...state.thoughts,
+                    `Signal ${action} ${state.symbol} rejected: confidence ${confidence.toFixed(2)} below threshold ${MIN_CONFIDENCE_DEFAULT}`,
+                ],
+            };
+        }
+
+        // Create signal with calculated confidence
         const signal: TradingSignal = {
             id: uuidv4(),
             symbol: state.symbol,
@@ -451,10 +537,9 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
             };
         }
 
-        // Update signal with risk-adjusted parameters
         signal.size = riskAssessment.suggestedSize;
 
-        logger.info(`[RiskGateNode] Signal approved: ${action} ${state.symbol} x${signal.size.toFixed(4)}`);
+        logger.info(`[RiskGateNode] Signal approved: ${action} ${state.symbol} x${signal.size.toFixed(4)} (confidence: ${confidence.toFixed(2)})`);
 
         return {
             currentStep: 'RISK_GATE_APPROVED',
@@ -464,7 +549,7 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
             thoughts: [
                 ...state.thoughts,
                 `Signal approved: ${action} ${state.symbol}`,
-                `Size: ${signal.size.toFixed(4)}, Risk Score: ${riskAssessment.riskScore}`,
+                `Confidence: ${confidence.toFixed(2)}, Size: ${signal.size.toFixed(4)}, Risk Score: ${riskAssessment.riskScore}`,
                 `Stop Loss: ${riskAssessment.stopLoss.toFixed(2)}, Take Profit: ${riskAssessment.takeProfit.toFixed(2)}`,
             ],
         };

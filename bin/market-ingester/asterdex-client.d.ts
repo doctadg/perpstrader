@@ -1,7 +1,7 @@
 /**
  * Asterdex Client
  * WebSocket and REST API client for Asterdex perpetual exchange
- * Configurable endpoints for easy updates when API docs are available
+ * Uses Binance-compatible Aster Futures endpoints.
  */
 interface AsterdexConfig {
     wsEndpoint: string;
@@ -37,6 +37,7 @@ interface AsterdexFundingRate {
     nextFundingTime: number;
     markPrice: number;
     indexPrice: number;
+    volume24h?: number;
     predictedFundingRate?: number;
     timestamp: number;
 }
@@ -54,6 +55,7 @@ declare class AsterdexClient {
     private marketsCache;
     private lastMarketsUpdate;
     private marketsCacheTtlMs;
+    private readonly quoteSuffixes;
     constructor();
     /**
      * Initialize and connect WebSocket
@@ -148,6 +150,14 @@ declare class AsterdexClient {
      * Assumes funding paid every 8 hours (3x per day)
      */
     private calculateAnnualizedRate;
+    /**
+     * Convert exchange symbol format (e.g. BTCUSDT) to internal base symbol (BTC)
+     */
+    private normalizeSymbol;
+    /**
+     * Convert internal/base symbol (BTC) to exchange perp symbol (BTCUSDT)
+     */
+    private toPerpSymbol;
     /**
      * Parse funding rates response
      */

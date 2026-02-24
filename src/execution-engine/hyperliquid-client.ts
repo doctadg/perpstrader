@@ -9,6 +9,7 @@
  * - Overfill protection
  * - State snapshots
  * - Message bus integration
+ * - ENHANCED: Anti-churn protections with exponential backoff
  */
 
 import { WalletClient, HttpTransport, PublicClient } from '@nktkas/hyperliquid';
@@ -57,6 +58,43 @@ export interface HyperliquidOrderResult {
     error?: string;
 }
 
+interface PendingOrderInfo {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    submittedAt: number;
+}
+
+interface OrderStats {
+    submitted: number;
+    filled: number;
+    failed: number;
+    lastFailureTime?: number;
+    consecutiveFailures: number;
+}
+
+interface OrderAttempt {
+    count: number;
+    lastAttempt: number;
+    consecutiveFailures: number;
+    lastSuccess?: number;
+}
+
+// Order signature for deduplication
+interface OrderSignature {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    sizeHash: string;  // Rounded size to prevent micro-diffs
+    priceHash: string; // Rounded price to prevent micro-diffs
+    timestamp: number;
+}
+
+// Global fill rate tracking
+interface FillRateWindow {
+    filled: number;
+    submitted: number;
+    windowStart: number;
+}
+
 export class HyperliquidClient {
     private transport: HttpTransport;
     private publicClient: PublicClient;
@@ -68,6 +106,51 @@ export class HyperliquidClient {
     private assetIndices: Map<string, number> = new Map();
     private assetNames: Map<number, string> = new Map();
     private isInitialized: boolean = false;
+    private readonly ORDER_TIMEOUT_MS = 60000;
+    private pendingOrders: Map<string, PendingOrderInfo> = new Map();
+    private orderStats: Map<string, OrderStats> = new Map();
+    
+    // ENHANCED: Stricter cooldowns to prevent churn
+    private lastOrderTime: Map<string, number> = new Map();
+    private readonly ORDER_COOLDOWN_MS = 60000; // 1 minute (was 10s)
+    private readonly MIN_ORDER_COOLDOWN_MS = 30000; // 30 seconds minimum
+    private readonly EXTENDED_COOLDOWN_MS = 300000; // 5 minutes after multiple failures
+    private orderAttemptCount: Map<string, OrderAttempt> = new Map();
+    
+    // ENHANCED: Order deduplication tracking
+    private pendingOrderSignatures: Map<string, OrderSignature> = new Map();
+    private readonly SIGNATURE_TTL_MS = 60000; // 1 minute TTL for signatures
+    
+    // ENHANCED: Consecutive failure handling
+    private readonly MAX_CONSECUTIVE_FAILURES = 3;
+    private readonly FAILURE_BACKOFF_MULTIPLIER = 2;
+    private readonly MAX_BACKOFF_MS = 300000; // 5 minutes max backoff
+    private readonly EXTENDED_COOLDOWN_MS = 300000; // 5 minutes after multiple failures
+    private orderAttemptCount: Map<string, OrderAttempt> = new Map();
+    
+    // ENHANCED: Consecutive failure handling
+    private readonly MAX_CONSECUTIVE_FAILURES = 3;
+    private readonly FAILURE_BACKOFF_MULTIPLIER = 2;
+    private readonly MAX_BACKOFF_MS = 300000; // 5 minutes max backoff
+
+    // Minimum order sizes by symbol to prevent "invalid size" errors
+    private readonly MIN_ORDER_SIZES: Record<string, number> = {
+        'BTC': 0.0001,
+        'ETH': 0.001,
+        'SOL': 0.01,
+        'DEFAULT': 0.01
+    };
+    
+    // ENHANCED: Confidence threshold
+    private readonly MIN_CONFIDENCE = 0.80; // Increased from 0.75
+    private readonly MIN_ORDER_BOOK_LEVELS = 5;
+    private readonly MIN_ORDER_BOOK_NOTIONAL_DEPTH_K = 0;
+    private readonly MAX_ALLOWED_SPREAD = 0.001; // 0.1%
+    
+    // ENHANCED: Fill rate monitoring
+    private readonly MIN_FILL_RATE = 0.10; // 10% minimum fill rate before warnings
+    private readonly CRITICAL_FILL_RATE = 0.05; // 5% critical threshold
+    private symbolFillRates: Map<string, { filled: number; total: number; lastCalculated: number }> = new Map();
 
     constructor() {
         const hyperliquidConfig = config.getSection('hyperliquid');
@@ -83,25 +166,19 @@ export class HyperliquidClient {
         this.publicClient = new PublicClient({ transport: this.transport });
 
         // Try to initialize wallet from private key
-        // Support both apiSecret (legacy) and privateKey naming
-        const privateKey = hyperliquidConfig.privateKey || hyperliquidConfig.apiSecret;
-        const mainAddress = hyperliquidConfig.mainAddress || hyperliquidConfig.apiKey;
+        const privateKey = hyperliquidConfig.privateKey || (hyperliquidConfig as any).apiSecret;
+        const mainAddress = hyperliquidConfig.mainAddress || (hyperliquidConfig as any).apiKey;
 
         if (privateKey && privateKey.startsWith('0x') && privateKey.length === 66) {
             try {
                 this.wallet = privateKeyToAccount(privateKey as `0x${string}`);
                 this.walletAddress = this.wallet.address;
-
-                // If mainAddress is configured, use it as the target user address
-                // Otherwise use the signer's address
                 this.userAddress = mainAddress || this.walletAddress;
 
-                // Wallet client for trading
                 this.walletClient = new WalletClient({
                     transport: this.transport,
                     wallet: this.wallet,
                     isTestnet: this.isTestnet
-                    // defaultVaultAddress: mainAddress ? (mainAddress as `0x${string}`) : undefined
                 });
 
                 logger.info(`Hyperliquid client initialized with wallet: ${this.walletAddress.slice(0, 10)}...`);
@@ -116,16 +193,14 @@ export class HyperliquidClient {
         }
 
         logger.info(`Hyperliquid client configured for ${this.isTestnet ? 'TESTNET' : 'MAINNET'}`);
+        logger.info(`[ChurnPrevention] Cooldowns: min=${this.MIN_ORDER_COOLDOWN_MS}ms, standard=${this.ORDER_COOLDOWN_MS}ms, extended=${this.EXTENDED_COOLDOWN_MS}ms`);
+        logger.info(`[ChurnPrevention] Max consecutive failures: ${this.MAX_CONSECUTIVE_FAILURES}, Max backoff: ${this.MAX_BACKOFF_MS}ms`);
     }
 
-    /**
-     * Initialize asset indices from the API
-     */
     async initialize(): Promise<void> {
         if (this.isInitialized) return;
 
         try {
-            // Get metadata to build asset index mapping
             const meta = await this.publicClient.meta();
 
             if (meta && meta.universe) {
@@ -145,39 +220,23 @@ export class HyperliquidClient {
         }
     }
 
-    /**
-     * Check if the client is configured for trading
-     */
     isConfigured(): boolean {
         return this.walletClient !== null && this.wallet !== null;
     }
 
-    /**
-     * Get the wallet address (signer)
-     */
     getWalletAddress(): string {
         return this.walletAddress;
     }
 
-    /**
-     * Get the user address (target account)
-     */
     getUserAddress(): string {
         return this.userAddress;
     }
 
-    /**
-     * Get asset index by symbol
-     */
     getAssetIndex(symbol: string): number | undefined {
         return this.assetIndices.get(symbol) ?? ASSET_INDICES[symbol];
     }
 
-    /**
-     * Get all current mid prices (with rate limiting)
-     */
     async getAllMids(): Promise<Record<string, number>> {
-        // Apply rate limiting for info endpoint
         await hyperliquidRateLimiter.throttleInfoRequest(2);
 
         try {
@@ -195,11 +254,7 @@ export class HyperliquidClient {
         }
     }
 
-    /**
-     * Get account state (balance, positions) - with rate limiting
-     */
     async getAccountState(): Promise<HyperliquidAccountState> {
-        // Apply rate limiting for info endpoint
         await hyperliquidRateLimiter.throttleInfoRequest(60);
 
         if (!this.userAddress) {
@@ -243,9 +298,6 @@ export class HyperliquidClient {
         }
     }
 
-    /**
-     * Get open orders
-     */
     async getOpenOrders(): Promise<any[]> {
         if (!this.userAddress) {
             throw new Error('No wallet configured');
@@ -261,16 +313,233 @@ export class HyperliquidClient {
     }
 
     /**
-     * Place an order (enhanced with rate limiting, retry logic, and overfill protection)
+     * ENHANCED: Calculate dynamic cooldown based on recent failure history
      */
+    private calculateDynamicCooldown(symbol: string): number {
+        const symbolKey = symbol.toUpperCase();
+        const attempts = this.orderAttemptCount.get(symbolKey);
+        
+        if (!attempts) return this.ORDER_COOLDOWN_MS;
+        
+        // If we have consecutive failures, apply exponential backoff
+        if (attempts.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+            const backoffMultiplier = Math.pow(this.FAILURE_BACKOFF_MULTIPLIER, 
+                attempts.consecutiveFailures - this.MAX_CONSECUTIVE_FAILURES + 1);
+            const dynamicCooldown = Math.min(
+                this.EXTENDED_COOLDOWN_MS * backoffMultiplier,
+                this.MAX_BACKOFF_MS
+            );
+            
+            logger.warn(`[ChurnPrevention] ${symbol} has ${attempts.consecutiveFailures} consecutive failures. ` +
+                `Applying extended cooldown: ${dynamicCooldown}ms`);
+            
+            return dynamicCooldown;
+        }
+        
+        return this.ORDER_COOLDOWN_MS;
+    }
+
+    /**
+     * ENHANCED: Check if we should allow a new order for this symbol (comprehensive churn prevention)
+     */
+    private canPlaceNewOrder(symbol: string, confidence?: number): { allowed: boolean; reason?: string } {
+        const now = Date.now();
+        const symbolKey = symbol.toUpperCase();
+        
+        // Check minimum confidence threshold
+        if (confidence !== undefined && confidence < this.MIN_CONFIDENCE) {
+            return { 
+                allowed: false, 
+                reason: `Confidence ${confidence.toFixed(2)} below threshold ${this.MIN_CONFIDENCE}` 
+            };
+        }
+        
+        // Get current attempt data
+        const attempts = this.orderAttemptCount.get(symbolKey);
+        
+        if (attempts) {
+            const timeSinceLastAttempt = now - attempts.lastAttempt;
+            
+            // Enforce absolute minimum cooldown between any order attempts
+            if (timeSinceLastAttempt < this.MIN_ORDER_COOLDOWN_MS) {
+                const remainingMs = this.MIN_ORDER_COOLDOWN_MS - timeSinceLastAttempt;
+                return { 
+                    allowed: false, 
+                    reason: `Minimum cooldown not met: ${remainingMs}ms remaining` 
+                };
+            }
+            
+            // Check dynamic cooldown based on failure history
+            const dynamicCooldown = this.calculateDynamicCooldown(symbol);
+            if (timeSinceLastAttempt < dynamicCooldown) {
+                const remainingSec = Math.ceil((dynamicCooldown - timeSinceLastAttempt) / 1000);
+                return { 
+                    allowed: false, 
+                    reason: `Dynamic cooldown active: ${remainingSec}s remaining (${attempts.consecutiveFailures} consecutive failures)` 
+                };
+            }
+            
+            // Check fill rate - if too low, extend cooldown
+            const fillRate = this.getSymbolFillRate(symbol);
+            if (fillRate < this.CRITICAL_FILL_RATE && attempts.count > 5) {
+                return { 
+                    allowed: false, 
+                    reason: `Critical fill rate ${(fillRate * 100).toFixed(1)}% - extended cooldown applied` 
+                };
+            }
+        }
+        
+        return { allowed: true };
+    }
+
+    /**
+     * ENHANCED: Record order attempt result with comprehensive tracking
+     */
+    private recordOrderAttempt(symbol: string, success: boolean): void {
+        const symbolKey = symbol.toUpperCase();
+        const now = Date.now();
+        const current = this.orderAttemptCount.get(symbolKey);
+        
+        if (success) {
+            this.orderAttemptCount.set(symbolKey, { 
+                count: (current?.count || 0) + 1, 
+                lastAttempt: now,
+                consecutiveFailures: 0,
+                lastSuccess: now
+            });
+            logger.info(`[ChurnPrevention] ${symbol} order succeeded. Consecutive failures reset.`);
+        } else {
+            this.orderAttemptCount.set(symbolKey, { 
+                count: (current?.count || 0) + 1, 
+                lastAttempt: now,
+                consecutiveFailures: (current?.consecutiveFailures || 0) + 1
+            });
+            logger.warn(`[ChurnPrevention] ${symbol} order failed. Consecutive failures: ${(current?.consecutiveFailures || 0) + 1}`);
+        }
+    }
+
+    /**
+     * ENHANCED: Get fill rate for a symbol
+     */
+    private getSymbolFillRate(symbol: string): number {
+        const symbolKey = symbol.toUpperCase();
+        const stats = this.orderStats.get(symbolKey);
+        if (!stats || stats.submitted === 0) return 1.0;
+        return stats.filled / stats.submitted;
+    }
+
+    /**
+     * ENHANCED: Update order stats with fill rate tracking
+     */
+    private updateOrderStats(symbol: string, filled: boolean): void {
+        const symbolKey = symbol.toUpperCase();
+        const stats = this.orderStats.get(symbolKey) || { 
+            submitted: 0, 
+            filled: 0, 
+            failed: 0, 
+            consecutiveFailures: 0 
+        };
+
+        stats.submitted += 1;
+        if (filled) {
+            stats.filled += 1;
+            stats.consecutiveFailures = 0;
+        } else {
+            stats.failed += 1;
+            stats.consecutiveFailures += 1;
+            stats.lastFailureTime = Date.now();
+        }
+
+        this.orderStats.set(symbolKey, stats);
+
+        const fillRate = stats.submitted > 0 ? stats.filled / stats.submitted : 0;
+        
+        // Log with appropriate severity based on fill rate
+        const logMessage = `[OrderStats] ${symbolKey} fillRate=${(fillRate * 100).toFixed(2)}% (${stats.filled}/${stats.submitted})`;
+        
+        if (fillRate < this.CRITICAL_FILL_RATE) {
+            logger.error(`[ChurnPrevention] ${logMessage} - CRITICAL: Churn detected!`);
+        } else if (fillRate < this.MIN_FILL_RATE) {
+            logger.warn(`[ChurnPrevention] ${logMessage} - WARNING: Low fill rate`);
+        } else {
+            logger.info(logMessage);
+        }
+    }
+
+    private calculateDepthNotional(levels: any[]): number {
+        return levels.reduce((total, level) => {
+            const price = Number.parseFloat(level?.px ?? '');
+            const size = Number.parseFloat(level?.sz ?? '');
+
+            if (!Number.isFinite(price) || !Number.isFinite(size) || price <= 0 || size < 0) {
+                return total;
+            }
+
+            return total + (price * size);
+        }, 0);
+    }
+
+    private validateOrderBookDepth(symbol: string, book: any): { valid: boolean; reason?: string; bestBid?: number; bestAsk?: number } {
+        const bids = Array.isArray(book?.levels?.[0]) ? book.levels[0] : [];
+        const asks = Array.isArray(book?.levels?.[1]) ? book.levels[1] : [];
+
+        if (bids.length < this.MIN_ORDER_BOOK_LEVELS || asks.length < this.MIN_ORDER_BOOK_LEVELS) {
+            return {
+                valid: false,
+                reason: `Order book depth too shallow for ${symbol}: bids=${bids.length}, asks=${asks.length}, required=${this.MIN_ORDER_BOOK_LEVELS}`
+            };
+        }
+
+        const topBids = bids.slice(0, this.MIN_ORDER_BOOK_LEVELS);
+        const topAsks = asks.slice(0, this.MIN_ORDER_BOOK_LEVELS);
+        const minNotionalDepth = this.MIN_ORDER_BOOK_NOTIONAL_DEPTH_K * 1000;
+        const bidDepthNotional = this.calculateDepthNotional(topBids);
+        const askDepthNotional = this.calculateDepthNotional(topAsks);
+
+        if (bidDepthNotional < minNotionalDepth || askDepthNotional < minNotionalDepth) {
+            return {
+                valid: false,
+                reason: `Insufficient notional depth for ${symbol}: bid=${bidDepthNotional.toFixed(2)}, ask=${askDepthNotional.toFixed(2)}, required=${minNotionalDepth.toFixed(2)}`
+            };
+        }
+
+        const bestBid = Number.parseFloat(topBids[0]?.px ?? '');
+        const bestAsk = Number.parseFloat(topAsks[0]?.px ?? '');
+
+        if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk) || bestBid <= 0 || bestAsk <= 0) {
+            return { valid: false, reason: `Invalid best bid/ask for ${symbol}` };
+        }
+
+        return { valid: true, bestBid, bestAsk };
+    }
+
+    private checkSpread(bestBid: number, bestAsk: number): { allowed: boolean; reason?: string } {
+        const mid = (bestBid + bestAsk) / 2;
+        if (!Number.isFinite(mid) || mid <= 0 || bestAsk < bestBid) {
+            return { allowed: false, reason: 'Invalid spread inputs from order book' };
+        }
+
+        const spreadRatio = (bestAsk - bestBid) / mid;
+        if (spreadRatio >= this.MAX_ALLOWED_SPREAD) {
+            return {
+                allowed: false,
+                reason: `Spread ${(spreadRatio * 100).toFixed(4)}% exceeds ${(this.MAX_ALLOWED_SPREAD * 100).toFixed(3)}%`
+            };
+        }
+
+        return { allowed: true };
+    }
+
     async placeOrder(params: {
         symbol: string;
         side: 'BUY' | 'SELL';
         size: number;
-        price?: number; // If not provided, uses market order pricing
+        price?: number;
         reduceOnly?: boolean;
+        bypassCooldown?: boolean;
         orderType?: 'limit' | 'market';
-        clientOrderId?: string; // For deduplication
+        clientOrderId?: string;
+        confidence?: number;
     }): Promise<HyperliquidOrderResult> {
         if (!this.walletClient) {
             return {
@@ -279,6 +548,68 @@ export class HyperliquidClient {
                 error: 'No wallet configured for trading'
             };
         }
+
+        // Validate order size
+        const sizeValidation = this.validateOrderSize(params.size, params.symbol);
+        if (!sizeValidation.valid) {
+            return { success: false, status: 'INVALID_SIZE', error: sizeValidation.error };
+        }
+        const validatedSize = sizeValidation.adjustedSize;
+
+        const bypassChurnGuards = params.bypassCooldown === true || params.reduceOnly === true;
+
+        if (!bypassChurnGuards) {
+            // ENHANCED: Comprehensive churn prevention check
+            const orderCheck = this.canPlaceNewOrder(params.symbol, params.confidence);
+            if (!orderCheck.allowed) {
+                logger.warn(`[ChurnPrevention] Blocking order for ${params.symbol}: ${orderCheck.reason}`);
+                return { success: false, status: 'CHURN_PREVENTION', error: orderCheck.reason };
+            }
+
+            const orderBook = await this.getL2Book(params.symbol);
+            const depthCheck = this.validateOrderBookDepth(params.symbol, orderBook);
+            if (!depthCheck.valid) {
+                logger.warn(`[ChurnPrevention] Blocking order for ${params.symbol}: ${depthCheck.reason}`);
+                return { success: false, status: 'CHURN_PREVENTION', error: depthCheck.reason };
+            }
+
+            if (depthCheck.bestBid === undefined || depthCheck.bestAsk === undefined) {
+                logger.warn(`[ChurnPrevention] Blocking order for ${params.symbol}: Missing top-of-book prices`);
+                return { success: false, status: 'CHURN_PREVENTION', error: 'Missing top-of-book prices' };
+            }
+
+            const spreadCheck = this.checkSpread(depthCheck.bestBid, depthCheck.bestAsk);
+            if (!spreadCheck.allowed) {
+                logger.warn(`[ChurnPrevention] Blocking order for ${params.symbol}: ${spreadCheck.reason}`);
+                return { success: false, status: 'CHURN_PREVENTION', error: spreadCheck.reason };
+            }
+        } else {
+            logger.warn(`[ChurnPrevention] Bypassing cooldown and churn guards for reduce-only exit on ${params.symbol}`);
+        }
+
+        await this.checkOrderTimeouts();
+
+        const now = Date.now();
+        const symbolKey = params.symbol.toUpperCase();
+        const lastTime = this.lastOrderTime.get(symbolKey) || 0;
+
+        if (!bypassChurnGuards) {
+            // Legacy cooldown check (redundant but kept for safety)
+            if (now - lastTime < this.MIN_ORDER_COOLDOWN_MS) {
+                const remainingSec = Math.ceil((this.MIN_ORDER_COOLDOWN_MS - (now - lastTime)) / 1000);
+                logger.warn(`[ChurnPrevention] Minimum cooldown active for ${params.symbol}, ${remainingSec}s remaining`);
+                return { success: false, status: 'CHURN_PREVENTION', error: `Minimum cooldown active: ${remainingSec}s remaining` };
+            }
+
+            const dynamicCooldown = this.calculateDynamicCooldown(params.symbol);
+            if (now - lastTime < dynamicCooldown) {
+                const remainingSec = Math.ceil((dynamicCooldown - (now - lastTime)) / 1000);
+                logger.warn(`[ChurnPrevention] Order cooldown active for ${params.symbol}, ${remainingSec}s remaining`);
+                return { success: false, status: 'COOLDOWN', error: `Cooldown active: ${remainingSec}s remaining` };
+            }
+        }
+        
+        this.lastOrderTime.set(symbolKey, now);
 
         // Generate client order ID for tracking
         const clientOrderId = params.clientOrderId || uuidv4();
@@ -307,41 +638,37 @@ export class HyperliquidClient {
             };
         }
 
-        // ULTRA-AGGRESSIVE: Retry logic with exponential backoff
-        const maxRetries = 3;
+        // Retry logic with exponential backoff
+        const maxRetries = 0; // No retries: max 1 order attempt per signal
+        const maxAttempts = maxRetries + 1;
         let lastError: any = null;
 
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
-                // Apply rate limiting before each attempt
                 await hyperliquidRateLimiter.throttleExchangeRequest(1);
 
-                // Get current price if not provided (for market-like orders)
                 let orderPrice = params.price;
-                if (!orderPrice) {
-                    const mids = await this.getAllMids();
-                    const midPrice = mids[params.symbol];
-                    if (!midPrice) {
-                        return {
-                            success: false,
-                            status: 'NO_PRICE',
-                            error: `Could not get price for ${params.symbol}`
-                        };
+                const requestedOrderType = params.orderType || 'limit';
+                const marketLikeOrder = requestedOrderType === 'market' || params.reduceOnly === true;
+
+                // For market/reduce-only orders, force executable aggressive pricing instead of
+                // trusting a potentially stale mark price from upstream.
+                if (!orderPrice || marketLikeOrder) {
+                    try {
+                        orderPrice = await this.getAggressiveMarketPrice(params.symbol, params.side);
+                    } catch (priceError) {
+                        logger.warn(`[PlaceOrder] Failed to get aggressive price: ${priceError}`);
+                        orderPrice = await this.getBufferedBookPrice(params.symbol, params.side);
                     }
-                    // ULTRA-AGGRESSIVE: Increased slippage for better fill rates
-                    // For buys, go 1% higher; for sells, go 1% lower
-                    // On retries, increase slippage further
-                    const slippageMultiplier = 1 + (attempt * 0.005);  // 0.5%, 1%, 1.5%
-                    orderPrice = params.side === 'BUY'
-                        ? midPrice * (1.01 + (attempt * 0.005))  // More aggressive on retries
-                        : midPrice * (0.99 - (attempt * 0.005));
                 }
 
-                // Format price to appropriate precision
                 const formattedPrice = this.formatPrice(orderPrice, params.symbol);
-                const formattedSize = this.formatSize(params.size, params.symbol);
+                const formattedSize = this.formatSize(validatedSize, params.symbol);
+                const orderTypeConfig = {
+                    limit: { tif: marketLikeOrder ? ('Ioc' as const) : ('Gtc' as const) }
+                };
 
-                logger.info(`[Attempt ${attempt + 1}/${maxRetries}] Placing order: ${params.side} ${formattedSize} ${params.symbol} @ ${formattedPrice}`);
+                logger.info(`[Attempt ${attempt + 1}/${maxAttempts}] Placing order: ${params.side} ${formattedSize} ${params.symbol} @ ${formattedPrice}`);
 
                 const result = await this.walletClient.order({
                     orders: [{
@@ -350,9 +677,7 @@ export class HyperliquidClient {
                         p: formattedPrice,
                         s: formattedSize,
                         r: params.reduceOnly || false,
-                        t: params.orderType === 'market'
-                            ? { limit: { tif: 'Ioc' } }  // IOC for market-like execution
-                            : { limit: { tif: 'Gtc' } }   // GTC for limit orders
+                        t: orderTypeConfig
                     }],
                     grouping: 'na'
                 });
@@ -360,25 +685,45 @@ export class HyperliquidClient {
                 if (result.status === 'ok') {
                     const response = result.response;
                     const orderStatus = response?.data?.statuses?.[0] as any;
+                    const isFilled = Boolean(orderStatus?.filled);
+                    this.updateOrderStats(params.symbol, isFilled);
 
-                    if (orderStatus?.filled) {
-                        logger.info(`Order filled: ${params.side} ${formattedSize} ${params.symbol} @ ${orderStatus.filled.avgPx || formattedPrice}`);
+                    if (isFilled) {
+                        const filledOrderId = orderStatus.filled.oid?.toString();
+                        if (filledOrderId) {
+                            this.pendingOrders.delete(filledOrderId);
+                        }
+
+                        logger.info(`[PlaceOrder] Order FILLED: ${params.side} ${formattedSize} ${params.symbol}`);
+                        this.recordOrderAttempt(params.symbol, true);
                         return {
                             success: true,
-                            orderId: orderStatus.filled.oid?.toString(),
+                            orderId: filledOrderId,
                             filledPrice: parseFloat(orderStatus.filled.avgPx || formattedPrice),
                             filledSize: parseFloat(orderStatus.filled.totalSz || formattedSize),
                             status: 'FILLED'
                         };
                     } else if (orderStatus?.resting) {
-                        logger.info(`Order resting: ${params.side} ${formattedSize} ${params.symbol} @ ${formattedPrice}`);
+                        const restingOrderId = orderStatus.resting.oid?.toString();
+                        if (restingOrderId) {
+                            this.pendingOrders.set(restingOrderId, {
+                                symbol: params.symbol,
+                                side: params.side,
+                                submittedAt: Date.now()
+                            });
+                        }
+
+                        logger.info(`[PlaceOrder] Order RESTING: ${params.side} ${formattedSize} ${params.symbol}`);
+                        this.recordOrderAttempt(params.symbol, true);
                         return {
                             success: true,
-                            orderId: orderStatus.resting.oid?.toString(),
+                            orderId: restingOrderId,
                             status: 'RESTING'
                         };
                     } else if (orderStatus?.error) {
-                        // If error is retryable, continue; otherwise fail
+                        this.recordOrderAttempt(params.symbol, false);
+                        this.updateOrderStats(params.symbol, false);
+                        
                         const errorMessage = String(orderStatus.error).toLowerCase();
                         if (errorMessage.includes('insufficient') || errorMessage.includes('margin')) {
                             return {
@@ -389,24 +734,26 @@ export class HyperliquidClient {
                         }
                         lastError = orderStatus.error;
                     } else {
-                        // Status OK but no clear fill/resting - check response data
-                        logger.warn(`Order response unclear: ${JSON.stringify(response)}`);
-                        // Consider this a success for aggressive trading
+                        logger.warn(`[PlaceOrder] Order response unclear: ${JSON.stringify(response)}`);
+                        this.recordOrderAttempt(params.symbol, true);
                         return {
                             success: true,
                             status: 'OK'
                         };
                     }
                 } else {
+                    this.updateOrderStats(params.symbol, false);
+                    this.recordOrderAttempt(params.symbol, false);
                     lastError = `Order failed: ${JSON.stringify(result)}`;
-                    logger.warn(`[Attempt ${attempt + 1}/${maxRetries}] ${lastError}`);
+                    logger.warn(`[Attempt ${attempt + 1}/${maxAttempts}] ${lastError}`);
                 }
             } catch (error: any) {
                 lastError = error;
                 const isRetryable = this.isRetryableError(error);
-                logger.error(`[Attempt ${attempt + 1}/${maxRetries}] Order error:`, error);
+                logger.error(`[Attempt ${attempt + 1}/${maxAttempts}] Order error:`, error);
 
-                if (!isRetryable || attempt >= maxRetries - 1) {
+                if (!isRetryable || attempt >= maxAttempts - 1) {
+                    this.recordOrderAttempt(params.symbol, false);
                     return {
                         success: false,
                         status: 'EXCEPTION',
@@ -416,13 +763,14 @@ export class HyperliquidClient {
             }
 
             // Exponential backoff before retry
-            if (attempt < maxRetries - 1) {
-                const backoffMs = Math.min(1000 * Math.pow(2, attempt), 5000);  // 1s, 2s, 4s max
+            if (attempt < maxAttempts - 1) {
+                const backoffMs = Math.min(1000 * Math.pow(2, attempt), 3000);
                 logger.info(`Retrying in ${backoffMs}ms...`);
                 await new Promise(resolve => setTimeout(resolve, backoffMs));
             }
         }
 
+        this.recordOrderAttempt(params.symbol, false);
         return {
             success: false,
             status: 'RETRY_EXHAUSTED',
@@ -430,24 +778,103 @@ export class HyperliquidClient {
         };
     }
 
-    /**
-     * Check if an error is retryable (temporary network/server issues)
-     */
+    private validateOrderSize(size: number, symbol: string): { valid: boolean; adjustedSize: number; error?: string } {
+        const minSize = this.MIN_ORDER_SIZES[symbol] || this.MIN_ORDER_SIZES['DEFAULT'];
+        
+        if (size <= 0) {
+            return { valid: false, adjustedSize: 0, error: 'Order size must be positive' };
+        }
+        
+        if (size < minSize) {
+            logger.warn(`[SizeValidation] Order size ${size} below minimum ${minSize} for ${symbol}, adjusting up`);
+            return { valid: true, adjustedSize: minSize };
+        }
+        
+        const decimals = symbol === 'BTC' ? 5 : symbol === 'ETH' ? 4 : 3;
+        const adjustedSize = Math.ceil(size * Math.pow(10, decimals)) / Math.pow(10, decimals);
+        
+        return { valid: true, adjustedSize };
+    }
+
+    private async getAggressiveMarketPrice(symbol: string, side: 'BUY' | 'SELL'): Promise<number> {
+        const book = await this.getL2Book(symbol);
+        const bids = Array.isArray(book?.levels?.[0]) ? book.levels[0] : [];
+        const asks = Array.isArray(book?.levels?.[1]) ? book.levels[1] : [];
+
+        const bestBid = Number.parseFloat(bids[0]?.px ?? '');
+        const bestAsk = Number.parseFloat(asks[0]?.px ?? '');
+
+        if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk) || bestBid <= 0 || bestAsk <= 0) {
+            throw new Error(`Invalid order book for ${symbol}`);
+        }
+
+        const slippageBuffer = 0.005;
+        
+        const aggressivePrice = side === 'BUY'
+            ? bestAsk * (1 + slippageBuffer)
+            : bestBid * (1 - slippageBuffer);
+
+        return aggressivePrice;
+    }
+
+    private async getBufferedBookPrice(symbol: string, side: 'BUY' | 'SELL'): Promise<number> {
+        const mids = await this.getAllMids();
+        const midPrice = mids[symbol];
+        
+        if (!midPrice || midPrice <= 0) {
+            throw new Error(`Could not get mid price for ${symbol}`);
+        }
+        
+        const buffer = 0.002;
+        return side === 'BUY' 
+            ? midPrice * (1 + buffer) 
+            : midPrice * (1 - buffer);
+    }
+
     private isRetryableError(error: any): boolean {
         const errorMessage = String(error?.message || error || '').toLowerCase();
         const retryablePatterns = [
             'timeout', 'timed out',
             'network', 'connection',
-            '502', '503', '504', '500',  // HTTP server errors
+            '502', '503', '504', '500',
             'econnreset', 'etimedout',
             'rate limit',
         ];
         return retryablePatterns.some(pattern => errorMessage.includes(pattern));
     }
 
-    /**
-     * Cancel an order
-     */
+    async checkOrderTimeouts(): Promise<void> {
+        if (this.pendingOrders.size === 0) {
+            return;
+        }
+
+        const now = Date.now();
+        for (const [orderId, pendingOrder] of this.pendingOrders.entries()) {
+            const ageMs = now - pendingOrder.submittedAt;
+            
+            if (ageMs > 30000 && ageMs <= this.ORDER_TIMEOUT_MS) {
+                logger.warn(
+                    `[OrderTimeout] Order ${orderId} (${pendingOrder.symbol}) pending for ${(ageMs / 1000).toFixed(1)}s`
+                );
+            }
+            
+            if (ageMs > this.ORDER_TIMEOUT_MS) {
+                logger.warn(
+                    `[OrderTimeout] Cancelling stale order ${orderId} (${pendingOrder.symbol}) after ${(ageMs / 1000).toFixed(1)}s`
+                );
+
+                const cancelled = await this.cancelOrder(pendingOrder.symbol, orderId);
+                if (cancelled) {
+                    this.pendingOrders.delete(orderId);
+                    this.recordOrderAttempt(pendingOrder.symbol, false);
+                    this.updateOrderStats(pendingOrder.symbol, false);
+                } else {
+                    logger.error(`[OrderTimeout] Failed to cancel stale order ${orderId} (${pendingOrder.symbol})`);
+                }
+            }
+        }
+    }
+
     async cancelOrder(symbol: string, orderId: string): Promise<boolean> {
         if (!this.walletClient) {
             logger.error('No wallet configured for trading');
@@ -470,6 +897,10 @@ export class HyperliquidClient {
                 }]
             });
 
+            if (result.status === 'ok') {
+                this.pendingOrders.delete(orderId);
+            }
+
             return result.status === 'ok';
         } catch (error) {
             logger.error('Failed to cancel order:', error);
@@ -477,9 +908,6 @@ export class HyperliquidClient {
         }
     }
 
-    /**
-     * Cancel all open orders
-     */
     async cancelAllOrders(): Promise<boolean> {
         try {
             const openOrders = await this.getOpenOrders();
@@ -495,9 +923,6 @@ export class HyperliquidClient {
         }
     }
 
-    /**
-     * Update leverage for a symbol
-     */
     async updateLeverage(symbol: string, leverage: number, isCross: boolean = true): Promise<boolean> {
         if (!this.walletClient) {
             logger.error('No wallet configured for trading');
@@ -526,36 +951,21 @@ export class HyperliquidClient {
         }
     }
 
-    /**
-     * Format price to appropriate precision for the asset
-     * BTC uses $1 tick, ETH uses $0.1, SOL/others use $0.01
-     */
     private formatPrice(price: number, symbol: string): string {
-        // Different assets have different tick sizes on Hyperliquid
         if (symbol === 'BTC') {
-            // BTC: $1 tick size - round to nearest integer
             return Math.round(price).toString();
         } else if (symbol === 'ETH') {
-            // ETH: $0.1 tick size
             return (Math.round(price * 10) / 10).toFixed(1);
         } else {
-            // Most other assets: $0.01 tick size
             return (Math.round(price * 100) / 100).toFixed(2);
         }
     }
 
-    /**
-     * Format size to appropriate precision for the asset
-     */
     private formatSize(size: number, symbol: string): string {
-        // Different assets have different size increments
         const decimals = symbol === 'BTC' ? 5 : 4;
         return size.toFixed(decimals);
     }
 
-    /**
-     * Get L2 order book
-     */
     async getL2Book(symbol: string): Promise<any> {
         try {
             return await this.publicClient.l2Book({ coin: symbol });
@@ -565,21 +975,52 @@ export class HyperliquidClient {
         }
     }
 
-    /**
-     * Get recent trades
-     */
     async getRecentTrades(symbol: string): Promise<any[]> {
         try {
-            // recentTrades is not available in PublicClient, returning empty array for now
-            // const result = await this.publicClient.recentTrades({ coin: symbol });
             return [];
         } catch (error) {
             logger.error(`Failed to get recent trades for ${symbol}:`, error);
             return [];
         }
     }
+
+    /**
+     * Get anti-churn statistics for monitoring
+     */
+    getAntiChurnStats(): {
+        orderStats: Record<string, OrderStats>;
+        fillRates: Record<string, { rate: number; filled: number; total: number }>;
+        attemptCounts: Record<string, OrderAttempt>;
+        pendingOrders: number;
+    } {
+        const fillRates: Record<string, { rate: number; filled: number; total: number }> = {};
+        
+        for (const [symbol, stats] of this.orderStats.entries()) {
+            fillRates[symbol] = {
+                rate: stats.submitted > 0 ? stats.filled / stats.submitted : 0,
+                filled: stats.filled,
+                total: stats.submitted
+            };
+        }
+
+        const attemptCounts: Record<string, OrderAttempt> = {};
+        for (const [symbol, attempts] of this.orderAttemptCount.entries()) {
+            attemptCounts[symbol] = attempts;
+        }
+
+        const orderStats: Record<string, OrderStats> = {};
+        for (const [symbol, stats] of this.orderStats.entries()) {
+            orderStats[symbol] = stats;
+        }
+
+        return {
+            orderStats,
+            fillRates,
+            attemptCounts,
+            pendingOrders: this.pendingOrders.size
+        };
+    }
 }
 
-// Singleton instance
 const hyperliquidClient = new HyperliquidClient();
 export default hyperliquidClient;

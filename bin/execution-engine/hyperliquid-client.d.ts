@@ -9,6 +9,7 @@
  * - Overfill protection
  * - State snapshots
  * - Message bus integration
+ * - ENHANCED: Anti-churn protections with exponential backoff
  */
 export interface HyperliquidPosition {
     symbol: string;
@@ -34,6 +35,19 @@ export interface HyperliquidOrderResult {
     status: string;
     error?: string;
 }
+interface OrderStats {
+    submitted: number;
+    filled: number;
+    failed: number;
+    lastFailureTime?: number;
+    consecutiveFailures: number;
+}
+interface OrderAttempt {
+    count: number;
+    lastAttempt: number;
+    consecutiveFailures: number;
+    lastSuccess?: number;
+}
 export declare class HyperliquidClient {
     private transport;
     private publicClient;
@@ -45,84 +59,93 @@ export declare class HyperliquidClient {
     private assetIndices;
     private assetNames;
     private isInitialized;
+    private readonly ORDER_TIMEOUT_MS;
+    private pendingOrders;
+    private orderStats;
+    private lastOrderTime;
+    private readonly ORDER_COOLDOWN_MS;
+    private readonly MIN_ORDER_COOLDOWN_MS;
+    private readonly EXTENDED_COOLDOWN_MS;
+    private orderAttemptCount;
+    private readonly MAX_CONSECUTIVE_FAILURES;
+    private readonly FAILURE_BACKOFF_MULTIPLIER;
+    private readonly MAX_BACKOFF_MS;
+    private readonly MIN_ORDER_SIZES;
+    private readonly MIN_CONFIDENCE;
+    private readonly MIN_ORDER_BOOK_LEVELS;
+    private readonly MIN_ORDER_BOOK_NOTIONAL_DEPTH_K;
+    private readonly MAX_ALLOWED_SPREAD;
+    private readonly MIN_FILL_RATE;
+    private readonly CRITICAL_FILL_RATE;
+    private symbolFillRates;
     constructor();
-    /**
-     * Initialize asset indices from the API
-     */
     initialize(): Promise<void>;
-    /**
-     * Check if the client is configured for trading
-     */
     isConfigured(): boolean;
-    /**
-     * Get the wallet address (signer)
-     */
     getWalletAddress(): string;
-    /**
-     * Get the user address (target account)
-     */
     getUserAddress(): string;
-    /**
-     * Get asset index by symbol
-     */
     getAssetIndex(symbol: string): number | undefined;
-    /**
-     * Get all current mid prices (with rate limiting)
-     */
     getAllMids(): Promise<Record<string, number>>;
-    /**
-     * Get account state (balance, positions) - with rate limiting
-     */
     getAccountState(): Promise<HyperliquidAccountState>;
-    /**
-     * Get open orders
-     */
     getOpenOrders(): Promise<any[]>;
     /**
-     * Place an order (enhanced with rate limiting, retry logic, and overfill protection)
+     * ENHANCED: Calculate dynamic cooldown based on recent failure history
      */
+    private calculateDynamicCooldown;
+    /**
+     * ENHANCED: Check if we should allow a new order for this symbol (comprehensive churn prevention)
+     */
+    private canPlaceNewOrder;
+    /**
+     * ENHANCED: Record order attempt result with comprehensive tracking
+     */
+    private recordOrderAttempt;
+    /**
+     * ENHANCED: Get fill rate for a symbol
+     */
+    private getSymbolFillRate;
+    /**
+     * ENHANCED: Update order stats with fill rate tracking
+     */
+    private updateOrderStats;
+    private calculateDepthNotional;
+    private validateOrderBookDepth;
+    private checkSpread;
     placeOrder(params: {
         symbol: string;
         side: 'BUY' | 'SELL';
         size: number;
         price?: number;
         reduceOnly?: boolean;
+        bypassCooldown?: boolean;
         orderType?: 'limit' | 'market';
         clientOrderId?: string;
+        confidence?: number;
     }): Promise<HyperliquidOrderResult>;
-    /**
-     * Check if an error is retryable (temporary network/server issues)
-     */
+    private validateOrderSize;
+    private getAggressiveMarketPrice;
+    private getBufferedBookPrice;
     private isRetryableError;
-    /**
-     * Cancel an order
-     */
+    checkOrderTimeouts(): Promise<void>;
     cancelOrder(symbol: string, orderId: string): Promise<boolean>;
-    /**
-     * Cancel all open orders
-     */
     cancelAllOrders(): Promise<boolean>;
-    /**
-     * Update leverage for a symbol
-     */
     updateLeverage(symbol: string, leverage: number, isCross?: boolean): Promise<boolean>;
-    /**
-     * Format price to appropriate precision for the asset
-     * BTC uses $1 tick, ETH uses $0.1, SOL/others use $0.01
-     */
     private formatPrice;
-    /**
-     * Format size to appropriate precision for the asset
-     */
     private formatSize;
-    /**
-     * Get L2 order book
-     */
     getL2Book(symbol: string): Promise<any>;
-    /**
-     * Get recent trades
-     */
     getRecentTrades(symbol: string): Promise<any[]>;
+    /**
+     * Get anti-churn statistics for monitoring
+     */
+    getAntiChurnStats(): {
+        orderStats: Record<string, OrderStats>;
+        fillRates: Record<string, {
+            rate: number;
+            filled: number;
+            total: number;
+        }>;
+        attemptCounts: Record<string, OrderAttempt>;
+        pendingOrders: number;
+    };
 }
 declare const hyperliquidClient: HyperliquidClient;
 export default hyperliquidClient;

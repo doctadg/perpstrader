@@ -50,10 +50,9 @@ Executed:                29 (1.9%) 🔴
 ## ✅ Action Checklist
 
 ### Today (Critical)
-- [ ] Set HYPERLIQUID_API_KEY environment variable
-- [ ] Set HYPERLIQUID_API_SECRET environment variable
+- [ ] Set HYPERLIQUID_PRIVATE_KEY environment variable
 - [ ] Start ChromaDB service
-- [ ] Set CHROMADB_URL environment variable
+- [ ] Set CHROMA_HOST / CHROMA_PORT (or CHROMA_URL) environment variables
 - [ ] Enable SQLite WAL mode
 
 ### This Week (High Priority)
@@ -84,8 +83,8 @@ Executed:                29 (1.9%) 🔴
 sqlite3 data/trading.db "PRAGMA journal_mode=WAL;"
 
 # Check environment variables
-echo $HYPERLIQUID_API_KEY
-echo $CHROMADB_URL
+echo $HYPERLIQUID_PRIVATE_KEY
+echo $CHROMA_URL
 
 # Start ChromaDB
 docker start chromadb

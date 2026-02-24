@@ -72,6 +72,29 @@ class PositionRecoveryService {
     async analyzePositions(portfolio) {
         const issues = [];
         for (const position of portfolio.positions) {
+            try {
+                const positionRisk = await risk_manager_1.default.checkPositionRisk(position, portfolio);
+                if (!positionRisk.approved || risk_manager_1.default.shouldClosePosition(position)) {
+                    const priority = positionRisk.warnings.some(warning => warning.includes('CRITICAL') || warning.includes('Large unrealized loss')) ? 'CRITICAL' : 'HIGH';
+                    const riskReason = positionRisk.warnings.length > 0
+                        ? positionRisk.warnings.join('; ')
+                        : `Risk score ${positionRisk.riskScore.toFixed(2)} exceeded threshold`;
+                    issues.push({
+                        position,
+                        issue: 'RISK_LIMIT',
+                        action: {
+                            type: 'CLOSE',
+                            reason: `Risk manager exit trigger: ${riskReason}`,
+                            priority,
+                        },
+                        detectedAt: new Date(),
+                    });
+                    continue;
+                }
+            }
+            catch (riskError) {
+                logger_1.default.warn(`[PositionRecovery] Risk check failed for ${position.symbol}:`, riskError);
+            }
             // Check for orphaned positions (no matching strategy)
             if (await this.isOrphanedPosition(position)) {
                 issues.push({
@@ -88,7 +111,7 @@ class PositionRecoveryService {
             }
             // Check for excessive unrealized loss
             const lossPercent = position.unrealizedPnL / (position.size * position.entryPrice);
-            if (lossPercent < -0.15) { // 15% loss
+            if (lossPercent < -0.05) { // 5% loss hard fallback
                 issues.push({
                     position,
                     issue: 'EXCESSIVE_LOSS',
@@ -254,14 +277,17 @@ class PositionRecoveryService {
                 strategyId: 'position-recovery',
                 reason: `Recovery: ${reason}`,
             };
-            const riskAssessment = await risk_manager_1.default.evaluateSignal(signal, await execution_engine_1.default.getPortfolio());
-            if (riskAssessment.approved) {
-                await execution_engine_1.default.executeSignal(signal, riskAssessment);
-                logger_1.default.info(`[PositionRecovery] Successfully closed position ${position.symbol}`);
-            }
-            else {
-                logger_1.default.error(`[PositionRecovery] Risk manager rejected recovery close for ${position.symbol}`);
-            }
+            const riskAssessment = {
+                approved: true,
+                suggestedSize: Math.abs(position.size),
+                riskScore: 0,
+                warnings: ['Exit signal', 'Position recovery close'],
+                stopLoss: 0,
+                takeProfit: 0,
+                leverage: position.leverage,
+            };
+            await execution_engine_1.default.executeSignal(signal, riskAssessment);
+            logger_1.default.info(`[PositionRecovery] Successfully closed position ${position.symbol}`);
         }
         catch (error) {
             logger_1.default.error(`[PositionRecovery] Failed to close position ${position.symbol}:`, error);
@@ -282,15 +308,21 @@ class PositionRecoveryService {
                 price: position.markPrice,
                 type: 'MARKET',
                 timestamp: new Date(),
-                confidence: 0.8,
+                confidence: 1.0,
                 strategyId: 'position-recovery',
                 reason: `Recovery: ${reason}`,
             };
-            const riskAssessment = await risk_manager_1.default.evaluateSignal(signal, portfolio);
-            if (riskAssessment.approved) {
-                await execution_engine_1.default.executeSignal(signal, riskAssessment);
-                logger_1.default.info(`[PositionRecovery] Successfully reduced position ${position.symbol} by 50%`);
-            }
+            const riskAssessment = {
+                approved: true,
+                suggestedSize: newSize,
+                riskScore: 0,
+                warnings: ['Exit signal', 'Position recovery reduce'],
+                stopLoss: 0,
+                takeProfit: 0,
+                leverage: position.leverage,
+            };
+            await execution_engine_1.default.executeSignal(signal, riskAssessment);
+            logger_1.default.info(`[PositionRecovery] Successfully reduced position ${position.symbol} by 50%`);
         }
         catch (error) {
             logger_1.default.error(`[PositionRecovery] Failed to reduce position ${position.symbol}:`, error);

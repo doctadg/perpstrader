@@ -55,6 +55,8 @@ cp .env.example .env
 
 # 5. Start the system
 ./scripts/perps-control start
+# or (without systemd)
+./scripts/quick-start.sh start
 ```
 
 ### Access the Dashboard
@@ -85,6 +87,28 @@ HYPERLIQUID_PRIVATE_KEY=your_key_here
 
 # Optional
 OPENROUTER_API_KEY=your_key_here
+OPENROUTER_LABELING_MODEL=z-ai/glm-4.7-flash
+
+# Optional (Safekeeping agent wallet auto-bootstrap)
+ETH_PRIVATE_KEY=
+BSC_PRIVATE_KEY=
+SOLANA_SECRET_KEY=
+SAFEKEEPING_WALLET_STORE_PATH=config/openclaw/wallets.json
+SAFEKEEPING_AUTO_CREATE_WALLETS=true
+```
+
+Generate or view local safekeeping wallet addresses:
+```bash
+npm run wallets:setup
+```
+
+OpenClaw/ClawDBot wallet access:
+```bash
+# show fundable addresses
+npm run wallets:openclaw
+
+# export private-key env file for local ClawDBot process
+npm run wallets:openclaw:env
 ```
 
 ## 🎮 Service Control
@@ -101,6 +125,9 @@ OPENROUTER_API_KEY=your_key_here
 
 # Restart specific service
 ./scripts/perps-control restart news-agent
+
+# Run end-to-end readiness audit
+./scripts/health-audit.sh
 ```
 
 ## 📊 System Components

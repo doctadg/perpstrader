@@ -107,9 +107,14 @@ class FundingArbitrageJob {
 
       // Log cross-exchange opportunities
       for (const opp of crossExchangeOpps) {
-        const action = opp.recommendedAction === 'long_hl_short_aster' ? 'Long HL / Short Aster' : 'Short HL / Long Aster';
+        const action = opp.longExchange && opp.shortExchange
+          ? `Long ${this.formatExchangeName(opp.longExchange)} / Short ${this.formatExchangeName(opp.shortExchange)}`
+          : 'Monitor';
         const emoji = opp.urgency === 'high' ? '🔥' : opp.urgency === 'medium' ? '⚡' : '💡';
-        logger.info(`[FundingJob] ${emoji} CROSS-EXCHANGE ${opp.symbol}: ${opp.annualizedSpread.toFixed(2)}% spread - ${action} (${opp.confidence.toFixed(0)}% confidence)`);
+        logger.info(
+          `[FundingJob] ${emoji} CROSS-EXCHANGE ${opp.symbol} ${this.formatExchangeName(opp.exchangeA)}/${this.formatExchangeName(opp.exchangeB)}: ` +
+          `${opp.annualizedSpread.toFixed(2)}% spread - ${action} (${opp.confidence.toFixed(0)}% confidence)`
+        );
       }
 
       // Check for extreme events and send alerts
@@ -167,11 +172,15 @@ class FundingArbitrageJob {
 
   private async checkCrossExchangeAlerts(opportunities: Array<{
     symbol: string;
-    hyperliquidFunding: number;
-    asterdexFunding: number;
+    exchangeA: string;
+    exchangeB: string;
+    exchangeAFunding: number;
+    exchangeBFunding: number;
     spread: number;
     annualizedSpread: number;
     recommendedAction: string | null;
+    longExchange: string | null;
+    shortExchange: string | null;
     urgency: string;
     confidence: number;
   }>): Promise<void> {
@@ -184,11 +193,15 @@ class FundingArbitrageJob {
       logger.warn(`[FundingJob] ${highUrgency.length} HIGH URGENCY cross-exchange opportunities detected!`);
 
       for (const opp of highUrgency) {
-        const action = opp.recommendedAction === 'long_hl_short_aster' 
-          ? 'Long HL / Short Asterdex' 
-          : 'Short HL / Long Asterdex';
+        const action = opp.longExchange && opp.shortExchange
+          ? `Long ${this.formatExchangeName(opp.longExchange)} / Short ${this.formatExchangeName(opp.shortExchange)}`
+          : opp.recommendedAction || 'Monitor';
         
-        logger.warn(`[FundingJob] CROSS-EXCHANGE ALERT [${opp.urgency.toUpperCase()}] ${opp.symbol}: ${opp.annualizedSpread.toFixed(2)}% spread`);
+        logger.warn(
+          `[FundingJob] CROSS-EXCHANGE ALERT [${opp.urgency.toUpperCase()}] ` +
+          `${opp.symbol} ${this.formatExchangeName(opp.exchangeA)}/${this.formatExchangeName(opp.exchangeB)}: ` +
+          `${opp.annualizedSpread.toFixed(2)}% spread`
+        );
         logger.warn(`[FundingJob] Action: ${action} (Confidence: ${opp.confidence.toFixed(0)}%)`);
 
         await this.sendCrossExchangeNotification(opp);
@@ -198,11 +211,15 @@ class FundingArbitrageJob {
 
   private async sendCrossExchangeNotification(opportunity: {
     symbol: string;
-    hyperliquidFunding: number;
-    asterdexFunding: number;
+    exchangeA: string;
+    exchangeB: string;
+    exchangeAFunding: number;
+    exchangeBFunding: number;
     spread: number;
     annualizedSpread: number;
     recommendedAction: string | null;
+    longExchange: string | null;
+    shortExchange: string | null;
     urgency: string;
     confidence: number;
   }): Promise<void> {
@@ -217,20 +234,22 @@ class FundingArbitrageJob {
         const { default: TelegramBot } = await import('node-telegram-bot-api');
         const bot = new TelegramBot(telegramToken, { polling: false });
         
-        const action = opportunity.recommendedAction === 'long_hl_short_aster' 
-          ? '🟢 Long HL / 🔴 Short Asterdex' 
-          : '🔴 Short HL / 🟢 Long Asterdex';
+        const action = opportunity.longExchange && opportunity.shortExchange
+          ? `🟢 Long ${this.formatExchangeName(opportunity.longExchange)} / 🔴 Short ${this.formatExchangeName(opportunity.shortExchange)}`
+          : (opportunity.recommendedAction || 'Monitor');
         
-        const hlRate = (opportunity.hyperliquidFunding * 100).toFixed(4);
-        const asterRate = (opportunity.asterdexFunding * 100).toFixed(4);
+        const rateA = (opportunity.exchangeAFunding * 100).toFixed(4);
+        const rateB = (opportunity.exchangeBFunding * 100).toFixed(4);
+        const exchangeAName = this.formatExchangeName(opportunity.exchangeA);
+        const exchangeBName = this.formatExchangeName(opportunity.exchangeB);
         
         const message = `
 ⚡ <b>CROSS-EXCHANGE ARBITRAGE ALERT</b> ⚡
 
 <b>${opportunity.symbol}</b> Funding Rate Divergence
 
-📊 Hyperliquid: <code>${hlRate}%</code>
-📊 Asterdex: <code>${asterRate}%</code>
+📊 ${exchangeAName}: <code>${rateA}%</code>
+📊 ${exchangeBName}: <code>${rateB}%</code>
 📈 Spread: <code>${opportunity.annualizedSpread.toFixed(2)}% APR</code>
 
 🎯 <b>Action:</b> ${action}
@@ -251,6 +270,19 @@ class FundingArbitrageJob {
       }
     } catch (error) {
       logger.error('[FundingJob] Failed to send cross-exchange notification:', error);
+    }
+  }
+
+  private formatExchangeName(exchange: string): string {
+    switch (exchange) {
+      case 'hyperliquid':
+        return 'Hyperliquid';
+      case 'asterdex':
+        return 'Asterdex';
+      case 'binance':
+        return 'Binance';
+      default:
+        return exchange;
     }
   }
 

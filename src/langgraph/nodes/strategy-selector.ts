@@ -7,9 +7,18 @@ import { v4 as uuidv4 } from 'uuid';
 import dataManager from '../../data-manager/data-manager';
 import logger from '../../shared/logger';
 
+// MINIMUM QUALITY THRESHOLDS (previously ultra-aggressive, now with basic sanity checks)
+const MIN_SHARPE_RATIO = -0.3; // Reduced from aggressive -0.5, but still allows some exploration
+const MIN_WIN_RATE = 0.15; // Minimum 15% win rate (up from 10%)
+const MAX_DRAWDOWN = 0.80; // Maximum 80% drawdown (down from 70% tolerance)
+const MIN_TRADES = 3; // Minimum trades for statistical significance
+const MIN_TOTAL_RETURN = -10; // Allow strategies that don't lose more than 10%
+
 /**
  * Strategy Selector Node
  * Ranks strategies by risk-adjusted returns and selects the best one
+ * 
+ * ENHANCED: Added minimum quality thresholds to prevent spam from untested strategies
  */
 export async function strategySelectorNode(state: AgentState): Promise<Partial<AgentState>> {
     logger.info(`[StrategySelectorNode] Selecting from ${state.backtestResults.length} strategies`);
@@ -24,26 +33,50 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
     }
 
     try {
-        // AGGRESSIVE MODE: Ultra-relaxed criteria for maximum trading opportunities
-        // Prioritize upside potential over risk metrics
+        // ENHANCED: Filter with minimum quality thresholds
         const viableResults = state.backtestResults.filter(r => {
-            // Accept almost any strategy with a trading signal
-            // Minimum: Sharpe > -0.5 (even negative Sharpe accepted if not terrible)
-            // WinRate > 10% (very low bar - focus on big wins)
-            // MaxDrawdown < 70% (tolerate significant drawdowns for big upside)
-            // At least 1 trade
-            return r.totalTrades >= 1;
+            // Must have minimum trades for statistical significance
+            if (r.totalTrades < MIN_TRADES) {
+                logger.debug(`[StrategySelectorNode] Filtered out ${r.strategyId}: only ${r.totalTrades} trades (min: ${MIN_TRADES})`);
+                return false;
+            }
+            
+            // Check Sharpe ratio isn't catastrophically bad
+            if (r.sharpeRatio < MIN_SHARPE_RATIO) {
+                logger.debug(`[StrategySelectorNode] Filtered out ${r.strategyId}: Sharpe ${r.sharpeRatio.toFixed(2)} < ${MIN_SHARPE_RATIO}`);
+                return false;
+            }
+            
+            // Check win rate meets minimum
+            if (r.winRate < MIN_WIN_RATE * 100) {
+                logger.debug(`[StrategySelectorNode] Filtered out ${r.strategyId}: Win rate ${r.winRate.toFixed(1)}% < ${MIN_WIN_RATE * 100}%`);
+                return false;
+            }
+            
+            // Check drawdown isn't catastrophic
+            if (r.maxDrawdown > MAX_DRAWDOWN * 100) {
+                logger.debug(`[StrategySelectorNode] Filtered out ${r.strategyId}: Drawdown ${r.maxDrawdown.toFixed(1)}% > ${MAX_DRAWDOWN * 100}%`);
+                return false;
+            }
+            
+            // Check total return isn't a total loss
+            if (r.totalReturn < MIN_TOTAL_RETURN) {
+                logger.debug(`[StrategySelectorNode] Filtered out ${r.strategyId}: Return ${r.totalReturn.toFixed(1)}% < ${MIN_TOTAL_RETURN}%`);
+                return false;
+            }
+            
+            return true;
         });
 
-        // If still no viable strategies, accept ANY strategy that was backtested
-        const aggressiveResults = viableResults.length > 0
+        // If no viable strategies pass quality filters, be more lenient but still require some data
+        const fallbackResults = viableResults.length > 0
             ? viableResults
             : state.backtestResults.filter(r => r.totalTrades >= 1);
 
-        if (aggressiveResults.length === 0) {
-            // ULTRA-AGGRESSIVE FALLBACK: Even accept strategies with 0 trades if they have good parameters
+        if (fallbackResults.length === 0) {
+            // No strategies with any trades - use best strategy idea with warnings
             if (state.strategyIdeas.length > 0) {
-                logger.info('[StrategySelectorNode] No backtest data, using best strategy idea');
+                logger.warn('[StrategySelectorNode] No backtest data available, using best strategy idea with caution');
                 const bestIdea = state.strategyIdeas[0];
 
                 const fallbackStrategy: Strategy = {
@@ -56,13 +89,17 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
                     parameters: bestIdea.parameters,
                     entryConditions: bestIdea.entryConditions,
                     exitConditions: bestIdea.exitConditions,
-                    riskParameters: bestIdea.riskParameters,
+                    riskParameters: {
+                        ...bestIdea.riskParameters,
+                        // Reduce position size for untested strategies
+                        maxPositionSize: bestIdea.riskParameters.maxPositionSize * 0.5,
+                    },
                     isActive: true,
                     performance: {
                         totalTrades: 0,
                         winningTrades: 0,
                         losingTrades: 0,
-                        winRate: 50, // Assumption
+                        winRate: 50,
                         totalPnL: 0,
                         sharpeRatio: 0,
                         maxDrawdown: 0,
@@ -83,7 +120,7 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
                     thoughts: [
                         ...state.thoughts,
                         `No backtest data, using fallback strategy: ${fallbackStrategy.name}`,
-                        'Proceeding with ultra-aggressive approach',
+                        'WARNING: Strategy has no backtest data - using reduced position size',
                     ],
                 };
             }
@@ -99,36 +136,38 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
             };
         }
 
-        // AGGRESSIVE SCORING: Weight return heavily, minimize importance of drawdown
-        // New weights: Return (60%) + Sharpe (20%) + Win Rate (10%) + 1/Drawdown (10%)
-        // This prioritizes strategies with high upside even if risky
-        const scoredResults = aggressiveResults.map(r => {
+        // ENHANCED: Balanced scoring that still prioritizes returns but respects risk
+        // Weights: Return (40%) + Sharpe (25%) + Win Rate (20%) + Drawdown Penalty (15%)
+        const scoredResults = fallbackResults.map(r => {
             const idea = state.strategyIdeas.find(i => i.name === r.strategyId) ||
                 state.strategyIdeas[state.backtestResults.indexOf(r)];
 
-            // Boost return score significantly
-            const returnScore = Math.max(0, r.totalReturn / 100 * 0.6);
+            // Return score (40% weight) - normalized to 0-0.4 range
+            const returnScore = Math.max(0, Math.min(r.totalReturn / 50, 1)) * 0.4;
 
-            // Reduce Sharpe weight
-            const sharpeScore = Math.max(0, r.sharpeRatio) * 0.2;
+            // Sharpe ratio score (25% weight) - normalized, bonus for positive Sharpe
+            const sharpeScore = Math.max(0, (r.sharpeRatio + 1) / 3) * 0.25;
 
-            // Minimal win rate contribution
-            const winRateScore = (r.winRate / 100) * 0.1;
+            // Win rate score (20% weight)
+            const winRateScore = (r.winRate / 100) * 0.2;
 
-            // Reduced drawdown penalty
-            const drawdownScore = r.maxDrawdown > 0
-                ? (1 / Math.max(r.maxDrawdown, 1)) * 0.1 * 5
-                : 0.1;
+            // Drawdown penalty (15% weight) - less penalty for lower drawdown
+            const drawdownScore = r.maxDrawdown < 100 
+                ? ((100 - r.maxDrawdown) / 100) * 0.15
+                : 0;
 
-            // AGGRESSIVE BONUS: Extra points for high positive returns
-            const upsideBonus = r.totalReturn > 5 ? 0.2 : r.totalReturn > 2 ? 0.1 : 0;
+            // SMALL bonus for high positive returns (capped)
+            const upsideBonus = r.totalReturn > 10 ? 0.05 : r.totalReturn > 5 ? 0.025 : 0;
 
-            const score = returnScore + sharpeScore + winRateScore + drawdownScore + upsideBonus;
+            // PENALTY for very few trades (low statistical significance)
+            const sampleSizePenalty = r.totalTrades < MIN_TRADES ? -0.1 : 0;
+
+            const score = returnScore + sharpeScore + winRateScore + drawdownScore + upsideBonus + sampleSizePenalty;
 
             return { result: r, idea, score };
         });
 
-        // Sort by score
+        // Sort by score descending
         scoredResults.sort((a, b) => b.score - a.score);
         const best = scoredResults[0];
 
@@ -140,6 +179,12 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
                 thoughts: [...state.thoughts, 'Could not match backtest result to strategy idea'],
             };
         }
+
+        // Log all scored results for debugging
+        logger.info(`[StrategySelectorNode] Top 3 strategies:`);
+        scoredResults.slice(0, 3).forEach((s, i) => {
+            logger.info(`  ${i + 1}. ${s.idea.name}: score=${s.score.toFixed(3)}, return=${s.result.totalReturn.toFixed(1)}%, sharpe=${s.result.sharpeRatio.toFixed(2)}, winRate=${s.result.winRate.toFixed(0)}%, trades=${s.result.totalTrades}`);
+        });
 
         // Convert StrategyIdea to Strategy
         const strategy: Strategy = {
@@ -173,17 +218,16 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
         // Save strategy to database
         await dataManager.saveStrategy(strategy);
 
-        logger.info(`[StrategySelectorNode] [AGGRESSIVE] Selected: ${strategy.name} (Score: ${best.score.toFixed(2)})`);
+        logger.info(`[StrategySelectorNode] Selected: ${strategy.name} (Score: ${best.score.toFixed(3)}, Trades: ${best.result.totalTrades})`);
 
         return {
             currentStep: 'STRATEGY_SELECTED',
             selectedStrategy: strategy,
-            shouldExecute: true, // ALWAYS execute in aggressive mode
+            shouldExecute: true,
             thoughts: [
                 ...state.thoughts,
-                `[AGGRESSIVE MODE] Selected strategy: ${strategy.name}`,
-                `Score: ${best.score.toFixed(2)} (Sharpe: ${best.result.sharpeRatio.toFixed(2)}, Return: ${best.result.totalReturn.toFixed(2)}%, WinRate: ${best.result.winRate.toFixed(0)}%)`,
-                `Proceeding with execution - Ultra-aggressive mode active`,
+                `Selected strategy: ${strategy.name}`,
+                `Score: ${best.score.toFixed(3)} (Sharpe: ${best.result.sharpeRatio.toFixed(2)}, Return: ${best.result.totalReturn.toFixed(2)}%, WinRate: ${best.result.winRate.toFixed(0)}%, Trades: ${best.result.totalTrades})`,
             ],
         };
     } catch (error) {

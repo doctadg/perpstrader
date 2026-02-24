@@ -1,7 +1,6 @@
 /**
  * Cross-Exchange Arbitrage Detector
- * Compares funding rates between Hyperliquid and Asterdex
- * Identifies arbitrage opportunities for cross-exchange funding rate arbitrage
+ * Compares funding rates pairwise across Hyperliquid, Asterdex, and Binance.
  */
 
 import Database from 'better-sqlite3';
@@ -9,28 +8,42 @@ import logger from '../shared/logger';
 import config from '../shared/config';
 import hyperliquidAllMarkets from './hyperliquid-all-markets';
 import asterdexClient, { AsterdexFundingRate } from './asterdex-client';
+import binanceFundingClient, { BinanceFundingRate } from './binance-funding-client';
 
-// Cross-exchange opportunity structure
+type ExchangeName = 'hyperliquid' | 'asterdex' | 'binance';
+type Urgency = 'high' | 'medium' | 'low';
+
+interface ExchangeFundingData {
+  symbol: string;
+  fundingRate: number;
+  markPrice: number;
+  volume24h: number;
+  timestamp: number;
+}
+
 interface CrossExchangeOpportunity {
   id?: number;
   symbol: string;
-  hyperliquidFunding: number;
-  asterdexFunding: number;
-  spread: number; // Absolute difference
-  spreadPercent: number; // Spread as percentage
-  annualizedSpread: number; // Annualized difference
-  recommendedAction: 'long_hl_short_aster' | 'short_hl_long_aster' | null;
+  exchangeA: ExchangeName;
+  exchangeB: ExchangeName;
+  exchangeAFunding: number;
+  exchangeBFunding: number;
+  spread: number;
+  spreadPercent: number;
+  annualizedSpread: number;
+  recommendedAction: string | null;
+  longExchange: ExchangeName | null;
+  shortExchange: ExchangeName | null;
   estimatedYearlyYield: number;
-  urgency: 'high' | 'medium' | 'low';
+  urgency: Urgency;
   timestamp: number;
   isActive: boolean;
-  hyperliquidMarkPrice: number;
-  asterdexMarkPrice: number;
+  exchangeAMarkPrice: number;
+  exchangeBMarkPrice: number;
   priceDiffPercent: number;
-  confidence: number; // 0-100 based on data quality
+  confidence: number;
 }
 
-// Exchange info
 interface ExchangeInfo {
   name: string;
   connected: boolean;
@@ -38,40 +51,37 @@ interface ExchangeInfo {
   symbols: string[];
 }
 
-// Scanner configuration
 interface ArbitrageConfig {
-  minSpreadThreshold: number; // Minimum spread to consider (default: 0.0001 = 0.01%)
-  minAnnualizedSpread: number; // Minimum annualized spread (default: 10% APR)
-  highUrgencyThreshold: number; // Annualized spread for high urgency (default: 50% APR)
-  mediumUrgencyThreshold: number; // Annualized spread for medium urgency (default: 25% APR)
-  priceDiffThreshold: number; // Max acceptable price difference between exchanges
-  symbolsToTrack: string[]; // Priority symbols to always check
+  minSpreadThreshold: number;
+  minAnnualizedSpread: number;
+  highUrgencyThreshold: number;
+  mediumUrgencyThreshold: number;
+  priceDiffThreshold: number;
+  symbolsToTrack: string[];
 }
 
 class CrossExchangeArbitrage {
+  private readonly opportunitiesTable = 'cross_exchange_opportunities_v2';
   private db: Database.Database | null = null;
   private dbPath: string;
-  private initialized: boolean = false;
+  private initialized = false;
   private config: ArbitrageConfig;
+  private readonly exchangeOrder: ExchangeName[] = ['hyperliquid', 'asterdex', 'binance'];
 
   constructor() {
     this.dbPath = process.env.FUNDING_DB_PATH || './data/funding.db';
-    
-    // Load configuration
+
     const arbConfig = config.getSection('crossExchangeArbitrage') || {};
     this.config = {
       minSpreadThreshold: arbConfig.minSpreadThreshold || 0.0001,
       minAnnualizedSpread: arbConfig.minAnnualizedSpread || 10,
       highUrgencyThreshold: arbConfig.highUrgencyThreshold || 50,
       mediumUrgencyThreshold: arbConfig.mediumUrgencyThreshold || 25,
-      priceDiffThreshold: arbConfig.priceDiffThreshold || 0.5, // 0.5% max price diff
+      priceDiffThreshold: arbConfig.priceDiffThreshold || 0.5,
       symbolsToTrack: arbConfig.symbolsToTrack || ['BTC', 'ETH', 'SOL', 'AVAX', 'ARB', 'OP'],
     };
   }
 
-  /**
-   * Initialize database connection
-   */
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
@@ -87,46 +97,47 @@ class CrossExchangeArbitrage {
     }
   }
 
-  /**
-   * Create database tables
-   */
   private createTables(): void {
     if (!this.db) return;
 
-    // Cross-exchange opportunities table
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS cross_exchange_opportunities (
+      CREATE TABLE IF NOT EXISTS ${this.opportunitiesTable} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol TEXT NOT NULL,
-        hyperliquidFunding REAL NOT NULL,
-        asterdexFunding REAL NOT NULL,
+        exchangeA TEXT NOT NULL,
+        exchangeB TEXT NOT NULL,
+        exchangeAFunding REAL NOT NULL,
+        exchangeBFunding REAL NOT NULL,
         spread REAL NOT NULL,
         spreadPercent REAL NOT NULL,
         annualizedSpread REAL NOT NULL,
-        recommendedAction TEXT CHECK(recommendedAction IN ('long_hl_short_aster', 'short_hl_long_aster')),
+        recommendedAction TEXT,
+        longExchange TEXT,
+        shortExchange TEXT,
         estimatedYearlyYield REAL,
         urgency TEXT CHECK(urgency IN ('high', 'medium', 'low')),
         timestamp INTEGER NOT NULL,
         isActive INTEGER DEFAULT 1,
-        hyperliquidMarkPrice REAL DEFAULT 0,
-        asterdexMarkPrice REAL DEFAULT 0,
+        exchangeAMarkPrice REAL DEFAULT 0,
+        exchangeBMarkPrice REAL DEFAULT 0,
         priceDiffPercent REAL DEFAULT 0,
         confidence REAL DEFAULT 100
       );
 
-      CREATE INDEX IF NOT EXISTS idx_cross_exchange_symbol 
-        ON cross_exchange_opportunities(symbol);
-      CREATE INDEX IF NOT EXISTS idx_cross_exchange_active 
-        ON cross_exchange_opportunities(isActive);
-      CREATE INDEX IF NOT EXISTS idx_cross_exchange_timestamp 
-        ON cross_exchange_opportunities(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_cross_exchange_spread 
-        ON cross_exchange_opportunities(spread);
-      CREATE INDEX IF NOT EXISTS idx_cross_exchange_urgency 
-        ON cross_exchange_opportunities(urgency);
+      CREATE INDEX IF NOT EXISTS idx_cross_exchange_v2_symbol
+        ON ${this.opportunitiesTable}(symbol);
+      CREATE INDEX IF NOT EXISTS idx_cross_exchange_v2_active
+        ON ${this.opportunitiesTable}(isActive);
+      CREATE INDEX IF NOT EXISTS idx_cross_exchange_v2_timestamp
+        ON ${this.opportunitiesTable}(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_cross_exchange_v2_spread
+        ON ${this.opportunitiesTable}(annualizedSpread);
+      CREATE INDEX IF NOT EXISTS idx_cross_exchange_v2_urgency
+        ON ${this.opportunitiesTable}(urgency);
+      CREATE INDEX IF NOT EXISTS idx_cross_exchange_v2_pair
+        ON ${this.opportunitiesTable}(exchangeA, exchangeB);
     `);
 
-    // Exchange status tracking
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS exchange_status (
         exchange TEXT PRIMARY KEY,
@@ -140,9 +151,6 @@ class CrossExchangeArbitrage {
     logger.info('[CrossExchangeArbitrage] Database tables created');
   }
 
-  /**
-   * Scan for cross-exchange arbitrage opportunities
-   */
   async scanForOpportunities(): Promise<CrossExchangeOpportunity[]> {
     await this.initialize();
 
@@ -150,220 +158,286 @@ class CrossExchangeArbitrage {
       const timestamp = Date.now();
       logger.info('[CrossExchangeArbitrage] Starting cross-exchange scan...');
 
-      // Fetch data from both exchanges in parallel
-      const [hlMarkets, asterdexRates] = await Promise.all([
+      const [hlMap, asterMap, binanceMap] = await Promise.all([
         this.fetchHyperliquidData(),
         this.fetchAsterdexData(),
+        this.fetchBinanceData(),
       ]);
 
-      // Update exchange status
-      this.updateExchangeStatus('hyperliquid', hlMarkets.length > 0, hlMarkets.map(m => m.coin));
-      this.updateExchangeStatus('asterdex', asterdexRates.length > 0, asterdexRates.map(r => r.symbol));
+      this.updateExchangeStatus('hyperliquid', hlMap.size > 0, [...hlMap.keys()]);
+      this.updateExchangeStatus('asterdex', asterMap.size > 0, [...asterMap.keys()]);
+      this.updateExchangeStatus('binance', binanceMap.size > 0, [...binanceMap.keys()]);
 
-      // Find overlapping symbols
-      const hlSymbols = new Set(hlMarkets.map(m => m.coin.toUpperCase()));
-      const asterSymbols = new Set(asterdexRates.map(r => r.symbol.toUpperCase()));
-      const overlappingSymbols = Array.from(hlSymbols).filter(s => asterSymbols.has(s));
+      const fundingBook: Record<ExchangeName, Map<string, ExchangeFundingData>> = {
+        hyperliquid: hlMap,
+        asterdex: asterMap,
+        binance: binanceMap,
+      };
 
-      logger.info(`[CrossExchangeArbitrage] Found ${overlappingSymbols.length} overlapping symbols`);
-
-      // Create opportunity map
-      const opportunities: CrossExchangeOpportunity[] = [];
-
-      for (const symbol of overlappingSymbols) {
-        const hlData = hlMarkets.find(m => m.coin.toUpperCase() === symbol);
-        const asterData = asterdexRates.find(r => r.symbol.toUpperCase() === symbol);
-
-        if (!hlData || !asterData) continue;
-
-        const opportunity = this.calculateOpportunity(symbol, hlData, asterData, timestamp);
-        
-        if (opportunity) {
-          opportunities.push(opportunity);
+      const allSymbols = new Set<string>();
+      for (const ex of this.exchangeOrder) {
+        for (const symbol of fundingBook[ex].keys()) {
+          allSymbols.add(symbol);
         }
       }
 
-      // Store opportunities in database
+      const opportunities: CrossExchangeOpportunity[] = [];
+
+      for (const symbol of allSymbols) {
+        const availableExchanges = this.exchangeOrder.filter(ex => fundingBook[ex].has(symbol));
+        if (availableExchanges.length < 2) continue;
+
+        for (let i = 0; i < availableExchanges.length; i++) {
+          for (let j = i + 1; j < availableExchanges.length; j++) {
+            const exchangeA = availableExchanges[i];
+            const exchangeB = availableExchanges[j];
+            const dataA = fundingBook[exchangeA].get(symbol);
+            const dataB = fundingBook[exchangeB].get(symbol);
+
+            if (!dataA || !dataB) continue;
+
+            const opportunity = this.calculateOpportunity(
+              symbol,
+              exchangeA,
+              dataA,
+              exchangeB,
+              dataB,
+              timestamp
+            );
+
+            if (opportunity) {
+              opportunities.push(opportunity);
+            }
+          }
+        }
+      }
+
       if (opportunities.length > 0) {
         await this.storeOpportunities(opportunities);
       }
 
-      // Mark old opportunities as inactive
       this.deactivateOldOpportunities(timestamp);
 
       logger.info(`[CrossExchangeArbitrage] Found ${opportunities.length} cross-exchange opportunities`);
-      
-      // Sort by absolute annualized spread
-      return opportunities.sort((a, b) => 
-        Math.abs(b.annualizedSpread) - Math.abs(a.annualizedSpread)
-      );
+
+      return opportunities.sort((a, b) => Math.abs(b.annualizedSpread) - Math.abs(a.annualizedSpread));
     } catch (error) {
       logger.error('[CrossExchangeArbitrage] Failed to scan for opportunities:', error);
       throw error;
     }
   }
 
-  /**
-   * Fetch Hyperliquid market data
-   */
-  private async fetchHyperliquidData(): Promise<any[]> {
+  private async fetchHyperliquidData(): Promise<Map<string, ExchangeFundingData>> {
     try {
       const { markets } = await hyperliquidAllMarkets.getAllMarkets();
-      return markets;
+      const map = new Map<string, ExchangeFundingData>();
+
+      for (const market of markets) {
+        const symbol = String(market.coin || '').toUpperCase();
+        if (!symbol) continue;
+
+        map.set(symbol, {
+          symbol,
+          fundingRate: Number(market.fundingRate || 0),
+          markPrice: Number(market.markPx || market.markPrice || 0),
+          volume24h: Number(market.volume24h || 0),
+          timestamp: Date.now(),
+        });
+      }
+
+      return map;
     } catch (error) {
       logger.error('[CrossExchangeArbitrage] Failed to fetch Hyperliquid data:', error);
-      return [];
+      return new Map();
     }
   }
 
-  /**
-   * Fetch Asterdex funding rates
-   */
-  private async fetchAsterdexData(): Promise<AsterdexFundingRate[]> {
+  private async fetchAsterdexData(): Promise<Map<string, ExchangeFundingData>> {
     try {
-      // Initialize Asterdex client if needed
-      await asterdexClient.initialize();
-      
       const rates = await asterdexClient.getFundingRates();
-      return rates;
+      return this.mapAsterdexFundingRates(rates);
     } catch (error) {
       logger.error('[CrossExchangeArbitrage] Failed to fetch Asterdex data:', error);
-      return [];
+      return new Map();
     }
   }
 
-  /**
-   * Calculate arbitrage opportunity for a symbol
-   */
+  private async fetchBinanceData(): Promise<Map<string, ExchangeFundingData>> {
+    try {
+      const rates = await binanceFundingClient.getFundingRates();
+      return this.mapBinanceFundingRates(rates);
+    } catch (error) {
+      logger.error('[CrossExchangeArbitrage] Failed to fetch Binance data:', error);
+      return new Map();
+    }
+  }
+
+  private mapAsterdexFundingRates(rates: AsterdexFundingRate[]): Map<string, ExchangeFundingData> {
+    const map = new Map<string, ExchangeFundingData>();
+
+    for (const rate of rates) {
+      const symbol = this.normalizeSymbol(rate.symbol);
+      if (!symbol) continue;
+
+      map.set(symbol, {
+        symbol,
+        fundingRate: Number(rate.fundingRate || 0),
+        markPrice: Number(rate.markPrice || 0),
+        volume24h: Number(rate.volume24h || 0),
+        timestamp: Number(rate.timestamp || Date.now()),
+      });
+    }
+
+    return map;
+  }
+
+  private mapBinanceFundingRates(rates: BinanceFundingRate[]): Map<string, ExchangeFundingData> {
+    const map = new Map<string, ExchangeFundingData>();
+
+    for (const rate of rates) {
+      const symbol = this.normalizeSymbol(rate.symbol);
+      if (!symbol) continue;
+
+      map.set(symbol, {
+        symbol,
+        fundingRate: Number(rate.fundingRate || 0),
+        markPrice: Number(rate.markPrice || 0),
+        volume24h: Number(rate.volume24h || 0),
+        timestamp: Number(rate.timestamp || Date.now()),
+      });
+    }
+
+    return map;
+  }
+
+  private normalizeSymbol(raw: string): string {
+    const symbol = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!symbol) return '';
+
+    const suffixes = ['USDT', 'USD', 'USDC', 'FDUSD', 'BUSD'];
+    for (const suffix of suffixes) {
+      if (symbol.endsWith(suffix) && symbol.length > suffix.length) {
+        return symbol.slice(0, -suffix.length);
+      }
+    }
+
+    return symbol;
+  }
+
   private calculateOpportunity(
     symbol: string,
-    hlData: any,
-    asterData: AsterdexFundingRate,
+    exchangeA: ExchangeName,
+    dataA: ExchangeFundingData,
+    exchangeB: ExchangeName,
+    dataB: ExchangeFundingData,
     timestamp: number
   ): CrossExchangeOpportunity | null {
-    const hlFunding = hlData.fundingRate || 0;
-    const asterFunding = asterData.fundingRate || 0;
-    const hlMarkPrice = hlData.markPx || hlData.markPrice || 0;
-    const asterMarkPrice = asterData.markPrice || 0;
-
-    // Calculate spread
-    const spread = hlFunding - asterFunding;
+    const spread = dataA.fundingRate - dataB.fundingRate;
     const spreadPercent = Math.abs(spread) * 100;
     const annualizedSpread = this.calculateAnnualizedSpread(spread);
 
-    // Check if spread meets threshold
     if (Math.abs(spread) < this.config.minSpreadThreshold) {
       return null;
     }
-
     if (Math.abs(annualizedSpread) < this.config.minAnnualizedSpread) {
       return null;
     }
 
-    // Calculate price difference
     let priceDiffPercent = 0;
-    if (hlMarkPrice > 0 && asterMarkPrice > 0) {
-      priceDiffPercent = Math.abs(hlMarkPrice - asterMarkPrice) / hlMarkPrice * 100;
+    if (dataA.markPrice > 0 && dataB.markPrice > 0) {
+      const avgPrice = (dataA.markPrice + dataB.markPrice) / 2;
+      if (avgPrice > 0) {
+        priceDiffPercent = Math.abs(dataA.markPrice - dataB.markPrice) / avgPrice * 100;
+      }
     }
 
-    // Skip if price difference is too high (execution risk)
     if (priceDiffPercent > this.config.priceDiffThreshold) {
-      logger.warn(`[CrossExchangeArbitrage] ${symbol}: Price diff too high (${priceDiffPercent.toFixed(2)}%), skipping`);
       return null;
     }
 
-    // Determine recommended action
-    let recommendedAction: 'long_hl_short_aster' | 'short_hl_long_aster' | null = null;
-    
-    if (hlFunding > asterFunding) {
-      // HL has higher funding = short HL, long Asterdex
-      recommendedAction = 'short_hl_long_aster';
-    } else {
-      // Asterdex has higher funding = long HL, short Asterdex
-      recommendedAction = 'long_hl_short_aster';
-    }
+    const shortExchange = spread > 0 ? exchangeA : exchangeB;
+    const longExchange = spread > 0 ? exchangeB : exchangeA;
+    const recommendedAction = `short_${shortExchange}_long_${longExchange}`;
 
-    // Determine urgency
-    let urgency: 'high' | 'medium' | 'low' = 'low';
+    let urgency: Urgency = 'low';
     const absAnnualized = Math.abs(annualizedSpread);
-    
-    if (absAnnualized >= this.config.highUrgencyThreshold) {
-      urgency = 'high';
-    } else if (absAnnualized >= this.config.mediumUrgencyThreshold) {
-      urgency = 'medium';
-    }
+    if (absAnnualized >= this.config.highUrgencyThreshold) urgency = 'high';
+    else if (absAnnualized >= this.config.mediumUrgencyThreshold) urgency = 'medium';
 
-    // Calculate confidence (based on data quality)
     let confidence = 100;
     if (priceDiffPercent > 0.1) confidence -= 10;
-    if (priceDiffPercent > 0.3) confidence -= 20;
-    if (hlData.volume24h < 1000000) confidence -= 15; // Low volume on HL
-    if (!asterdexClient.isConnected()) confidence -= 10; // WS not connected
+    if (priceDiffPercent > 0.3) confidence -= 15;
+    if (dataA.volume24h > 0 && dataA.volume24h < 1_000_000) confidence -= 10;
+    if (dataB.volume24h > 0 && dataB.volume24h < 1_000_000) confidence -= 10;
+    if (dataA.markPrice <= 0 || dataB.markPrice <= 0) confidence -= 15;
+    const now = Date.now();
+    if (now - dataA.timestamp > 5 * 60 * 1000) confidence -= 10;
+    if (now - dataB.timestamp > 5 * 60 * 1000) confidence -= 10;
 
     return {
       symbol,
-      hyperliquidFunding: hlFunding,
-      asterdexFunding: asterFunding,
+      exchangeA,
+      exchangeB,
+      exchangeAFunding: dataA.fundingRate,
+      exchangeBFunding: dataB.fundingRate,
       spread,
       spreadPercent,
       annualizedSpread,
       recommendedAction,
+      longExchange,
+      shortExchange,
       estimatedYearlyYield: absAnnualized,
       urgency,
       timestamp,
       isActive: true,
-      hyperliquidMarkPrice: hlMarkPrice,
-      asterdexMarkPrice: asterMarkPrice,
+      exchangeAMarkPrice: dataA.markPrice,
+      exchangeBMarkPrice: dataB.markPrice,
       priceDiffPercent,
       confidence: Math.max(0, confidence),
     };
   }
 
-  /**
-   * Calculate annualized spread
-   * Assumes funding paid 3 times per day (every 8 hours)
-   */
   private calculateAnnualizedSpread(spread: number): number {
-    return spread * 3 * 365 * 100; // Convert to percentage
+    return spread * 3 * 365 * 100;
   }
 
-  /**
-   * Store opportunities in database
-   */
   private async storeOpportunities(opportunities: CrossExchangeOpportunity[]): Promise<void> {
     if (!this.db || opportunities.length === 0) return;
 
+    const deactivateForPair = this.db.prepare(`
+      UPDATE ${this.opportunitiesTable}
+      SET isActive = 0
+      WHERE symbol = ? AND exchangeA = ? AND exchangeB = ? AND isActive = 1
+    `);
+
     const insert = this.db.prepare(`
-      INSERT INTO cross_exchange_opportunities 
-      (symbol, hyperliquidFunding, asterdexFunding, spread, spreadPercent, annualizedSpread, 
-       recommendedAction, estimatedYearlyYield, urgency, timestamp, isActive,
-       hyperliquidMarkPrice, asterdexMarkPrice, priceDiffPercent, confidence)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+      INSERT INTO ${this.opportunitiesTable}
+      (symbol, exchangeA, exchangeB, exchangeAFunding, exchangeBFunding, spread, spreadPercent,
+       annualizedSpread, recommendedAction, longExchange, shortExchange, estimatedYearlyYield,
+       urgency, timestamp, isActive, exchangeAMarkPrice, exchangeBMarkPrice, priceDiffPercent, confidence)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
     `);
 
     const txn = this.db.transaction((ops: CrossExchangeOpportunity[]) => {
       for (const opp of ops) {
-        // Deactivate previous opportunities for this symbol
-        this.db!.prepare(`
-          UPDATE cross_exchange_opportunities 
-          SET isActive = 0 
-          WHERE symbol = ? AND isActive = 1
-        `).run(opp.symbol);
-
-        // Insert new opportunity
+        deactivateForPair.run(opp.symbol, opp.exchangeA, opp.exchangeB);
         insert.run(
           opp.symbol,
-          opp.hyperliquidFunding,
-          opp.asterdexFunding,
+          opp.exchangeA,
+          opp.exchangeB,
+          opp.exchangeAFunding,
+          opp.exchangeBFunding,
           opp.spread,
           opp.spreadPercent,
           opp.annualizedSpread,
           opp.recommendedAction,
+          opp.longExchange,
+          opp.shortExchange,
           opp.estimatedYearlyYield,
           opp.urgency,
           opp.timestamp,
-          opp.hyperliquidMarkPrice,
-          opp.asterdexMarkPrice,
+          opp.exchangeAMarkPrice,
+          opp.exchangeBMarkPrice,
           opp.priceDiffPercent,
           opp.confidence
         );
@@ -374,17 +448,13 @@ class CrossExchangeArbitrage {
     logger.info(`[CrossExchangeArbitrage] Stored ${opportunities.length} opportunities`);
   }
 
-  /**
-   * Deactivate old opportunities
-   */
   private deactivateOldOpportunities(currentTimestamp: number): void {
     if (!this.db) return;
 
-    const cutoffTime = currentTimestamp - (30 * 60 * 1000); // 30 minutes
-
+    const cutoffTime = currentTimestamp - (30 * 60 * 1000);
     const result = this.db.prepare(`
-      UPDATE cross_exchange_opportunities 
-      SET isActive = 0 
+      UPDATE ${this.opportunitiesTable}
+      SET isActive = 0
       WHERE isActive = 1 AND timestamp < ?
     `).run(cutoffTime);
 
@@ -393,10 +463,7 @@ class CrossExchangeArbitrage {
     }
   }
 
-  /**
-   * Update exchange status in database
-   */
-  private updateExchangeStatus(exchange: string, connected: boolean, symbols: string[]): void {
+  private updateExchangeStatus(exchange: ExchangeName, connected: boolean, symbols: string[]): void {
     if (!this.db) return;
 
     this.db.prepare(`
@@ -406,17 +473,9 @@ class CrossExchangeArbitrage {
         connected = excluded.connected,
         lastUpdate = excluded.lastUpdate,
         symbols = excluded.symbols
-    `).run(
-      exchange,
-      connected ? 1 : 0,
-      Date.now(),
-      JSON.stringify(symbols)
-    );
+    `).run(exchange, connected ? 1 : 0, Date.now(), JSON.stringify(symbols));
   }
 
-  /**
-   * Get all active cross-exchange opportunities
-   */
   async getActiveOpportunities(minSpread?: number): Promise<CrossExchangeOpportunity[]> {
     await this.initialize();
 
@@ -425,11 +484,10 @@ class CrossExchangeArbitrage {
 
       let query = `
         SELECT *
-        FROM cross_exchange_opportunities
+        FROM ${this.opportunitiesTable}
         WHERE isActive = 1
       `;
-
-      const params: any[] = [];
+      const params: number[] = [];
 
       if (minSpread !== undefined) {
         query += ' AND ABS(annualizedSpread) >= ?';
@@ -437,129 +495,62 @@ class CrossExchangeArbitrage {
       }
 
       query += ' ORDER BY ABS(annualizedSpread) DESC';
-
       const rows = this.db.prepare(query).all(...params) as any[];
 
-      return rows.map(row => ({
-        id: row.id,
-        symbol: row.symbol,
-        hyperliquidFunding: row.hyperliquidFunding,
-        asterdexFunding: row.asterdexFunding,
-        spread: row.spread,
-        spreadPercent: row.spreadPercent,
-        annualizedSpread: row.annualizedSpread,
-        recommendedAction: row.recommendedAction,
-        estimatedYearlyYield: row.estimatedYearlyYield,
-        urgency: row.urgency,
-        timestamp: row.timestamp,
-        isActive: row.isActive === 1,
-        hyperliquidMarkPrice: row.hyperliquidMarkPrice,
-        asterdexMarkPrice: row.asterdexMarkPrice,
-        priceDiffPercent: row.priceDiffPercent,
-        confidence: row.confidence,
-      }));
+      return rows.map(row => this.mapRowToOpportunity(row));
     } catch (error) {
       logger.error('[CrossExchangeArbitrage] Failed to get active opportunities:', error);
       return [];
     }
   }
 
-  /**
-   * Get opportunities by urgency level
-   */
-  async getOpportunitiesByUrgency(urgency: 'high' | 'medium' | 'low'): Promise<CrossExchangeOpportunity[]> {
+  async getOpportunitiesByUrgency(urgency: Urgency): Promise<CrossExchangeOpportunity[]> {
     await this.initialize();
 
     try {
       if (!this.db) return [];
-
       const rows = this.db.prepare(`
         SELECT *
-        FROM cross_exchange_opportunities
+        FROM ${this.opportunitiesTable}
         WHERE isActive = 1 AND urgency = ?
         ORDER BY ABS(annualizedSpread) DESC
       `).all(urgency) as any[];
 
-      return rows.map(row => ({
-        id: row.id,
-        symbol: row.symbol,
-        hyperliquidFunding: row.hyperliquidFunding,
-        asterdexFunding: row.asterdexFunding,
-        spread: row.spread,
-        spreadPercent: row.spreadPercent,
-        annualizedSpread: row.annualizedSpread,
-        recommendedAction: row.recommendedAction,
-        estimatedYearlyYield: row.estimatedYearlyYield,
-        urgency: row.urgency,
-        timestamp: row.timestamp,
-        isActive: row.isActive === 1,
-        hyperliquidMarkPrice: row.hyperliquidMarkPrice,
-        asterdexMarkPrice: row.asterdexMarkPrice,
-        priceDiffPercent: row.priceDiffPercent,
-        confidence: row.confidence,
-      }));
+      return rows.map(row => this.mapRowToOpportunity(row));
     } catch (error) {
       logger.error('[CrossExchangeArbitrage] Failed to get opportunities by urgency:', error);
       return [];
     }
   }
 
-  /**
-   * Get opportunity by symbol
-   */
   async getOpportunityBySymbol(symbol: string): Promise<CrossExchangeOpportunity | null> {
     await this.initialize();
 
     try {
       if (!this.db) return null;
-
       const row = this.db.prepare(`
         SELECT *
-        FROM cross_exchange_opportunities
+        FROM ${this.opportunitiesTable}
         WHERE symbol = ? AND isActive = 1
-        ORDER BY timestamp DESC
+        ORDER BY ABS(annualizedSpread) DESC, timestamp DESC
         LIMIT 1
       `).get(symbol.toUpperCase()) as any;
 
       if (!row) return null;
-
-      return {
-        id: row.id,
-        symbol: row.symbol,
-        hyperliquidFunding: row.hyperliquidFunding,
-        asterdexFunding: row.asterdexFunding,
-        spread: row.spread,
-        spreadPercent: row.spreadPercent,
-        annualizedSpread: row.annualizedSpread,
-        recommendedAction: row.recommendedAction,
-        estimatedYearlyYield: row.estimatedYearlyYield,
-        urgency: row.urgency,
-        timestamp: row.timestamp,
-        isActive: row.isActive === 1,
-        hyperliquidMarkPrice: row.hyperliquidMarkPrice,
-        asterdexMarkPrice: row.asterdexMarkPrice,
-        priceDiffPercent: row.priceDiffPercent,
-        confidence: row.confidence,
-      };
+      return this.mapRowToOpportunity(row);
     } catch (error) {
       logger.error(`[CrossExchangeArbitrage] Failed to get opportunity for ${symbol}:`, error);
       return null;
     }
   }
 
-  /**
-   * Get connected exchanges info
-   */
   async getExchangeInfo(): Promise<ExchangeInfo[]> {
     await this.initialize();
 
     try {
       if (!this.db) return [];
 
-      const rows = this.db.prepare(`
-        SELECT * FROM exchange_status
-      `).all() as any[];
-
+      const rows = this.db.prepare('SELECT * FROM exchange_status').all() as any[];
       return rows.map(row => ({
         name: row.exchange,
         connected: row.connected === 1,
@@ -572,9 +563,6 @@ class CrossExchangeArbitrage {
     }
   }
 
-  /**
-   * Get arbitrage statistics
-   */
   async getStatistics(): Promise<{
     totalOpportunities: number;
     highUrgencyCount: number;
@@ -599,51 +587,45 @@ class CrossExchangeArbitrage {
         };
       }
 
-      const totalOpportunities = this.db.prepare(`
-        SELECT COUNT(*) as count FROM cross_exchange_opportunities WHERE isActive = 1
+      const total = this.db.prepare(`
+        SELECT COUNT(*) as count FROM ${this.opportunitiesTable} WHERE isActive = 1
+      `).get() as { count: number };
+      const high = this.db.prepare(`
+        SELECT COUNT(*) as count FROM ${this.opportunitiesTable} WHERE isActive = 1 AND urgency = 'high'
+      `).get() as { count: number };
+      const medium = this.db.prepare(`
+        SELECT COUNT(*) as count FROM ${this.opportunitiesTable} WHERE isActive = 1 AND urgency = 'medium'
+      `).get() as { count: number };
+      const low = this.db.prepare(`
+        SELECT COUNT(*) as count FROM ${this.opportunitiesTable} WHERE isActive = 1 AND urgency = 'low'
       `).get() as { count: number };
 
-      const highUrgency = this.db.prepare(`
-        SELECT COUNT(*) as count FROM cross_exchange_opportunities 
-        WHERE isActive = 1 AND urgency = 'high'
-      `).get() as { count: number };
-
-      const mediumUrgency = this.db.prepare(`
-        SELECT COUNT(*) as count FROM cross_exchange_opportunities 
-        WHERE isActive = 1 AND urgency = 'medium'
-      `).get() as { count: number };
-
-      const lowUrgency = this.db.prepare(`
-        SELECT COUNT(*) as count FROM cross_exchange_opportunities 
-        WHERE isActive = 1 AND urgency = 'low'
-      `).get() as { count: number };
-
-      const bestSpread = this.db.prepare(`
-        SELECT symbol, ABS(annualizedSpread) as spread
-        FROM cross_exchange_opportunities
+      const bestRow = this.db.prepare(`
+        SELECT symbol, exchangeA, exchangeB, ABS(annualizedSpread) as spread
+        FROM ${this.opportunitiesTable}
         WHERE isActive = 1
         ORDER BY ABS(annualizedSpread) DESC
         LIMIT 1
-      `).get() as { symbol: string; spread: number } | undefined;
+      `).get() as { symbol: string; exchangeA: string; exchangeB: string; spread: number } | undefined;
 
-      const avgSpread = this.db.prepare(`
+      const avg = this.db.prepare(`
         SELECT AVG(ABS(annualizedSpread)) as avg
-        FROM cross_exchange_opportunities
+        FROM ${this.opportunitiesTable}
         WHERE isActive = 1
       `).get() as { avg: number } | undefined;
 
-      const connectedExchanges = this.db.prepare(`
+      const connected = this.db.prepare(`
         SELECT COUNT(*) as count FROM exchange_status WHERE connected = 1
       `).get() as { count: number };
 
       return {
-        totalOpportunities: totalOpportunities.count,
-        highUrgencyCount: highUrgency.count,
-        mediumUrgencyCount: mediumUrgency.count,
-        lowUrgencyCount: lowUrgency.count,
-        bestSpread: bestSpread ? { symbol: bestSpread.symbol, spread: bestSpread.spread } : null,
-        avgSpread: avgSpread?.avg || 0,
-        connectedExchanges: connectedExchanges.count,
+        totalOpportunities: total.count,
+        highUrgencyCount: high.count,
+        mediumUrgencyCount: medium.count,
+        lowUrgencyCount: low.count,
+        bestSpread: bestRow ? { symbol: `${bestRow.symbol} (${bestRow.exchangeA}/${bestRow.exchangeB})`, spread: bestRow.spread } : null,
+        avgSpread: avg?.avg || 0,
+        connectedExchanges: connected.count,
       };
     } catch (error) {
       logger.error('[CrossExchangeArbitrage] Failed to get statistics:', error);
@@ -659,9 +641,6 @@ class CrossExchangeArbitrage {
     }
   }
 
-  /**
-   * Get historical opportunities for a symbol
-   */
   async getHistoricalOpportunities(symbol: string, hours: number = 24): Promise<CrossExchangeOpportunity[]> {
     await this.initialize();
 
@@ -669,57 +648,32 @@ class CrossExchangeArbitrage {
       if (!this.db) return [];
 
       const cutoffTime = Date.now() - (hours * 60 * 60 * 1000);
-
       const rows = this.db.prepare(`
         SELECT *
-        FROM cross_exchange_opportunities
+        FROM ${this.opportunitiesTable}
         WHERE symbol = ? AND timestamp >= ?
         ORDER BY timestamp DESC
       `).all(symbol.toUpperCase(), cutoffTime) as any[];
 
-      return rows.map(row => ({
-        id: row.id,
-        symbol: row.symbol,
-        hyperliquidFunding: row.hyperliquidFunding,
-        asterdexFunding: row.asterdexFunding,
-        spread: row.spread,
-        spreadPercent: row.spreadPercent,
-        annualizedSpread: row.annualizedSpread,
-        recommendedAction: row.recommendedAction,
-        estimatedYearlyYield: row.estimatedYearlyYield,
-        urgency: row.urgency,
-        timestamp: row.timestamp,
-        isActive: row.isActive === 1,
-        hyperliquidMarkPrice: row.hyperliquidMarkPrice,
-        asterdexMarkPrice: row.asterdexMarkPrice,
-        priceDiffPercent: row.priceDiffPercent,
-        confidence: row.confidence,
-      }));
+      return rows.map(row => this.mapRowToOpportunity(row));
     } catch (error) {
       logger.error(`[CrossExchangeArbitrage] Failed to get historical opportunities for ${symbol}:`, error);
       return [];
     }
   }
 
-  /**
-   * Update configuration
-   */
   updateConfig(newConfig: Partial<ArbitrageConfig>): void {
     this.config = { ...this.config, ...newConfig };
     logger.info('[CrossExchangeArbitrage] Configuration updated');
   }
 
-  /**
-   * Clean up old data
-   */
   async cleanupOldData(days: number = 7): Promise<void> {
     if (!this.db) return;
 
     try {
       const cutoffTime = Date.now() - (days * 24 * 60 * 60 * 1000);
-
       const result = this.db.prepare(`
-        DELETE FROM cross_exchange_opportunities 
+        DELETE FROM ${this.opportunitiesTable}
         WHERE timestamp < ?
       `).run(cutoffTime);
 
@@ -728,13 +682,38 @@ class CrossExchangeArbitrage {
       logger.error('[CrossExchangeArbitrage] Cleanup failed:', error);
     }
   }
+
+  private mapRowToOpportunity(row: any): CrossExchangeOpportunity {
+    return {
+      id: row.id,
+      symbol: row.symbol,
+      exchangeA: row.exchangeA as ExchangeName,
+      exchangeB: row.exchangeB as ExchangeName,
+      exchangeAFunding: row.exchangeAFunding,
+      exchangeBFunding: row.exchangeBFunding,
+      spread: row.spread,
+      spreadPercent: row.spreadPercent,
+      annualizedSpread: row.annualizedSpread,
+      recommendedAction: row.recommendedAction,
+      longExchange: row.longExchange as ExchangeName | null,
+      shortExchange: row.shortExchange as ExchangeName | null,
+      estimatedYearlyYield: row.estimatedYearlyYield,
+      urgency: row.urgency as Urgency,
+      timestamp: row.timestamp,
+      isActive: row.isActive === 1,
+      exchangeAMarkPrice: row.exchangeAMarkPrice,
+      exchangeBMarkPrice: row.exchangeBMarkPrice,
+      priceDiffPercent: row.priceDiffPercent,
+      confidence: row.confidence,
+    };
+  }
 }
 
-// Export singleton instance
 export const crossExchangeArbitrage = new CrossExchangeArbitrage();
 export default crossExchangeArbitrage;
-export type { 
-  CrossExchangeOpportunity, 
-  ExchangeInfo, 
-  ArbitrageConfig 
+export type {
+  CrossExchangeOpportunity,
+  ExchangeInfo,
+  ArbitrageConfig,
+  ExchangeName,
 };

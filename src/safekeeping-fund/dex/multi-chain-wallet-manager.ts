@@ -1,6 +1,8 @@
 // Safekeeping Fund System - Multi-Chain Wallet Manager
 // Unified wallet management across Ethereum, BSC, and Solana
 
+import { Keypair } from '@solana/web3.js';
+import { privateKeyToAccount } from 'viem/accounts';
 import logger from '../../shared/logger';
 import { UniswapV3Client } from './uniswap-v3-client';
 import { PancakeswapV3Client } from './pancakeswap-v3-client';
@@ -97,9 +99,7 @@ export class MultiChainWalletManager {
 
       // Initialize Solana/Meteora client
       if (this.config.solana?.secretKey) {
-        const secretKey = typeof this.config.solana.secretKey === 'string'
-          ? new Uint8Array(Buffer.from(this.config.solana.secretKey, 'base64'))
-          : this.config.solana.secretKey;
+        const secretKey = this.normalizeSolanaSecretKey(this.config.solana.secretKey);
         const solClient = new MeteoraClient({
           secretKey,
           rpcUrl: this.config.solana.rpcUrl,
@@ -126,9 +126,9 @@ export class MultiChainWalletManager {
    * Cache wallet addresses for all chains
    */
   private async cacheAddresses(): Promise<void> {
-    for (const [chain, client] of this.clients) {
+    for (const chain of this.clients.keys()) {
       try {
-        const address = await this.getAddress(chain);
+        const address = this.deriveChainAddress(chain);
         this.addresses.set(chain, address);
       } catch (error) {
         logger.warn(`[WalletManager] Failed to get address for ${chain}: ${error}`);
@@ -176,26 +176,18 @@ export class MultiChainWalletManager {
    * Get wallet address for a chain
    */
   getAddress(chain: Chain): string {
-    const client = this.clients.get(chain);
-    if (!client) {
+    const cachedAddress = this.addresses.get(chain);
+    if (cachedAddress) {
+      return cachedAddress;
+    }
+
+    if (!this.clients.has(chain)) {
       throw new Error(`Chain ${chain} not initialized`);
     }
 
-    // Return address based on chain type
-    if (chain === 'solana') {
-      // Solana keypair address would be stored in the Meteora client
-      return 'solana-address-placeholder';
-    }
-
-    // EVM chains - derive from private key
-    const chainConfig = this.config[chain as keyof typeof this.config] as ChainWalletConfig | undefined;
-    if (chainConfig?.privateKey) {
-      // For EVM chains, address is derived from private key
-      // This is a simplified approach - in production, derive properly
-      return `0x${chainConfig.privateKey.slice(2, 42)}`;
-    }
-
-    return '0x0000000000000000000000000000000000000000';
+    const address = this.deriveChainAddress(chain);
+    this.addresses.set(chain, address);
+    return address;
   }
 
   /**
@@ -476,5 +468,35 @@ export class MultiChainWalletManager {
    */
   isReady(): boolean {
     return this.isInitialized && this.clients.size > 0;
+  }
+
+  private normalizeSolanaSecretKey(secretKey: string | Uint8Array): Uint8Array {
+    if (typeof secretKey !== 'string') {
+      return secretKey;
+    }
+
+    const trimmed = secretKey.trim();
+    if (trimmed.startsWith('[')) {
+      return Uint8Array.from(JSON.parse(trimmed) as number[]);
+    }
+
+    return Uint8Array.from(Buffer.from(trimmed, 'base64'));
+  }
+
+  private deriveChainAddress(chain: Chain): string {
+    if (chain === 'solana') {
+      if (!this.config.solana?.secretKey) {
+        throw new Error('Missing Solana secret key');
+      }
+      const secretKey = this.normalizeSolanaSecretKey(this.config.solana.secretKey);
+      return Keypair.fromSecretKey(secretKey).publicKey.toBase58();
+    }
+
+    const chainConfig = this.config[chain as keyof typeof this.config] as ChainWalletConfig | undefined;
+    if (!chainConfig?.privateKey) {
+      throw new Error(`Missing private key for ${chain}`);
+    }
+
+    return privateKeyToAccount(chainConfig.privateKey as `0x${string}`).address;
   }
 }

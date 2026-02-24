@@ -1,44 +1,12 @@
 "use strict";
 // Prediction Market Backtester Node
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.backtesterNode = backtesterNode;
 const prediction_store_1 = __importDefault(require("../../data/prediction-store"));
+const polymarket_client_1 = __importDefault(require("../polymarket-client"));
 const logger_1 = __importDefault(require("../../shared/logger"));
 const MIN_HISTORY = Number.parseInt(process.env.PREDICTION_MIN_HISTORY || '20', 10) || 20;
 const HORIZON = Number.parseInt(process.env.PREDICTION_BACKTEST_HORIZON || '5', 10) || 5;
@@ -65,6 +33,41 @@ function maxDrawdown(returns) {
     }
     return Math.abs(drawdown);
 }
+function normalizeSeries(points) {
+    const byTimestamp = new Map();
+    for (const point of points) {
+        if (!Number.isFinite(point.timestamp))
+            continue;
+        if (!Number.isFinite(point.price) || point.price <= 0)
+            continue;
+        byTimestamp.set(point.timestamp, point.price);
+    }
+    return Array.from(byTimestamp.entries())
+        .map(([timestamp, price]) => ({ timestamp, price }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+}
+function localSeriesFromSnapshots(idea, snapshots) {
+    const points = [];
+    for (const snapshot of snapshots) {
+        const price = idea.outcome === 'YES' ? snapshot.yesPrice : snapshot.noPrice;
+        if (!Number.isFinite(price) || price <= 0)
+            continue;
+        points.push({ timestamp: snapshot.timestamp.getTime(), price: price });
+    }
+    return normalizeSeries(points);
+}
+function resolveOutcomeTokenId(idea, market) {
+    if (!market?.outcomes?.length)
+        return null;
+    const targetOutcome = market.outcomes.find(outcome => outcome.name.toUpperCase() === idea.outcome);
+    if (targetOutcome?.id)
+        return String(targetOutcome.id);
+    if (idea.outcome === 'YES' && market.outcomes[0]?.id)
+        return String(market.outcomes[0].id);
+    if (idea.outcome === 'NO' && market.outcomes[1]?.id)
+        return String(market.outcomes[1].id);
+    return null;
+}
 async function backtesterNode(state) {
     logger_1.default.info(`[PredictionBacktester] Backtesting ${state.ideas.length} ideas`);
     if (!state.ideas.length) {
@@ -76,30 +79,23 @@ async function backtesterNode(state) {
     }
     const results = [];
     for (const idea of state.ideas) {
-        let series = [];
-        const localHistory = prediction_store_1.default.getMarketPrices(idea.marketId, 200);
-        // Prefer local if enough data
-        if (localHistory.length >= MIN_HISTORY) {
-            series = localHistory
-                .map(point => idea.outcome === 'YES' ? point.yesPrice : point.noPrice)
-                .filter((price) => typeof price === 'number' && Number.isFinite(price) && price > 0);
+        const localHistory = prediction_store_1.default.getMarketPrices(idea.marketId, 300);
+        const localSeries = localSeriesFromSnapshots(idea, localHistory);
+        let seriesPoints = [...localSeries];
+        if (seriesPoints.length < MIN_HISTORY) {
+            const market = state.activeMarkets.find(m => m.id === idea.marketId)
+                || state.marketUniverse.find(m => m.id === idea.marketId);
+            const tokenId = resolveOutcomeTokenId(idea, market);
+            if (tokenId) {
+                const remoteCandles = await polymarket_client_1.default.fetchCandles(tokenId);
+                const remoteSeries = normalizeSeries(remoteCandles.map(candle => ({
+                    timestamp: candle.timestamp,
+                    price: candle.price,
+                })));
+                seriesPoints = normalizeSeries([...localSeries, ...remoteSeries]);
+            }
         }
-        // Fallback to API if we don't have enough local history
-        if (series.length < MIN_HISTORY) {
-            Promise.resolve().then(() => __importStar(require('../polymarket-client'))).then(async (mod) => {
-                // This is tricky because we're inside a sync loop, but backtesterNode is async
-                // We need to refactor the loop to be async-friendly or structure this differently
-                // Since the function is async, we can await inside the loop if we change it to 'for ... of'
-            });
-            // Note: The loop below needs to be awaited. 
-            // Checking file structure: it's a 'for (const idea of state.ideas)' loop inside 'async function'.
-            // So we can await directly.
-        }
-        // NOTE: Splitting this replacement to avoid complexity with imports. 
-        // I will replace the LOGIC block.
-        // Assuming 'polymarketClient' is imported or I can import it.
-        // 'polymarket-client' is NOT imported in original file.
-        // I need to add the import first!
+        const series = seriesPoints.map(point => point.price);
         const returns = [];
         for (let i = 0; i + HORIZON < series.length; i++) {
             const entry = series[i];
@@ -114,8 +110,8 @@ async function backtesterNode(state) {
             ideaId: idea.id,
             marketId: idea.marketId,
             period: {
-                start: localHistory.length > 0 ? localHistory[0].timestamp : new Date(),
-                end: localHistory.length > 0 ? localHistory[localHistory.length - 1].timestamp : new Date(),
+                start: seriesPoints.length > 0 ? new Date(seriesPoints[0].timestamp) : new Date(),
+                end: seriesPoints.length > 0 ? new Date(seriesPoints[seriesPoints.length - 1].timestamp) : new Date(),
             },
             totalReturn,
             averageReturn: avgReturn * 100,
@@ -123,6 +119,9 @@ async function backtesterNode(state) {
             maxDrawdown: maxDrawdown(returns) * 100,
             tradesSimulated: returns.length,
             sharpeRatio: sharpe,
+            strategyId: idea.strategyId || idea.id,
+            strategyName: idea.name || `${idea.marketTitle} (${idea.outcome})`,
+            totalTrades: returns.length,
         };
         prediction_store_1.default.storeBacktest(result);
         results.push(result);

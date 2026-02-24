@@ -39,7 +39,7 @@ class ConfigManager {
       openrouter: {
         apiKey: process.env.OPENROUTER_API_KEY || '',
         baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-        labelingModel: process.env.OPENROUTER_LABELING_MODEL || 'openai/gpt-oss-20b',
+        labelingModel: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
         embeddingModel: process.env.OPENROUTER_EMBEDDING_MODEL || 'qwen/qwen3-embedding-8b',
         timeout: parseInt(process.env.OPENROUTER_TIMEOUT || '30000')
       },
@@ -53,6 +53,15 @@ class ConfigManager {
         maxLeverage: parseInt(process.env.MAX_LEVERAGE || '40'),
         emergencyStop: process.env.EMERGENCY_STOP === 'true'
       },
+      safety: {
+        dailyLossLimit: parseFloat(process.env.SAFETY_DAILY_LOSS_LIMIT || '50'),
+        maxDrawdownPercent: parseFloat(process.env.SAFETY_MAX_DRAWDOWN_PERCENT || '15'),
+        consecutiveLossLimit: parseInt(process.env.SAFETY_CONSECUTIVE_LOSS_LIMIT || '5'),
+        maxTradesPerDay: parseInt(process.env.SAFETY_MAX_TRADES_PER_DAY || '20'),
+        maxTradesPerSymbol: parseInt(process.env.SAFETY_MAX_TRADES_PER_SYMBOL || '5'),
+        volatilityReduceThreshold: parseFloat(process.env.SAFETY_VOLATILITY_REDUCE_THRESHOLD || '5'),
+        volatilityStopThreshold: parseFloat(process.env.SAFETY_VOLATILITY_STOP_THRESHOLD || '10')
+      },
       trading: {
         symbols: (process.env.TRADING_SYMBOLS || 'BTC,ETH,SOL,AVAX,ARB,OP,LINK,DOGE,PEPE,WIF,RENDER,TAO,SUI,SEI,INJ,BONK,AAVE,UNI,CRV,SNX,JUP,RAY,PENDLE,ZRO,BERA,HYPE,XRP,ZEC').split(','),
         timeframes: (process.env.TRADING_TIMEFRAMES || '1s,1m,5m,15m,1h').split(','),
@@ -65,13 +74,13 @@ class ConfigManager {
       },
       pumpfun: {
         subscribeDurationMs: parseInt(process.env.PUMPFUN_SUBSCRIBE_DURATION_MS || '30000'),
-        minScoreThreshold: parseFloat(process.env.PUMPFUN_MIN_SCORE_THRESHOLD || '0.5'),
+        minScoreThreshold: parseFloat(process.env.PUMPFUN_MIN_SCORE_THRESHOLD || '0.7'),
         cycleIntervalMs: parseInt(process.env.PUMPFUN_CYCLE_INTERVAL_MS || '60000'),
         weights: {
-          website: parseFloat(process.env.PUMPFUN_WEIGHT_WEBSITE || '0.25'),
-          social: parseFloat(process.env.PUMPFUN_WEIGHT_SOCIAL || '0.25'),
-          security: parseFloat(process.env.PUMPFUN_WEIGHT_SECURITY || '0.35'),
-          glm: parseFloat(process.env.PUMPFUN_WEIGHT_GLM || '0.15')
+          website: parseFloat(process.env.PUMPFUN_WEIGHT_WEBSITE || '0.7'),
+          social: parseFloat(process.env.PUMPFUN_WEIGHT_SOCIAL || '0'),
+          security: parseFloat(process.env.PUMPFUN_WEIGHT_SECURITY || '0'),
+          glm: parseFloat(process.env.PUMPFUN_WEIGHT_GLM || '0.3')
         }
       }
     };
@@ -118,6 +127,9 @@ class ConfigManager {
           if (parsed.pumpfun.weights) {
             mergedConfig.pumpfun.weights = { ...(defaultConfig.pumpfun?.weights || {}), ...parsed.pumpfun.weights };
           }
+        }
+        if (parsed.safety) {
+          mergedConfig.safety = { ...defaultConfig.safety, ...parsed.safety };
         }
 
         return mergedConfig;

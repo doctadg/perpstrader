@@ -24,10 +24,10 @@ export class GLMAIService {
     private timeout: number;
 
     constructor() {
-        this.baseUrl = config.glm.baseUrl;
-        this.apiKey = config.glm.apiKey;
-        this.model = config.glm.model || 'glm-4.7';
-        this.labelingModel = process.env.GLM_LABELING_MODEL || 'glm-4.5-air';
+        this.baseUrl = config.openrouter.baseUrl;
+        this.apiKey = config.openrouter.apiKey;
+        this.model = 'anthropic/claude-3.5-sonnet';
+        this.labelingModel = 'anthropic/claude-3.5-sonnet';
         this.timeout = config.glm.timeout;
     }
 
@@ -56,7 +56,7 @@ export class GLMAIService {
      */
     async generateTradingStrategies(researchData: ResearchData): Promise<Strategy[]> {
         if (!this.canUseService()) {
-            logger.warn('[GLM] API key not configured, using fallback strategies');
+            logger.warn('[OpenRouter] API key not configured, using fallback strategies');
             return this.generateFallbackStrategies(researchData);
         }
 
@@ -66,11 +66,11 @@ export class GLMAIService {
 
             // Parse strategies from response
             const strategies = this.parseStrategies(response);
-            logger.info(`[GLM] Generated ${strategies.length} strategies`);
+            logger.info(`[OpenRouter] Generated ${strategies.length} strategies`);
             return strategies;
 
         } catch (error) {
-            logger.error(`[GLM] Strategy generation failed: ${this.safeErrorMessage(error)}`);
+            logger.error(`[OpenRouter] Strategy generation failed: ${this.safeErrorMessage(error)}`);
             return this.generateFallbackStrategies(researchData);
         }
     }
@@ -83,7 +83,7 @@ export class GLMAIService {
         marketNews: Record<string, NewsItem[]>;
     }): Promise<PredictionIdea[]> {
         if (!this.canUseService()) {
-            logger.warn('[GLM] API key not configured, skipping prediction ideas');
+            logger.warn('[OpenRouter] API key not configured, skipping prediction ideas');
             return [];
         }
 
@@ -92,7 +92,7 @@ export class GLMAIService {
             const response = await this.callAPI(prompt);
             return this.parsePredictionIdeas(response);
         } catch (error) {
-            logger.error(`[GLM] Prediction idea generation failed: ${this.safeErrorMessage(error)}`);
+            logger.error(`[OpenRouter] Prediction idea generation failed: ${this.safeErrorMessage(error)}`);
             return [];
         }
     }
@@ -123,6 +123,8 @@ export class GLMAIService {
                         headers: {
                             'Authorization': `Bearer ${this.apiKey}`,
                             'Content-Type': 'application/json',
+                            'HTTP-Referer': 'https://perpstrader.local',
+                            'X-Title': 'PerpsTrader AI',
                         },
                         timeout: this.timeout,
                     }
@@ -131,7 +133,7 @@ export class GLMAIService {
                 return response.data.choices[0]?.message?.content || '';
             } catch (error) {
                 if (attempt === retries) throw error;
-                logger.warn(`[GLM] Attempt ${attempt} failed, retrying...`);
+                logger.warn(`[OpenRouter] Attempt ${attempt} failed, retrying...`);
                 await new Promise(r => setTimeout(r, 1000 * attempt));
             }
         }
@@ -230,7 +232,7 @@ Markets:\n${markets}`;
                 }))
                 .filter((idea: PredictionIdea) => !!idea.marketId && !!idea.marketTitle);
         } catch (error) {
-            logger.warn('[GLM] Failed to parse prediction ideas JSON');
+            logger.warn('[OpenRouter] Failed to parse prediction ideas JSON');
             return [];
         }
     }
@@ -243,7 +245,7 @@ Markets:\n${markets}`;
             // Extract JSON from response
             const jsonMatch = response.match(/\{[\s\S]*"strategies"[\s\S]*\}/);
             if (!jsonMatch) {
-                logger.warn('[GLM] Could not find JSON in response');
+                logger.warn('[OpenRouter] Could not find JSON in response');
                 return [];
             }
 
@@ -287,7 +289,7 @@ Markets:\n${markets}`;
 
             return strategies;
         } catch (error) {
-            logger.error(`[GLM] Failed to parse strategies: ${this.safeErrorMessage(error)}`);
+            logger.error(`[OpenRouter] Failed to parse strategies: ${this.safeErrorMessage(error)}`);
             return [];
         }
     }
@@ -399,7 +401,7 @@ Markets:\n${markets}`;
      * Optimize a strategy based on its performance (stub for compatibility)
      */
     async optimizeStrategy(strategy: Strategy, performance: Strategy['performance']): Promise<Strategy> {
-        logger.info(`[GLM] Optimizing strategy: ${strategy.name}`);
+        logger.info(`[OpenRouter] Optimizing strategy: ${strategy.name}`);
         // Return the same strategy with slightly adjusted parameters
         return {
             ...strategy,
@@ -416,7 +418,7 @@ Markets:\n${markets}`;
      * Generate a trading signal (stub for compatibility)
      */
     async generateTradingSignal(indicators: any[], patterns: any[]): Promise<any> {
-        logger.info('[GLM] generateTradingSignal called (stub)');
+        logger.info('[OpenRouter] generateTradingSignal called (stub)');
         return null;
     }
 
@@ -425,7 +427,7 @@ Markets:\n${markets}`;
      */
     async summarizeArticle(content: string): Promise<string> {
         if (!this.canUseService()) {
-            logger.warn('[GLM] API key not configured, returning fallback summary');
+            logger.warn('[OpenRouter] API key not configured, returning fallback summary');
             return this.generateFallbackSummary(content);
         }
 
@@ -434,7 +436,7 @@ Markets:\n${markets}`;
             const summary = await this.callAPI(prompt);
             return summary.trim();
         } catch (error) {
-            logger.error(`[GLM] Summarization failed: ${this.safeErrorMessage(error)}`);
+            logger.error(`[OpenRouter] Summarization failed: ${this.safeErrorMessage(error)}`);
             return this.generateFallbackSummary(content);
         }
     }
@@ -478,6 +480,8 @@ Summary:`;
                     headers: {
                         'Authorization': `Bearer ${this.apiKey}`,
                         'Content-Type': 'application/json',
+                        'HTTP-Referer': 'https://perpstrader.local',
+                        'X-Title': 'PerpsTrader AI',
                     },
                     timeout: this.timeout,
                 }
@@ -490,7 +494,7 @@ Summary:`;
 
             return null;
         } catch (error) {
-            logger.warn(`[GLM] Embedding generation failed: ${this.safeErrorMessage(error)}`);
+            logger.warn(`[OpenRouter] Embedding generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
     }
@@ -595,7 +599,7 @@ Return JSON ONLY:
                     : [],
             };
         } catch (error) {
-            logger.warn(`[GLM] Event label generation failed: ${this.safeErrorMessage(error)}`);
+            logger.warn(`[OpenRouter] Event label generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
     }
@@ -659,7 +663,7 @@ Return JSON ONLY:
                 keywords: Array.isArray(parsed.keywords) ? parsed.keywords.map((k: any) => String(k).trim()).filter(Boolean) : [],
             };
         } catch (error) {
-            logger.warn(`[GLM] Trend label generation failed: ${this.safeErrorMessage(error)}`);
+            logger.warn(`[OpenRouter] Trend label generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
     }

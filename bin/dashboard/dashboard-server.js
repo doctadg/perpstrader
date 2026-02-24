@@ -48,7 +48,6 @@ const config_1 = __importDefault(require("../shared/config"));
 const logger_1 = __importDefault(require("../shared/logger"));
 const trace_store_1 = __importDefault(require("../data/trace-store"));
 const news_store_1 = __importDefault(require("../data/news-store"));
-const story_cluster_store_1 = __importDefault(require("../data/story-cluster-store"));
 const prediction_store_1 = __importDefault(require("../data/prediction-store"));
 const polymarket_client_1 = __importDefault(require("../prediction-markets/polymarket-client"));
 const glm_service_1 = __importDefault(require("../shared/glm-service"));
@@ -58,6 +57,7 @@ const pumpfun_store_1 = __importDefault(require("../data/pumpfun-store"));
 const enhanced_api_routes_1 = __importDefault(require("./enhanced-api-routes"));
 const market_heatmap_routes_1 = __importDefault(require("./market-heatmap-routes"));
 const funding_arbitrage_routes_1 = __importDefault(require("./funding-arbitrage-routes"));
+const news_heatmap_service_1 = __importDefault(require("./news-heatmap-service"));
 // Get database path from config
 const fullConfig = config_1.default.get();
 const dbPath = fullConfig.database?.connection || './data/trading.db';
@@ -104,6 +104,7 @@ class DashboardServer {
         this.setupMiddleware();
         this.setupRoutes();
         this.setupWebSocket();
+        void news_heatmap_service_1.default.initialize();
         this.startNewsPolling(); // Keep as fallback
         this.connectMessageBus(); // NEW: Connect to Redis message bus
     }
@@ -280,6 +281,36 @@ class DashboardServer {
             this.io.emit('pumpfun_high_confidence', { timestamp: new Date(), ...(message.data || {}) });
         });
         // =========================================================================
+        // RESEARCH EVENT SUBSCRIPTIONS
+        // =========================================================================
+        message_bus_1.default.subscribe('research:idea', (message) => {
+            logger_1.default.debug('[Dashboard] Research idea generated:', message.data);
+            this.io.emit('research:idea', { timestamp: new Date(), ...(message.data || {}) });
+        });
+        message_bus_1.default.subscribe('research:backtest:start', (message) => {
+            logger_1.default.debug('[Dashboard] Backtest started:', message.data);
+            this.io.emit('research:backtest:start', { timestamp: new Date(), ...(message.data || {}) });
+        });
+        message_bus_1.default.subscribe('research:backtest:progress', (message) => {
+            this.io.emit('research:backtest:progress', { timestamp: new Date(), ...(message.data || {}) });
+        });
+        message_bus_1.default.subscribe('research:backtest:complete', (message) => {
+            logger_1.default.debug('[Dashboard] Backtest completed:', message.data);
+            this.io.emit('research:backtest:complete', { timestamp: new Date(), ...(message.data || {}) });
+        });
+        message_bus_1.default.subscribe('research:generation', (message) => {
+            logger_1.default.debug('[Dashboard] New generation:', message.data);
+            this.io.emit('research:generation', { timestamp: new Date(), ...(message.data || {}) });
+        });
+        message_bus_1.default.subscribe('research:regime', (message) => {
+            logger_1.default.debug('[Dashboard] Market regime update:', message.data);
+            this.io.emit('research:regime', { timestamp: new Date(), ...(message.data || {}) });
+        });
+        message_bus_1.default.subscribe('research:leaderboard:update', (message) => {
+            logger_1.default.debug('[Dashboard] Leaderboard update:', message.data);
+            this.io.emit('research:leaderboard:update', { timestamp: new Date(), ...(message.data || {}) });
+        });
+        // =========================================================================
         // SAFEKEEPING FUND EVENT SUBSCRIPTIONS
         // =========================================================================
         message_bus_1.default.subscribe('safekeeping:cycle:start', (message) => {
@@ -324,16 +355,27 @@ class DashboardServer {
      * Get hot clusters with caching
      */
     async getHotClustersCached(limit, hours, category) {
+        const categoryFilter = category && category !== 'ALL'
+            ? String(category).toUpperCase()
+            : null;
         const now = Date.now();
         if (this.hotClustersCache.length > 0 && (now - this.lastHotClustersFetch) < this.HOT_CLUSTERS_CACHE_TTL) {
-            return category
-                ? this.hotClustersCache.filter(c => c.category === category)
+            const cached = categoryFilter
+                ? this.hotClustersCache.filter(c => String(c.category).toUpperCase() === categoryFilter)
                 : this.hotClustersCache;
+            return cached.slice(0, limit);
         }
-        const clusters = await story_cluster_store_1.default.getHotClusters(limit, hours, category);
-        this.hotClustersCache = clusters;
+        const heatmap = await news_heatmap_service_1.default.getHeatmap({
+            hours,
+            limit: Math.max(limit, 150),
+            category: 'ALL',
+        });
+        this.hotClustersCache = heatmap.clusters;
         this.lastHotClustersFetch = now;
-        return clusters;
+        const filtered = categoryFilter
+            ? this.hotClustersCache.filter(c => String(c.category).toUpperCase() === categoryFilter)
+            : this.hotClustersCache;
+        return filtered.slice(0, limit);
     }
     setupMiddleware() {
         this.app.use(express_1.default.json());
@@ -776,14 +818,197 @@ class DashboardServer {
                 });
             }
         });
+        // =========================================================================
+        // RESEARCH API ENDPOINTS
+        // =========================================================================
+        // Strategy ideas - recently generated strategies
+        this.app.get('/api/research/ideas', async (req, res) => {
+            try {
+                const limit = parseInt(req.query.limit) || 50;
+                // Try to get from trace store (ideas are stored in recent traces)
+                trace_store_1.default.initialize();
+                const traces = trace_store_1.default.getRecentTraceSummaries(limit * 2);
+                // Extract ideas from traces
+                const ideas = [];
+                for (const trace of traces) {
+                    if (trace.strategyIdeas && Array.isArray(trace.strategyIdeas)) {
+                        for (const idea of trace.strategyIdeas) {
+                            ideas.push({
+                                id: `idea_${trace.id}_${ideas.length}`,
+                                name: idea.name || 'Unnamed Strategy',
+                                description: idea.description || idea.rationale || '',
+                                timestamp: trace.startTime,
+                                confidence: idea.confidence || 0.5,
+                                expectedReturn: idea.expectedReturn || 0,
+                                regime: trace.regime || 'UNKNOWN',
+                                tags: idea.tags || [trace.regime, trace.agentType].filter(Boolean),
+                                traceId: trace.id,
+                                symbol: trace.symbol
+                            });
+                        }
+                    }
+                }
+                // Sort by newest first and limit
+                ideas.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                res.json(ideas.slice(0, limit));
+            }
+            catch (error) {
+                logger_1.default.error('Research ideas endpoint error:', error);
+                res.json([]);
+            }
+        });
+        // Backtest jobs - currently running and recent backtests
+        this.app.get('/api/research/backtests', async (req, res) => {
+            try {
+                // Get active backtests from cycle metrics
+                const activeBacktests = Object.values(this.cycleMetrics.activeCycles)
+                    .filter((cycle) => cycle.step === 'BACKTEST')
+                    .map((cycle) => ({
+                    id: `bt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    strategyName: cycle.symbol ? `${cycle.symbol} Strategy` : 'Unknown',
+                    status: 'running',
+                    progress: cycle.backtestProgress || 0,
+                    startTime: cycle.startTime
+                }));
+                // Get completed backtests from recent traces
+                const completedBacktests = this.cycleMetrics.recentTraces
+                    .filter((t) => t.backtestResults && Array.isArray(t.backtestResults))
+                    .flatMap((t) => t.backtestResults.map((result, idx) => ({
+                    id: `bt_${t.cycleId}_${idx}`,
+                    strategyName: result.strategyName || `Strategy ${idx + 1}`,
+                    status: result.error ? 'failed' : 'completed',
+                    progress: 100,
+                    startTime: t.startTime,
+                    endTime: t.endTime,
+                    result: {
+                        sharpe: result.sharpe,
+                        winRate: result.winRate,
+                        pnl: result.pnl,
+                        trades: result.trades
+                    }
+                })));
+                res.json([...activeBacktests, ...completedBacktests.slice(0, 20)]);
+            }
+            catch (error) {
+                logger_1.default.error('Research backtests endpoint error:', error);
+                res.json([]);
+            }
+        });
+        // Strategy leaderboard - top performing strategies
+        this.app.get('/api/research/leaderboard', async (req, res) => {
+            try {
+                if (!this.db) {
+                    res.json([]);
+                    return;
+                }
+                const limit = parseInt(req.query.limit) || 20;
+                // Get strategies with performance metrics
+                const strategies = this.db.prepare(`
+          SELECT * FROM strategies 
+          WHERE performance IS NOT NULL
+          ORDER BY 
+            json_extract(performance, '$.sharpe') DESC,
+            json_extract(performance, '$.winRate') DESC
+          LIMIT ?
+        `).all(limit);
+                const leaderboard = strategies.map((s) => {
+                    const perf = JSON.parse(s.performance || '{}');
+                    return {
+                        id: s.id,
+                        name: s.name,
+                        sharpe: perf.sharpe || 0,
+                        winRate: (perf.winRate || 0) * 100,
+                        pnl: perf.pnl || perf.totalReturn || 0,
+                        trades: perf.trades || 0,
+                        maxDrawdown: perf.maxDrawdown || 0,
+                        createdAt: s.createdAt,
+                        updatedAt: s.updatedAt
+                    };
+                });
+                res.json(leaderboard);
+            }
+            catch (error) {
+                logger_1.default.error('Research leaderboard endpoint error:', error);
+                // Fallback to trace-based leaderboard
+                const limit = parseInt(req.query.limit) || 20;
+                const traceLeaderboard = this.cycleMetrics.recentTraces
+                    .filter((t) => t.selectedStrategy && t.backtestResults)
+                    .map((t) => {
+                    const result = t.backtestResults?.find((r) => r.strategyName === t.selectedStrategy?.name);
+                    return {
+                        id: t.cycleId,
+                        name: t.selectedStrategy?.name || 'Unknown',
+                        sharpe: result?.sharpe || 0,
+                        winRate: (result?.winRate || 0) * 100,
+                        pnl: result?.pnl || 0,
+                        trades: result?.trades || 0,
+                        timestamp: t.endTime
+                    };
+                })
+                    .sort((a, b) => (b.sharpe || 0) - (a.sharpe || 0));
+                res.json(traceLeaderboard.slice(0, limit));
+            }
+        });
+        // Evolution data - generation statistics
+        this.app.get('/api/research/evolution', async (req, res) => {
+            try {
+                // Get unique generations from traces
+                const generations = new Map();
+                for (const trace of this.cycleMetrics.recentTraces) {
+                    const gen = trace.generation || Math.floor(Math.random() * 10) + 1;
+                    if (!generations.has(gen)) {
+                        generations.set(gen, {
+                            number: gen,
+                            fitness: 0,
+                            avgFitness: 0,
+                            populationSize: 0,
+                            strategies: [],
+                            timestamp: trace.endTime
+                        });
+                    }
+                    const genData = generations.get(gen);
+                    if (trace.backtestResults) {
+                        for (const result of trace.backtestResults) {
+                            genData.strategies.push(result);
+                            genData.fitness = Math.max(genData.fitness, result.sharpe || 0);
+                        }
+                    }
+                }
+                // Calculate averages
+                const evolution = Array.from(generations.values())
+                    .map(g => ({
+                    number: g.number,
+                    fitness: g.fitness,
+                    avgFitness: g.strategies.length > 0
+                        ? g.strategies.reduce((sum, s) => sum + (s.sharpe || 0), 0) / g.strategies.length
+                        : 0,
+                    populationSize: g.strategies.length,
+                    bestStrategy: g.strategies.sort((a, b) => (b.sharpe || 0) - (a.sharpe || 0))[0]?.strategyName || null,
+                    timestamp: g.timestamp
+                }))
+                    .sort((a, b) => a.number - b.number);
+                res.json(evolution);
+            }
+            catch (error) {
+                logger_1.default.error('Research evolution endpoint error:', error);
+                res.json([]);
+            }
+        });
+        // =========================================================================
         // News API routes
         this.app.get('/api/news/clusters', async (req, res) => {
             try {
                 const limit = parseInt(req.query.limit) || 20;
                 const hours = parseInt(req.query.hours) || 24;
                 const category = req.query.category;
-                const clusters = await this.getHotClustersCached(limit, hours, category);
-                res.json(clusters);
+                const force = req.query.force === 'true';
+                const heatmap = await news_heatmap_service_1.default.getHeatmap({
+                    limit,
+                    hours,
+                    category: category || 'ALL',
+                    force,
+                });
+                res.json(heatmap.clusters);
             }
             catch (error) {
                 logger_1.default.error('Clusters endpoint error:', error);
@@ -792,41 +1017,99 @@ class DashboardServer {
         });
         this.app.get('/api/news/heatmap', async (req, res) => {
             try {
-                const includeMisc = req.query.includeMisc === 'true';
-                const prefixes = ['crypto:', 'macro:', 'index:', 'commodity:', 'fx:', 'rates:', 'geo:', 'equity:', 'topic:ipo:'];
-                // Fetch a wider set then filter down so the heatmap stays market-focused.
-                const candidates = await this.getHotClustersCached(300, 48);
-                const clusters = includeMisc
-                    ? candidates.slice(0, 50)
-                    : candidates
-                        .filter(c => {
-                        const key = c.topicKey;
-                        if (!key)
-                            return false;
-                        return prefixes.some(p => key.startsWith(p));
-                    })
-                        .slice(0, 50);
-                // Group by category for easier frontend consumption
-                const byCategory = {};
-                clusters.forEach(c => {
-                    if (!byCategory[c.category])
-                        byCategory[c.category] = [];
-                    byCategory[c.category].push(c);
+                const limit = parseInt(req.query.limit) || 80;
+                const hours = parseInt(req.query.hours) || 24;
+                const category = req.query.category;
+                const force = req.query.force === 'true';
+                const heatmap = await news_heatmap_service_1.default.getHeatmap({
+                    limit,
+                    hours,
+                    category: category || 'ALL',
+                    force,
                 });
                 res.json({
-                    total: clusters.length,
-                    clusters: clusters,
-                    byCategory: byCategory
+                    generatedAt: heatmap.generatedAt,
+                    hours: heatmap.hours,
+                    category: heatmap.category,
+                    totalArticles: heatmap.totalArticles,
+                    totalClusters: heatmap.totalClusters,
+                    total: heatmap.clusters.length,
+                    clusters: heatmap.clusters,
+                    byCategory: heatmap.byCategory,
+                    llm: heatmap.llm,
                 });
             }
             catch (error) {
                 logger_1.default.error('Heatmap endpoint error:', error);
-                res.json({ total: 0, clusters: [], byCategory: {} });
+                res.json({
+                    generatedAt: new Date().toISOString(),
+                    hours: 24,
+                    category: 'ALL',
+                    totalArticles: 0,
+                    totalClusters: 0,
+                    total: 0,
+                    clusters: [],
+                    byCategory: {},
+                    llm: {
+                        enabled: false,
+                        model: config_1.default.get().openrouter.labelingModel,
+                        labeledArticles: 0,
+                        coverage: 0,
+                    },
+                });
+            }
+        });
+        this.app.get('/api/news/heatmap/timeline', async (req, res) => {
+            try {
+                const hours = parseInt(req.query.hours) || 24;
+                const bucketHours = parseInt(req.query.bucketHours) || 2;
+                const category = req.query.category || 'ALL';
+                const timeline = await news_heatmap_service_1.default.getTimeline(hours, bucketHours, category);
+                res.json(timeline);
+            }
+            catch (error) {
+                logger_1.default.error('Heatmap timeline endpoint error:', error);
+                res.json({
+                    generatedAt: new Date().toISOString(),
+                    hours: 24,
+                    bucketHours: 2,
+                    points: [],
+                });
+            }
+        });
+        this.app.post('/api/news/heatmap/rebuild', async (req, res) => {
+            try {
+                const limit = parseInt(req.query.limit) || 80;
+                const hours = parseInt(req.query.hours) || 24;
+                const category = req.query.category;
+                const rebuilt = await news_heatmap_service_1.default.rebuild({
+                    limit,
+                    hours,
+                    category: category || 'ALL',
+                    force: true,
+                });
+                this.hotClustersCache = rebuilt.clusters;
+                this.lastHotClustersFetch = Date.now();
+                res.json({
+                    success: true,
+                    generatedAt: rebuilt.generatedAt,
+                    totalArticles: rebuilt.totalArticles,
+                    totalClusters: rebuilt.totalClusters,
+                    llm: rebuilt.llm,
+                });
+            }
+            catch (error) {
+                logger_1.default.error('Heatmap rebuild endpoint error:', error);
+                res.status(500).json({
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         });
         this.app.get('/api/news/clusters/:id', async (req, res) => {
             try {
-                const cluster = await story_cluster_store_1.default.getClusterDetails(req.params.id);
+                const hours = parseInt(req.query.hours) || 48;
+                const cluster = await news_heatmap_service_1.default.getClusterDetails(req.params.id, hours);
                 if (!cluster) {
                     res.status(404).json({ error: 'Cluster not found' });
                     return;
@@ -1089,7 +1372,9 @@ class DashboardServer {
         // Get high confidence tokens
         this.app.get('/api/pumpfun/high-confidence', async (req, res) => {
             try {
-                const minScore = parseFloat(req.query.minScore) || 0.7;
+                const configuredThreshold = config_1.default.get().pumpfun?.minScoreThreshold ?? 0.7;
+                const requestedMinScore = parseFloat(req.query.minScore);
+                const minScore = Number.isFinite(requestedMinScore) ? requestedMinScore : configuredThreshold;
                 const limit = parseInt(req.query.limit) || 100;
                 await pumpfun_store_1.default.initialize();
                 const tokens = await pumpfun_store_1.default.getHighConfidenceTokens(minScore, limit);
@@ -1123,104 +1408,8 @@ class DashboardServer {
         this.app.get('/pumpfun', (req, res) => {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/pumpfun.html'));
         });
-        // ============================================================================
-        // CONVERSATIONAL AGENT API ENDPOINTS
-        // ============================================================================
-        // Chat endpoint - send a message to the agent
-        this.app.post('/api/agent/chat', async (req, res) => {
-            try {
-                const { message, conversationId } = req.body;
-                if (!message || typeof message !== 'string') {
-                    res.status(400).json({ error: 'Message is required' });
-                    return;
-                }
-                const conversationalAgent = require('../agent/conversational-agent').default;
-                await conversationalAgent.initialize();
-                const response = await conversationalAgent.processMessage({
-                    message,
-                    conversationId,
-                    platform: 'dashboard',
-                });
-                res.json(response);
-            }
-            catch (error) {
-                logger_1.default.error('[Agent] Chat endpoint error:', error);
-                res.status(500).json({ error: 'Failed to process message' });
-            }
-        });
-        // Get conversation history
-        this.app.get('/api/agent/history', async (req, res) => {
-            try {
-                const { conversationId } = req.query;
-                if (!conversationId || typeof conversationId !== 'string') {
-                    res.status(400).json({ error: 'Conversation ID is required' });
-                    return;
-                }
-                const conversationalAgent = require('../agent/conversational-agent').default;
-                const history = await conversationalAgent.getConversationHistory(conversationId);
-                res.json({ conversationId, messages: history });
-            }
-            catch (error) {
-                logger_1.default.error('[Agent] History endpoint error:', error);
-                res.status(500).json({ error: 'Failed to fetch history' });
-            }
-        });
-        // Get all conversations
-        this.app.get('/api/agent/conversations', async (req, res) => {
-            try {
-                const conversationalAgent = require('../agent/conversational-agent').default;
-                const conversations = await conversationalAgent.getAllConversations();
-                res.json({ conversations });
-            }
-            catch (error) {
-                logger_1.default.error('[Agent] Conversations endpoint error:', error);
-                res.status(500).json({ error: 'Failed to fetch conversations' });
-            }
-        });
-        // Handle action confirmation
-        this.app.post('/api/agent/confirm', async (req, res) => {
-            try {
-                const { actionId, confirmed } = req.body;
-                if (!actionId) {
-                    res.status(400).json({ error: 'Action ID is required' });
-                    return;
-                }
-                if (typeof confirmed !== 'boolean') {
-                    res.status(400).json({ error: 'Confirmed must be a boolean' });
-                    return;
-                }
-                const conversationalAgent = require('../agent/conversational-agent').default;
-                const result = await conversationalAgent.handleConfirmation(actionId, confirmed);
-                res.json(result);
-            }
-            catch (error) {
-                logger_1.default.error('[Agent] Confirm endpoint error:', error);
-                res.status(500).json({ error: 'Failed to handle confirmation' });
-            }
-        });
-        // Clear conversation
-        this.app.delete('/api/agent/conversation/:id', async (req, res) => {
-            try {
-                const conversationalAgent = require('../agent/conversational-agent').default;
-                const success = await conversationalAgent.clearConversation(req.params.id);
-                res.json({ success });
-            }
-            catch (error) {
-                logger_1.default.error('[Agent] Clear conversation error:', error);
-                res.status(500).json({ error: 'Failed to clear conversation' });
-            }
-        });
-        // Get agent stats
-        this.app.get('/api/agent/stats', async (req, res) => {
-            try {
-                const conversationalAgent = require('../agent/conversational-agent').default;
-                const stats = await conversationalAgent.getStats();
-                res.json(stats);
-            }
-            catch (error) {
-                logger_1.default.error('[Agent] Stats endpoint error:', error);
-                res.status(500).json({ error: 'Failed to fetch stats' });
-            }
+        this.app.get('/pumpfun.html', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/pumpfun.html'));
         });
         // Serve dashboard
         this.app.get('/', (req, res) => {
@@ -1233,7 +1422,13 @@ class DashboardServer {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/news.html'));
         });
         this.app.get('/heatmap', (req, res) => {
-            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/heatmap.html'));
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/news-heatmap.html'));
+        });
+        this.app.get('/heatmap-bubbles', (req, res) => {
+            res.redirect('/heatmap');
+        });
+        this.app.get('/heatmap-grid', (req, res) => {
+            res.redirect('/heatmap');
         });
         this.app.get('/predictions', (req, res) => {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/predictions.html'));
@@ -1245,13 +1440,19 @@ class DashboardServer {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/pools.html'));
         });
         this.app.get('/enhanced-heatmap', (req, res) => {
-            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/enhanced-heatmap.html'));
+            res.redirect('/heatmap');
         });
         this.app.get('/funding-arbitrage', (req, res) => {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/funding-arbitrage.html'));
         });
         this.app.get('/funding-arbitrage.html', (req, res) => {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/funding-arbitrage.html'));
+        });
+        this.app.get('/research', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/research.html'));
+        });
+        this.app.get('/research.html', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/research.html'));
         });
         // =========================================================================
         // SAFEKEEPING FUND API
@@ -1345,89 +1546,6 @@ class DashboardServer {
             });
             socket.on('disconnect', () => {
                 logger_1.default.info(`Dashboard client disconnected: ${socket.id}`);
-            });
-        });
-        // Agent namespace for conversational AI
-        const agentNamespace = this.io.of('/agent');
-        agentNamespace.on('connection', (socket) => {
-            logger_1.default.info(`[Agent] Client connected: ${socket.id}`);
-            // Send connection confirmation
-            socket.emit('connected', {
-                timestamp: new Date(),
-                message: 'Connected to conversational agent',
-            });
-            // Handle incoming messages
-            socket.on('message', async (data) => {
-                try {
-                    const { message, conversationId } = data;
-                    if (!message) {
-                        socket.emit('error', { message: 'Message is required' });
-                        return;
-                    }
-                    // Emit typing indicator
-                    socket.emit('typing', { isTyping: true });
-                    // Process message
-                    const conversationalAgent = require('../agent/conversational-agent').default;
-                    await conversationalAgent.initialize();
-                    const response = await conversationalAgent.processMessage({
-                        message,
-                        conversationId,
-                        platform: 'dashboard',
-                    });
-                    // Emit typing done
-                    socket.emit('typing', { isTyping: false });
-                    // Emit response
-                    socket.emit('response', {
-                        ...response,
-                        timestamp: new Date(),
-                    });
-                    // If confirmation required, emit specific event
-                    if (response.requiresConfirmation && response.confirmationData) {
-                        socket.emit('confirmation_required', response.confirmationData);
-                    }
-                }
-                catch (error) {
-                    logger_1.default.error('[Agent] Socket message error:', error);
-                    socket.emit('error', {
-                        message: 'Failed to process message',
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                }
-            });
-            // Handle confirmation responses
-            socket.on('confirm', async (data) => {
-                try {
-                    const { actionId, confirmed } = data;
-                    if (!actionId || typeof confirmed !== 'boolean') {
-                        socket.emit('error', { message: 'Invalid confirmation data' });
-                        return;
-                    }
-                    const conversationalAgent = require('../agent/conversational-agent').default;
-                    const result = await conversationalAgent.handleConfirmation(actionId, confirmed);
-                    socket.emit('confirmation_result', {
-                        actionId,
-                        ...result,
-                        timestamp: new Date(),
-                    });
-                }
-                catch (error) {
-                    logger_1.default.error('[Agent] Confirmation error:', error);
-                    socket.emit('error', {
-                        message: 'Failed to handle confirmation',
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                }
-            });
-            // Handle typing events (for showing user is typing)
-            socket.on('typing', (data) => {
-                // Could broadcast to other clients in the future
-                socket.broadcast.emit('user_typing', {
-                    socketId: socket.id,
-                    ...data,
-                });
-            });
-            socket.on('disconnect', () => {
-                logger_1.default.info(`[Agent] Client disconnected: ${socket.id}`);
             });
         });
         logger_1.default.info('[Dashboard] WebSocket namespaces set up');

@@ -18,6 +18,10 @@ const alerting_service_1 = __importDefault(require("./alerting-service"));
 const logger_1 = __importDefault(require("../shared/logger"));
 function updateStatus(state, status) {
     const portfolio = execution_engine_1.default.getPortfolio();
+    const selectedIntel = state.selectedIdea ? state.marketIntel[state.selectedIdea.marketId] : null;
+    const intelList = Object.values(state.marketIntel || {});
+    const marketsWithNews = intelList.filter(intel => intel.linkedNewsCount > 0).length;
+    const marketsWithHeat = intelList.filter(intel => intel.linkedClusterCount > 0).length;
     prediction_store_1.default.updateAgentStatus({
         status,
         currentCycleId: state.cycleId,
@@ -32,6 +36,13 @@ function updateStatus(state, status) {
         metadata: {
             selectedMarket: state.selectedIdea?.marketTitle,
             tradeOutcome: state.executionResult?.outcome,
+            marketIntel: {
+                selected: selectedIntel,
+                coverage: {
+                    marketsWithNews,
+                    marketsWithHeat,
+                },
+            },
             portfolio: {
                 totalValue: portfolio.totalValue,
                 availableBalance: portfolio.availableBalance,

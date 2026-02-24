@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=d
 WorkingDirectory=/home/d/PerpsTrader
-ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/dashboard.js
+ExecStart=/home/d/.nvm/versions/node/v22.22.0/bin/node /home/d/PerpsTrader/bin/dashboard.js
 Restart=always
 RestartSec=10
 

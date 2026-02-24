@@ -1,15 +1,37 @@
 [Unit]
 Description=PerpsTrader Research Engine
-After=network.target
+After=network.target perps-redis.service
+Wants=perps-redis.service
 
 [Service]
 Type=simple
 User=d
 WorkingDirectory=/home/d/PerpsTrader
-ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/research.js
+
+# Ensure log directory exists
+ExecStartPre=/bin/mkdir -p /var/log/perps-trader
+ExecStartPre=/bin/chown d:d /var/log/perps-trader
+
+# Main process - uses compiled JS from bin directory
+ExecStart=/home/d/.nvm/versions/node/v22.22.0/bin/node /home/d/PerpsTrader/bin/research-engine/entry.js
+
+# Logging
+StandardOutput=append:/var/log/perps-trader/research.log
+StandardError=append:/var/log/perps-trader/research.log
+
+# Restart configuration
 Restart=always
 RestartSec=30
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Environment
 Environment=NODE_ENV=production
+Environment=RESEARCH_INTERVAL_MINUTES=15
+Environment=EVOLUTION_INTERVAL_HOURS=6
+
+# Resource limits
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

@@ -59,9 +59,9 @@ async function fetchHyperliquidCandles(symbol, timeframe, count) {
     const baseUrl = hyperliquidConfig.baseUrl || 'https://api.hyperliquid.xyz';
     const interval = toHyperliquidInterval(timeframe);
     try {
-        const endTime = Math.floor(Date.now() / 1000);
+        const endTime = Date.now();
         const intervalMs = parseTimeframeMs(timeframe);
-        const startTime = Math.floor((Date.now() - intervalMs * count) / 1000);
+        const startTime = Date.now() - intervalMs * count;
         const response = await axios_1.default.post(`${baseUrl}/info`, {
             type: 'candleSnapshot',
             req: {

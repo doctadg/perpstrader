@@ -1,0 +1,275 @@
+/**
+ * Mutation Engine
+ * Handles mutation of strategy parameters using various mutation strategies
+ */
+
+import { 
+  StrategyGenome, 
+  StrategyParameters, 
+  PARAMETER_BOUNDS, 
+  TIMEFRAME_OPTIONS,
+  ParameterBounds 
+} from './types';
+
+export interface MutationConfig {
+  mutationRate: number;        // Probability of mutating each parameter (0-1)
+  mutationStrength: number;    // How much to mutate (0-1, percentage of range)
+  adaptiveMutation: boolean;   // Adapt mutation rate based on diversity
+  elitePreservation: number;   // Number of elite genomes to preserve unchanged
+}
+
+export const DEFAULT_MUTATION_CONFIG: MutationConfig = {
+  mutationRate: 0.3,
+  mutationStrength: 0.2,
+  adaptiveMutation: true,
+  elitePreservation: 2,
+};
+
+export class MutationEngine {
+  private config: MutationConfig;
+  private generationMutationRate: number;
+
+  constructor(config: Partial<MutationConfig> = {}) {
+    this.config = { ...DEFAULT_MUTATION_CONFIG, ...config };
+    this.generationMutationRate = this.config.mutationRate;
+  }
+
+  /**
+   * Apply mutation to a genome
+   */
+  mutate(genome: StrategyGenome, isElite: boolean = false): StrategyGenome {
+    const { v4: uuidv4 } = require('uuid');
+    
+    // Don't mutate elite genomes
+    if (isElite) {
+      return {
+        ...genome,
+        id: uuidv4(),
+        parentIds: [genome.id],
+        generation: genome.generation + 1,
+        fitness: undefined,
+        sharpeRatio: undefined,
+        totalReturn: undefined,
+        maxDrawdown: undefined,
+        winRate: undefined,
+        totalTrades: undefined,
+        backtestResult: undefined,
+        createdAt: new Date(),
+      };
+    }
+
+    const mutatedParams: StrategyParameters = {
+      entryThresholds: this.mutateGroup(genome.parameters.entryThresholds, 'entryThresholds'),
+      riskParameters: this.mutateGroup(genome.parameters.riskParameters, 'riskParameters'),
+      timingParameters: this.mutateTimingParameters(genome.parameters.timingParameters),
+      filterParameters: this.mutateGroup(genome.parameters.filterParameters, 'filterParameters'),
+    };
+
+    // Ensure consistency after mutation
+    this.validateAndFixParameters(mutatedParams);
+
+    return {
+      id: uuidv4(),
+      parentIds: [genome.id],
+      generation: genome.generation + 1,
+      parameters: mutatedParams,
+      fitness: undefined,
+      sharpeRatio: undefined,
+      totalReturn: undefined,
+      maxDrawdown: undefined,
+      winRate: undefined,
+      totalTrades: undefined,
+      createdAt: new Date(),
+      backtestResult: undefined,
+    };
+  }
+
+  /**
+   * Mutate a group of numeric parameters
+   */
+  private mutateGroup(
+    group: Record<string, number>,
+    groupName: string
+  ): any {
+    const bounds = PARAMETER_BOUNDS[groupName];
+    const mutated: Record<string, number> = {};
+
+    for (const [key, value] of Object.entries(group)) {
+      if (Math.random() < this.generationMutationRate) {
+        mutated[key] = this.mutateValue(value, bounds[key]);
+      } else {
+        mutated[key] = value;
+      }
+    }
+
+    return mutated;
+  }
+
+  /**
+   * Mutate timing parameters (includes string timeframe)
+   */
+  private mutateTimingParameters(timing: StrategyParameters['timingParameters']): StrategyParameters['timingParameters'] {
+    const bounds = PARAMETER_BOUNDS.timingParameters;
+    
+    // Potentially mutate timeframe
+    let timeframe = timing.timeframe;
+    if (Math.random() < this.generationMutationRate * 0.5) {
+      timeframe = this.mutateTimeframe(timing.timeframe);
+    }
+
+    return {
+      timeframe,
+      maxHoldTime: Math.random() < this.generationMutationRate 
+        ? this.mutateValue(timing.maxHoldTime, bounds.maxHoldTime)
+        : timing.maxHoldTime,
+      minHoldTime: Math.random() < this.generationMutationRate
+        ? this.mutateValue(timing.minHoldTime, bounds.minHoldTime)
+        : timing.minHoldTime,
+    };
+  }
+
+  /**
+   * Mutate a single numeric value
+   */
+  private mutateValue(value: number, bounds: ParameterBounds): number {
+    const range = bounds.max - bounds.min;
+    const mutationAmount = (Math.random() - 0.5) * 2 * range * this.config.mutationStrength;
+    let newValue = value + mutationAmount;
+
+    // Ensure within bounds
+    newValue = Math.max(bounds.min, Math.min(bounds.max, newValue));
+
+    // Apply step if specified
+    if (bounds.step) {
+      newValue = Math.round(newValue / bounds.step) * bounds.step;
+    }
+
+    // Round if integer
+    if (bounds.integer) {
+      newValue = Math.round(newValue);
+    }
+
+    return newValue;
+  }
+
+  /**
+   * Mutate timeframe by shifting up or down
+   */
+  private mutateTimeframe(current: string): string {
+    const index = TIMEFRAME_OPTIONS.indexOf(current);
+    if (index === -1) return TIMEFRAME_OPTIONS[0];
+
+    const shift = Math.random() < 0.5 ? -1 : 1;
+    const newIndex = Math.max(0, Math.min(TIMEFRAME_OPTIONS.length - 1, index + shift));
+    
+    return TIMEFRAME_OPTIONS[newIndex];
+  }
+
+  /**
+   * Validate and fix parameter consistency
+   */
+  private validateAndFixParameters(params: StrategyParameters): void {
+    // Ensure emaFast < emaSlow
+    if (params.entryThresholds.emaFast >= params.entryThresholds.emaSlow) {
+      params.entryThresholds.emaSlow = params.entryThresholds.emaFast + 5;
+    }
+
+    // Ensure minVolatility < maxVolatility
+    if (params.filterParameters.minVolatility >= params.filterParameters.maxVolatility) {
+      params.filterParameters.maxVolatility = params.filterParameters.minVolatility + 0.01;
+    }
+
+    // Ensure minHoldTime < maxHoldTime
+    if (params.timingParameters.minHoldTime >= params.timingParameters.maxHoldTime) {
+      params.timingParameters.maxHoldTime = params.timingParameters.minHoldTime + 10;
+    }
+
+    // Ensure RSI thresholds make sense
+    if (params.entryThresholds.rsiOversold >= params.entryThresholds.rsiOverbought) {
+      const mid = (params.entryThresholds.rsiOversold + params.entryThresholds.rsiOverbought) / 2;
+      params.entryThresholds.rsiOversold = Math.max(10, mid - 15);
+      params.entryThresholds.rsiOverbought = Math.min(90, mid + 15);
+    }
+  }
+
+  /**
+   * Apply adaptive mutation based on population diversity
+   */
+  updateAdaptiveMutation(population: StrategyGenome[]): void {
+    if (!this.config.adaptiveMutation || population.length < 2) return;
+
+    // Calculate average fitness diversity
+    const fitnesses = population
+      .map(g => g.fitness)
+      .filter(f => f !== undefined) as number[];
+
+    if (fitnesses.length < 2) return;
+
+    const avg = fitnesses.reduce((a, b) => a + b, 0) / fitnesses.length;
+    const variance = fitnesses.reduce((sum, f) => sum + Math.pow(f - avg, 2), 0) / fitnesses.length;
+    const stdDev = Math.sqrt(variance);
+
+    // If diversity is low, increase mutation rate
+    const diversity = stdDev / Math.abs(avg || 1);
+    
+    if (diversity < 0.1) {
+      this.generationMutationRate = Math.min(0.8, this.config.mutationRate * 1.5);
+    } else if (diversity > 0.5) {
+      this.generationMutationRate = Math.max(0.1, this.config.mutationRate * 0.8);
+    } else {
+      this.generationMutationRate = this.config.mutationRate;
+    }
+  }
+
+  /**
+   * Reset mutation rate for new generation
+   */
+  resetMutationRate(): void {
+    this.generationMutationRate = this.config.mutationRate;
+  }
+
+  /**
+   * Batch mutate a population
+   */
+  mutatePopulation(
+    population: StrategyGenome[], 
+    offspringCount: number
+  ): StrategyGenome[] {
+    const offspring: StrategyGenome[] = [];
+    
+    // Sort by fitness for elite preservation
+    const sorted = [...population].sort((a, b) => (b.fitness || 0) - (a.fitness || 0));
+
+    this.updateAdaptiveMutation(population);
+
+    for (let i = 0; i < offspringCount; i++) {
+      // Select parent (tournament selection)
+      const parent = this.selectParent(sorted);
+      const isElite = i < this.config.elitePreservation;
+      
+      offspring.push(this.mutate(parent, isElite));
+    }
+
+    this.resetMutationRate();
+    return offspring;
+  }
+
+  /**
+   * Select parent using tournament selection
+   */
+  private selectParent(population: StrategyGenome[]): StrategyGenome {
+    const tournamentSize = Math.min(3, population.length);
+    let best = population[Math.floor(Math.random() * population.length)];
+
+    for (let i = 1; i < tournamentSize; i++) {
+      const contender = population[Math.floor(Math.random() * population.length)];
+      if ((contender.fitness || 0) > (best.fitness || 0)) {
+        best = contender;
+      }
+    }
+
+    return best;
+  }
+}
+
+export default MutationEngine;

@@ -125,5 +125,7 @@ export declare class MultiChainWalletManager {
      * Check if initialized
      */
     isReady(): boolean;
+    private normalizeSolanaSecretKey;
+    private deriveChainAddress;
 }
 //# sourceMappingURL=multi-chain-wallet-manager.d.ts.map

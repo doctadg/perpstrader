@@ -20,6 +20,7 @@
                 items: [
                     { id: 'dashboard', label: 'Dashboard', path: '/', icon: '◈', shortcut: 'D', desc: 'Main control terminal' },
                     { id: 'trace', label: 'Trace Viewer', path: '/trace', icon: '◉', shortcut: 'T', desc: 'Cycle traces & logs' },
+                    { id: 'research', label: 'Research Lab', path: '/research', icon: '◆', shortcut: 'R', desc: 'Strategy evolution & backtesting' },
                 ]
             },
             {
@@ -27,9 +28,7 @@
                 title: 'Intelligence',
                 items: [
                     { id: 'news', label: 'News Feed', path: '/news', icon: '◆', shortcut: 'N', desc: 'Real-time news stream' },
-                    { id: 'heatmap', label: 'Heatmap', path: '/heatmap', icon: '▣', shortcut: 'H', desc: 'Event visualization' },
-                    { id: 'enhanced-heatmap', label: 'Enhanced Heatmap', path: '/enhanced-heatmap', icon: '◈', shortcut: 'E', desc: 'Advanced heat analysis' },
-                    { id: 'market-bubbles', label: 'Market Bubbles', path: '/heatmap-bubbles', icon: '●', shortcut: 'B', desc: 'Market-based bubble view' },
+                    { id: 'heatmap', label: 'News Heatmap', path: '/heatmap', icon: '▣', shortcut: 'H', desc: 'LLM clustered heat system' },
                 ]
             },
             {
@@ -37,8 +36,8 @@
                 title: 'Markets',
                 items: [
                     { id: 'predictions', label: 'Predictions', path: '/predictions', icon: '◊', shortcut: 'P', desc: 'Prediction markets' },
-                    { id: 'funding-arbitrage', label: 'Funding Arbitrage', path: '/funding-arbitrage.html', icon: '💰', shortcut: 'F', desc: 'Funding rate opportunities' },
-                    { id: 'pools', label: 'Safekeeping Pools', path: '/pools.html', icon: '◐', shortcut: 'S', desc: 'Yield & safekeeping' },
+                    { id: 'funding-arbitrage', label: 'Funding Arbitrage', path: '/funding-arbitrage', icon: '💰', shortcut: 'F', desc: 'Funding rate opportunities' },
+                    { id: 'pools', label: 'Safekeeping Pools', path: '/pools', icon: '◐', shortcut: 'S', desc: 'Yield & safekeeping' },
                     { id: 'pumpfun', label: 'PumpFun Analyzer', path: '/pumpfun', icon: '●', shortcut: 'U', desc: 'Token analysis' },
                 ]
             }
@@ -535,16 +534,166 @@
                 }
             }
 
+            /* Bloomberg-style refinement pass */
+            body.has-nav {
+                padding-left: 272px;
+            }
+
+            body.has-nav.nav-collapsed {
+                padding-left: 68px;
+            }
+
+            #universal-nav {
+                width: 272px;
+                background: linear-gradient(180deg, rgba(8, 12, 16, 0.985), rgba(8, 12, 16, 0.97));
+                border-right: 1px solid rgba(255, 196, 116, 0.22);
+                box-shadow: 8px 0 30px rgba(0, 0, 0, 0.38);
+            }
+
+            #universal-nav.collapsed {
+                width: 68px;
+            }
+
+            .nav-header {
+                padding: 14px 12px;
+                min-height: 62px;
+                background: linear-gradient(90deg, rgba(255, 196, 116, 0.08), rgba(102, 215, 229, 0.06));
+            }
+
+            .nav-brand-icon {
+                border-radius: 6px;
+                border: 1px solid rgba(255, 196, 116, 0.45);
+                box-shadow: 0 0 16px rgba(255, 196, 116, 0.25);
+            }
+
+            .nav-brand-title {
+                font-size: 12px;
+                letter-spacing: 1.4px;
+            }
+
+            .nav-brand-subtitle {
+                color: #ffc474;
+                font-size: 9px;
+            }
+
+            .nav-toggle {
+                border-color: rgba(255, 196, 116, 0.35);
+            }
+
+            .nav-content {
+                padding: 8px 8px 10px;
+            }
+
+            .nav-section {
+                margin-bottom: 10px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+                padding-bottom: 8px;
+            }
+
+            .nav-section:last-child {
+                border-bottom: none;
+            }
+
+            .nav-section-title {
+                color: #ffc474;
+                font-size: 9px;
+                letter-spacing: 2px;
+                font-weight: 700;
+            }
+
+            .nav-item {
+                border-radius: 6px;
+                border: 1px solid transparent;
+                padding: 9px 10px;
+                margin: 3px 0;
+            }
+
+            .nav-item:hover,
+            .nav-item.active {
+                background: rgba(255, 196, 116, 0.08);
+                border-color: rgba(255, 196, 116, 0.36);
+                box-shadow: inset 0 0 0 1px rgba(255, 196, 116, 0.08);
+            }
+
+            .nav-item::before,
+            .nav-item.active::before {
+                background: #ffc474;
+            }
+
+            .nav-item-icon {
+                color: #66d7e5;
+            }
+
+            .nav-item-label {
+                font-size: 12px;
+                letter-spacing: 0.02em;
+            }
+
+            .nav-item-desc {
+                color: #778a95;
+                font-size: 9px;
+                letter-spacing: 0.02em;
+            }
+
+            .nav-item-shortcut {
+                color: #ffc474;
+                border: 1px solid rgba(255, 196, 116, 0.34);
+                background: rgba(255, 196, 116, 0.1);
+                font-size: 9px;
+                padding: 2px 5px;
+            }
+
+            .nav-status {
+                border-top: 1px solid rgba(255, 196, 116, 0.2);
+                background: rgba(7, 12, 16, 0.88);
+            }
+
+            .nav-status-item {
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+
+            .nav-actions {
+                border-top: 1px solid rgba(255, 196, 116, 0.2);
+                background: rgba(7, 12, 16, 0.9);
+            }
+
+            .nav-action-btn {
+                border-radius: 6px;
+                border-color: rgba(102, 215, 229, 0.24);
+                background: rgba(10, 16, 21, 0.78);
+                font-size: 10px;
+                padding: 8px 10px;
+            }
+
+            .nav-action-btn:hover {
+                border-color: rgba(255, 196, 116, 0.56);
+                background: rgba(255, 196, 116, 0.1);
+            }
+
+            .nav-mobile-btn {
+                top: 14px;
+                left: 14px;
+                border-color: rgba(255, 196, 116, 0.32);
+                color: #ffc474;
+            }
+
             /* Page Content Adjustment */
             .top-bar {
-                padding-left: 280px !important;
+                padding-left: 292px !important;
             }
 
             body.nav-collapsed .top-bar {
-                padding-left: 80px !important;
+                padding-left: 88px !important;
             }
 
             @media (max-width: 1024px) {
+                body.has-nav,
+                body.has-nav.nav-collapsed {
+                    padding-left: 0;
+                }
+
                 .top-bar {
                     padding-left: 70px !important;
                 }

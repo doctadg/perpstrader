@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Channel = void 0;
+exports.messageBus = exports.Channel = void 0;
 const ioredis_1 = __importDefault(require("ioredis"));
 const events_1 = require("events");
 const logger_1 = __importDefault(require("./logger"));
@@ -340,12 +340,12 @@ class MessageBus extends events_1.EventEmitter {
     }
 }
 // Singleton instance
-const messageBus = new MessageBus();
+exports.messageBus = new MessageBus();
 // Auto-connect on import in production
 if (process.env.NODE_ENV === 'production') {
-    messageBus.connect().catch((error) => {
+    exports.messageBus.connect().catch((error) => {
         logger_1.default.error('[MessageBus] Auto-connect failed:', error);
     });
 }
-exports.default = messageBus;
+exports.default = exports.messageBus;
 //# sourceMappingURL=message-bus.js.map

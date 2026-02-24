@@ -3,53 +3,100 @@ declare class MarketIngester {
     private hyperliquidUrl;
     private wsUrl;
     private tradingSymbols;
+    private allSymbols;
+    private trackedSymbolSet;
+    private symbolVolumes;
     private primaryTimeframe;
     private ws;
+    private wsReconnectTimer;
+    private isStopping;
+    private subscribedSymbols;
+    private isSubscriptionSyncRunning;
+    private pendingSubscriptionSync;
     private isPaperTrading;
     private tradeCandles;
     private tradeCandleTimer;
+    private pollingTimer;
     private marketDataQueue;
     private orderBookQueue;
     private tradeQueue;
     private fundingQueue;
+    private ingestionTraceQueue;
     private marketDataStmt;
     private orderBookStmt;
     private tradeStmt;
     private fundingStmt;
+    private ingestionTraceStmt;
+    private symbolHealthStmt;
     private writeFlushTimer;
     private writeFlushIntervalMs;
     private writeBatchSize;
     private isFlushing;
     private orderBookLogIntervalMs;
     private lastOrderBookLogAt;
+    private lastAllMidsLogAt;
     private symbolUpdateTimer;
-    private allSymbols;
+    private startedAtMs;
+    private coverageTimer;
+    private coverageAuditIntervalMs;
+    private coverageFreshnessMs;
+    private coverageLogIntervalMs;
+    private coverageWarmupMs;
+    private minCoverageRatio;
+    private lastCoverageLogAt;
+    private minTrackedVolume24h;
+    private maxWsSymbolSubscriptions;
+    private wsAdaptiveMaxSymbols;
+    private wsSubscriptionDelayMs;
+    private wsEnableL2Book;
+    private wsEnableTrades;
+    private wsEnableFunding;
+    private wsEarlyCloseThresholdMs;
+    private wsLastOpenAt;
+    private wsConsecutiveEarlyCloses;
+    private maxBackfillPerCycle;
+    private backfillCooldownMs;
+    private backfillConcurrency;
+    private backfillDelayMs;
+    private backfillLookbackMinutes;
+    private isBackfillRunning;
+    private enrichmentTimer;
+    private enrichmentIntervalMs;
+    private enrichmentBatchSize;
+    private enrichmentConcurrency;
+    private enrichmentDelayMs;
+    private enrichmentCursor;
+    private enrichmentRuns;
+    private isEnrichmentRunning;
+    private lastMarketDataAt;
+    private lastQuoteAt;
+    private lastTradeAt;
+    private lastBackfillAt;
+    private lastBackfillAttemptAt;
+    private symbolDataPoints;
+    private symbolBackfillPoints;
     constructor();
     private initializeDatabase;
     private prepareStatements;
-    /**
-     * Fetch all available symbols from Hyperliquid and update subscriptions
-     */
     updateSymbolsList(): Promise<void>;
-    /**
-     * Get all tracked symbols
-     */
     getAllTrackedSymbols(): string[];
-    /**
-     * Start periodic symbol list updates
-     */
     startSymbolUpdates(): void;
-    /**
-     * Categorize a symbol
-     */
+    private getWsSymbolChannels;
+    private refreshWsSymbolWindow;
     private categorizeSymbol;
     private setupWriteBuffer;
     private maybeFlush;
     private flushWriteBuffers;
     start(): Promise<void>;
+    private isWsOpen;
     private connectWebSocket;
+    private scheduleReconnect;
     private subscribeToData;
+    private sendWsMessage;
+    private syncSymbolSubscriptions;
+    private sendSymbolSubscription;
     private handleWebSocketMessage;
+    private handleAllMids;
     private handleOrderBook;
     private handleTrades;
     private handleFunding;
@@ -58,11 +105,23 @@ declare class MarketIngester {
     private saveOrderBook;
     private saveTrade;
     private saveFunding;
+    private recordIngestionTrace;
+    private persistSymbolHealth;
+    private startCoverageMonitoring;
+    private runCoverageAudit;
+    private startEnrichmentPolling;
+    private getNextEnrichmentSymbols;
+    private runEnrichmentBatch;
+    private enrichSymbol;
+    private backfillSymbols;
+    private backfillSymbol;
     stop(): Promise<void>;
+    private mergeCandleSource;
     private updateTradeCandle;
     private updateQuoteCandle;
     private flushTradeCandle;
     private startCandleFlushTimer;
+    private sleep;
 }
 declare const _default: MarketIngester;
 export default _default;

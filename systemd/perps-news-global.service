@@ -7,7 +7,7 @@ Type=simple
 User=d
 Group=d
 WorkingDirectory=/home/d/PerpsTrader
-ExecStart=/usr/bin/node /home/d/PerpsTrader/bin/news-agent.js
+ExecStart=/home/d/.nvm/versions/node/v22.22.0/bin/node /home/d/PerpsTrader/bin/news-agent.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production

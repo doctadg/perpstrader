@@ -39,11 +39,7 @@ class PumpFunOrchestrator {
                     currentStep: 'NO_METADATA',
                 };
             }
-            // Step 3: Scrape websites
-            state = { ...state, ...await (0, nodes_1.scrapeNode)(state) };
-            // Step 4: Analyze contract security
-            state = { ...state, ...await (0, nodes_1.securityNode)(state) };
-            // Step 5: Run GLM comprehensive analysis
+            // Step 3: Run OpenRouter website-first analysis
             state = { ...state, ...await (0, nodes_1.analyzeNode)(state) };
             if (state.analyzedTokens.length === 0) {
                 logger_1.default.warn('[PumpFunOrchestrator] No tokens analyzed, ending cycle');
@@ -52,11 +48,11 @@ class PumpFunOrchestrator {
                     currentStep: 'NO_ANALYSIS',
                 };
             }
-            // Step 6: Calculate confidence scores
+            // Step 4: Calculate confidence scores
             state = { ...state, ...await (0, nodes_1.scoreNode)(state) };
-            // Step 7: Store results to database
+            // Step 5: Store results to database
             state = { ...state, ...await (0, nodes_1.storeNode)(state) };
-            // Step 8: Cleanup and publish events
+            // Step 6: Cleanup and publish events
             state = { ...state, ...await (0, nodes_1.cleanupNode)(state) };
             return state;
         }

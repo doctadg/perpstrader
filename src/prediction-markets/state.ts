@@ -9,6 +9,7 @@ import {
   PredictionTrade,
   PredictionPortfolio,
   NewsItem,
+  PredictionMarketIntel,
 } from '../shared/types';
 
 export interface PredictionAgentState {
@@ -19,6 +20,7 @@ export interface PredictionAgentState {
   marketUniverse: PredictionMarket[];
   activeMarkets: PredictionMarket[];
   marketNews: Record<string, NewsItem[]>;
+  marketIntel: Record<string, PredictionMarketIntel>;
 
   ideas: PredictionIdea[];
   backtestResults: PredictionBacktestResult[];
@@ -46,6 +48,7 @@ export function createInitialPredictionState(): PredictionAgentState {
     marketUniverse: [],
     activeMarkets: [],
     marketNews: {},
+    marketIntel: {},
 
     ideas: [],
     backtestResults: [],

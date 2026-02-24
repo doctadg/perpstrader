@@ -1,0 +1,307 @@
+"use strict";
+// Title Cleaner
+// Normalizes news titles by removing clickbait, ALL-CAPS, sensationalism
+// Returns cleaned title with quality score (0-1)
+//
+// Enhanced: Now includes market-enriched title generation with numerical context
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.detectEventType = exports.detectTrendDirection = exports.detectActionWord = exports.calculateTitleMetrics = exports.getAssetTicker = exports.normalizeAssetName = exports.formatTitle = exports.formatPercentage = exports.formatPrice = exports.getPrimaryAmount = exports.getPrimaryPercentage = exports.getPrimaryPrice = exports.extractNumericalEntities = exports.scoreTitleQuality = exports.generateTitleWithMarketContext = exports.quickGenerateTitle = exports.generateEnhancedTitle = void 0;
+exports.cleanTitle = cleanTitle;
+exports.isLikelySpam = isLikelySpam;
+exports.areTitlesSimilar = areTitlesSimilar;
+exports.getTitleFingerprint = getTitleFingerprint;
+exports.isExactDuplicate = isExactDuplicate;
+exports.isNonMarketMoving = isNonMarketMoving;
+// Re-export enhanced title system
+var market_title_generator_1 = require("./market-title-generator");
+Object.defineProperty(exports, "generateEnhancedTitle", { enumerable: true, get: function () { return market_title_generator_1.generateEnhancedTitle; } });
+Object.defineProperty(exports, "quickGenerateTitle", { enumerable: true, get: function () { return market_title_generator_1.quickGenerateTitle; } });
+Object.defineProperty(exports, "generateTitleWithMarketContext", { enumerable: true, get: function () { return market_title_generator_1.generateTitleWithMarketContext; } });
+Object.defineProperty(exports, "scoreTitleQuality", { enumerable: true, get: function () { return market_title_generator_1.scoreTitleQuality; } });
+var numerical_extractor_1 = require("./numerical-extractor");
+Object.defineProperty(exports, "extractNumericalEntities", { enumerable: true, get: function () { return numerical_extractor_1.extractNumericalEntities; } });
+Object.defineProperty(exports, "getPrimaryPrice", { enumerable: true, get: function () { return numerical_extractor_1.getPrimaryPrice; } });
+Object.defineProperty(exports, "getPrimaryPercentage", { enumerable: true, get: function () { return numerical_extractor_1.getPrimaryPercentage; } });
+Object.defineProperty(exports, "getPrimaryAmount", { enumerable: true, get: function () { return numerical_extractor_1.getPrimaryAmount; } });
+Object.defineProperty(exports, "formatPrice", { enumerable: true, get: function () { return numerical_extractor_1.formatPrice; } });
+Object.defineProperty(exports, "formatPercentage", { enumerable: true, get: function () { return numerical_extractor_1.formatPercentage; } });
+var title_formatter_1 = require("./title-formatter");
+Object.defineProperty(exports, "formatTitle", { enumerable: true, get: function () { return title_formatter_1.formatTitle; } });
+Object.defineProperty(exports, "normalizeAssetName", { enumerable: true, get: function () { return title_formatter_1.normalizeAssetName; } });
+Object.defineProperty(exports, "getAssetTicker", { enumerable: true, get: function () { return title_formatter_1.getAssetTicker; } });
+Object.defineProperty(exports, "calculateTitleMetrics", { enumerable: true, get: function () { return title_formatter_1.calculateTitleMetrics; } });
+Object.defineProperty(exports, "detectActionWord", { enumerable: true, get: function () { return title_formatter_1.detectActionWord; } });
+Object.defineProperty(exports, "detectTrendDirection", { enumerable: true, get: function () { return title_formatter_1.detectTrendDirection; } });
+Object.defineProperty(exports, "detectEventType", { enumerable: true, get: function () { return title_formatter_1.detectEventType; } });
+var CLICKBAIT_PATTERNS = [
+    /\b(you won't believe|you won't|you'll never believe|shocking|astonishing|unbelievable|mind-blowing|jaw-dropping)\b/gi,
+    /\b(this will blow your mind|this just in|must read|breaking news|urgent|emergency|just now)\b/gi,
+    /\b(\d+ reasons? you'll|\d+ things? that|\d+ ways? to|top \d+|best \d+|worst \d+)\b/gi,
+    /\b(secret|hidden|exposed|revealed|uncovered|they don't want you to know|what happened next)\b/gi,
+    /\b(bombshell|earth-shattering|history in the making|game changer|paradigm shift)\b/gi,
+    /\b(sponsored|ad\)|advertisement|promo)\b/gi,
+];
+var SOURCE_PREFIXES = [
+    /^(breaking:\s*)/i,
+    /^(urgent:\s*)/i,
+    /^(alert:\s*)/i,
+    /^(just in:\s*)/i,
+    /^(update:\s*)/i,
+    /^(developing:\s*)/i,
+    /^(report:\s*)/i,
+];
+var TRAILING_PATTERNS = [
+    /\s+[-–—]\s*(you won't believe|read more|click here|find out more)\s*$/gi,
+    /\s+[-–—]\s*\w+\s*$/, // Remove trailing "- SourceName"
+    /\s+[\|\-]{2,}\s*\w+$/, // Remove "|| SourceName" or "-- SourceName"
+];
+var EXCESSIVE_PUNCTUATION = /([!?]){3,}/g; // More than 2 of the same punctuation
+var ALL_CAPS_WORDS_THRESHOLD = 0.6; // If 60%+ of words are ALL CAPS
+var MIN_TITLE_LENGTH = 15;
+var MAX_TITLE_LENGTH = 200;
+/**
+ * Clean and normalize a news title
+ */
+function cleanTitle(title) {
+    var original = title.trim();
+    var flags = [];
+    var cleaned = original;
+    // 1. Remove source prefixes
+    for (var _i = 0, SOURCE_PREFIXES_1 = SOURCE_PREFIXES; _i < SOURCE_PREFIXES_1.length; _i++) {
+        var prefix = SOURCE_PREFIXES_1[_i];
+        if (prefix.test(cleaned)) {
+            flags.push('source_prefix');
+            cleaned = cleaned.replace(prefix, '');
+            break;
+        }
+    }
+    // 2. Remove trailing patterns
+    for (var _a = 0, TRAILING_PATTERNS_1 = TRAILING_PATTERNS; _a < TRAILING_PATTERNS_1.length; _a++) {
+        var pattern = TRAILING_PATTERNS_1[_a];
+        if (pattern.test(cleaned)) {
+            flags.push('trailing_pattern');
+            cleaned = cleaned.replace(pattern, '');
+        }
+    }
+    // 3. Normalize excessive punctuation
+    if (EXCESSIVE_PUNCTUATION.test(cleaned)) {
+        flags.push('excessive_punctuation');
+        cleaned = cleaned.replace(EXCESSIVE_PUNCTUATION, '$1');
+    }
+    // 4. Detect and normalize ALL-CAPS titles
+    var words = cleaned.split(/\s+/);
+    var allCapsWords = words.filter(function (w) { return w.length > 1 && w === w.toUpperCase() && !/[0-9]/.test(w); });
+    var allCapsRatio = allCapsWords.length / Math.max(words.length, 1);
+    if (allCapsRatio >= ALL_CAPS_WORDS_THRESHOLD) {
+        flags.push('all_caps');
+        // Convert to title case (smart capitalization)
+        cleaned = toTitleCase(cleaned);
+    }
+    // 5. Detect clickbait patterns
+    var clickbaitScore = 0;
+    for (var _b = 0, CLICKBAIT_PATTERNS_1 = CLICKBAIT_PATTERNS; _b < CLICKBAIT_PATTERNS_1.length; _b++) {
+        var pattern = CLICKBAIT_PATTERNS_1[_b];
+        if (pattern.test(cleaned)) {
+            clickbaitScore++;
+        }
+    }
+    if (clickbaitScore >= 2) {
+        flags.push('clickbait_heavy');
+    }
+    else if (clickbaitScore >= 1) {
+        flags.push('clickbait_light');
+    }
+    // 6. Remove excessive whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    // 7. Remove leading/trailing punctuation
+    cleaned = cleaned.replace(/^[^\w]+|[^\w]+$/g, '');
+    // 8. Truncate if too long
+    if (cleaned.length > MAX_TITLE_LENGTH) {
+        flags.push('too_long');
+        cleaned = cleaned.substring(0, MAX_TITLE_LENGTH - 3) + '...';
+    }
+    // Calculate quality score (0-1)
+    var qualityScore = 1.0;
+    // Deduct for flags
+    qualityScore -= flags.includes('clickbait_heavy') ? 0.4 : 0;
+    qualityScore -= flags.includes('clickbait_light') ? 0.15 : 0;
+    qualityScore -= flags.includes('all_caps') ? 0.1 : 0;
+    qualityScore -= flags.includes('excessive_punctuation') ? 0.1 : 0;
+    qualityScore -= flags.includes('source_prefix') ? 0.05 : 0;
+    qualityScore -= flags.includes('too_long') ? 0.1 : 0;
+    // Length-based scoring
+    if (cleaned.length < MIN_TITLE_LENGTH) {
+        qualityScore -= 0.3;
+        flags.push('too_short');
+    }
+    // Ensure score is in [0, 1]
+    qualityScore = Math.max(0, Math.min(1, qualityScore));
+    return {
+        title: cleaned,
+        qualityScore: qualityScore,
+        flags: flags,
+    };
+}
+/**
+ * Convert string to title case (smart capitalization)
+ */
+function toTitleCase(str) {
+    var smallWords = new Set([
+        'a', 'an', 'the', 'and', 'or', 'but', 'for', 'nor', 'so', 'yet',
+        'at', 'by', 'in', 'of', 'on', 'to', 'up', 'from', 'with', 'as',
+    ]);
+    return str
+        .toLowerCase()
+        .split(/\s+/)
+        .map(function (word, index) {
+        // Always capitalize first word
+        if (index === 0) {
+            return word.charAt(0).toUpperCase() + word.slice(1);
+        }
+        // Keep small words lowercase unless they're the last word
+        if (smallWords.has(word) && index !== str.split(/\s+/).length - 1) {
+            return word;
+        }
+        // Capitalize everything else
+        return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+        .join(' ');
+}
+/**
+ * Check if a title is likely SEO spam or low quality
+ */
+function isLikelySpam(title) {
+    var lower = title.toLowerCase();
+    // Check for excessive special characters
+    var specialCharRatio = (title.match(/[^\w\s]/g) || []).length / title.length;
+    if (specialCharRatio > 0.3)
+        return true;
+    // Check for excessive numbers (listicles)
+    var numberCount = (title.match(/\d/g) || []).length;
+    if (numberCount > 5)
+        return true;
+    // Check for repetitive patterns
+    var words = lower.split(/\s+/);
+    var uniqueWords = new Set(words);
+    if (words.length > 5 && uniqueWords.size / words.length < 0.5)
+        return true;
+    // Check for certain spam keywords
+    var spamKeywords = [
+        'click here', 'subscribe now', 'buy now', 'limited time',
+        'you won\'t believe', 'this one trick', 'doctors hate',
+    ];
+    for (var _i = 0, spamKeywords_1 = spamKeywords; _i < spamKeywords_1.length; _i++) {
+        var keyword = spamKeywords_1[_i];
+        if (lower.includes(keyword))
+            return true;
+    }
+    return false;
+}
+/**
+ * Deduplicate similar titles (simple Jaccard similarity)
+ */
+function areTitlesSimilar(title1, title2, threshold) {
+    if (threshold === void 0) { threshold = 0.7; }
+    var words1 = new Set(title1.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 2; }));
+    var words2 = new Set(title2.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 2; }));
+    if (words1.size === 0 || words2.size === 0)
+        return false;
+    var intersection = new Set(__spreadArray([], words1, true).filter(function (w) { return words2.has(w); }));
+    var union = new Set(__spreadArray(__spreadArray([], words1, true), words2, true));
+    return intersection.size / union.size >= threshold;
+}
+/**
+ * Create a normalized title fingerprint for exact duplicate detection.
+ * Normalizes: lowercase, removes punctuation, extra whitespace, certain stop words.
+ * Returns a hashable string suitable for comparing exact duplicates.
+ */
+function getTitleFingerprint(title) {
+    if (!title)
+        return '';
+    return title
+        .toLowerCase()
+        // Remove common source prefixes that might differ
+        .replace(/^(breaking|urgent|alert|just in|update|developing|report):\s*/i, '')
+        // Remove trailing source names
+        .replace(/\s[-–—]\s*(you won't believe|read more|click here|find out more)\s*$/gi, '')
+        .replace(/\s+[-–—]\s+\w+\s*$/, '') // Remove trailing "- SourceName"
+        // Normalize punctuation and whitespace
+        .replace(/[^\w\s]/g, ' ') // Replace punctuation with spaces
+        .replace(/\s+/g, ' ') // Collapse multiple spaces
+        .trim();
+}
+/**
+ * Check if two titles are exact duplicates (after normalization).
+ * Stricter than areTitlesSimilar - for catching syndicated content.
+ */
+function isExactDuplicate(title1, title2) {
+    var fp1 = getTitleFingerprint(title1);
+    var fp2 = getTitleFingerprint(title2);
+    return fp1 === fp2 && fp1.length > 10; // Minimum length to avoid false positives
+}
+/**
+ * Patterns for non-market-moving content that should be filtered out.
+ * These are typically syndicated general interest pieces that don't affect trading.
+ */
+var NON_MARKET_PATTERNS = [
+    // Fact check / general reporting
+    /^fact check\s+(team|team:)?/i,
+    /\bfact check\b/i,
+    // Generic exploring / reviewing without specific entities
+    /^exploring\s+(?!bitcoin|ethereum|crypto|stock|market|fed|sec)/i,
+    /^reviewing\s+/i,
+    /^discussing\s+/i,
+    // Non-specific local news patterns
+    /^your\s+(morning|afternoon|evening)\s+/i,
+    /^daily\s+(briefing|digest|summary|update)/i,
+    // Community calendar type content
+    /^community\s+(calendar|events|spotlight)/i,
+    /^school\s+(closings|delays|menu)/i,
+    // Weather
+    /^weather\s+(alert|update|forecast)/i,
+    /^((first|latest)?\s*)?weather\d*$/i,
+    // Sports scores/recaps without market impact
+    /^\d+\/\d+\s+score/i,
+    /^final:\s+\d+/i,
+    // Generic lifestyle content
+    /^(healthy|tasty|easy)\s+(living|cooking|eating|meals)/i,
+];
+/**
+ * Check if a title represents non-market-moving content that should be filtered.
+ * Returns true for content that adds noise without trading value.
+ */
+function isNonMarketMoving(title) {
+    if (!title)
+        return false;
+    var lower = title.toLowerCase();
+    // Check against known patterns
+    for (var _i = 0, NON_MARKET_PATTERNS_1 = NON_MARKET_PATTERNS; _i < NON_MARKET_PATTERNS_1.length; _i++) {
+        var pattern = NON_MARKET_PATTERNS_1[_i];
+        if (pattern.test(lower)) {
+            return true;
+        }
+    }
+    // Check for "Fact Check Team:" specifically (the example issue)
+    if (lower.startsWith('fact check team:')) {
+        return true;
+    }
+    // Check for generic "Exploring" titles without specific entities
+    // that suggest non-market content
+    if (/^(exploring|reviewing|discussing|examining)\s+/i.test(title)) {
+        // Allow if it contains market-relevant keywords
+        var marketKeywords = /\b(bitcoin|ethereum|crypto|btc|eth|defi|nft|web3|stock|market|fed|sec|inflation|recession|earnings|merger|acquisition|ipo|etf)\b/i;
+        if (!marketKeywords.test(title)) {
+            return true;
+        }
+    }
+    return false;
+}

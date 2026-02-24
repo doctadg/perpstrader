@@ -15,6 +15,13 @@ const METADATA_PROGRAM_ID = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
 
 // Metadata account seed
 const METADATA_SEED = 'metadata';
+const PUMPFUN_FRONTEND_API_BASE = 'https://frontend-api-v3.pump.fun';
+const PUMPFUN_FRONTEND_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; PerpsTrader/1.0)',
+  'Accept': 'application/json',
+  'Origin': 'https://pump.fun',
+  'Referer': 'https://pump.fun/',
+};
 
 /**
  * Solana RPC Service for pump.fun token monitoring
@@ -305,25 +312,54 @@ class SolanaRPCService {
    * Fetch token metadata from pump.fun API (fallback)
    */
   private async fetchPumpFunMetadata(mintAddress: string): Promise<TokenMetadata | null> {
+    // Primary: current frontend API endpoint by mint.
     try {
-      const response = await axios.get(`https://api.pump.fun/coins/${mintAddress}`, { timeout: 10000 });
-      const data = response.data;
+      const response = await axios.get(`${PUMPFUN_FRONTEND_API_BASE}/coins/${mintAddress}`, {
+        timeout: 10000,
+        headers: PUMPFUN_FRONTEND_HEADERS,
+      });
+      const data = response.data || {};
 
       return {
         name: data.name || 'Unknown',
         symbol: data.symbol || 'UNKNOWN',
         description: data.description || '',
-        image: data.image || '',
-        website: data.twitter ? `https://twitter.com/${data.twitter}` : undefined,
+        image: data.image || data.image_uri || '',
+        website: data.website || data.website_url || undefined,
         twitter: data.twitter,
         telegram: data.telegram,
         discord: data.discord,
         extensions: {
-          bondingCurveKey: data.bonding_curve_key,
+          bondingCurveKey: data.bonding_curve_key || data.bonding_curve,
         },
       };
     } catch (error) {
-      logger.warn(`[SolanaRPC] Failed to fetch from pump.fun API: ${error}`);
+      logger.debug(`[SolanaRPC] Frontend metadata lookup failed for ${mintAddress}: ${error}`);
+    }
+
+    // Fallback: legacy API (may return 404 for many tokens).
+    try {
+      const response = await axios.get(`https://api.pump.fun/coins/${mintAddress}`, { timeout: 10000 });
+      const data = response.data || {};
+
+      return {
+        name: data.name || 'Unknown',
+        symbol: data.symbol || 'UNKNOWN',
+        description: data.description || '',
+        image: data.image || data.image_uri || '',
+        website: data.website || data.website_url || undefined,
+        twitter: data.twitter,
+        telegram: data.telegram,
+        discord: data.discord,
+        extensions: {
+          bondingCurveKey: data.bonding_curve_key || data.bonding_curve,
+        },
+      };
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status !== 404) {
+        logger.warn(`[SolanaRPC] Legacy pump.fun metadata fetch failed: ${error}`);
+      }
       return null;
     }
   }

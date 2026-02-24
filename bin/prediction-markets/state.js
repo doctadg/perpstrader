@@ -10,6 +10,7 @@ function createInitialPredictionState() {
         marketUniverse: [],
         activeMarkets: [],
         marketNews: {},
+        marketIntel: {},
         ideas: [],
         backtestResults: [],
         selectedIdea: null,

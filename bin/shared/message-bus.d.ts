@@ -114,6 +114,6 @@ declare class MessageBus extends EventEmitter {
      */
     request<T, R = any>(channel: string | Channel, data: T, timeout?: number): Promise<R | null>;
 }
-declare const messageBus: MessageBus;
+export declare const messageBus: MessageBus;
 export default messageBus;
 //# sourceMappingURL=message-bus.d.ts.map

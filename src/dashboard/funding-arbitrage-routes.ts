@@ -268,7 +268,7 @@ router.get('/alert', async (req, res) => {
 
 /**
  * GET /api/funding/cross-exchange
- * Get cross-exchange arbitrage opportunities (HL vs Asterdex)
+ * Get cross-exchange arbitrage opportunities (pairwise across Hyperliquid, Asterdex, Binance)
  * Query params:
  *   - minSpread: minimum annualized spread percentage (default: 10)
  *   - urgency: filter by urgency level ('high', 'medium', 'low')
@@ -278,11 +278,24 @@ router.get('/cross-exchange', async (req, res) => {
   try {
     await ensureInitialized();
     
-    const { minSpread = '10', urgency, limit = '50' } = req.query;
+    const { minSpread = '10', urgency, limit = '50', refresh = 'false' } = req.query;
+    const minSpreadValue = parseFloat(minSpread as string);
+    const staleThresholdMs = 3 * 60 * 1000;
     
-    let opportunities = await fundingArbitrageScanner.getCrossExchangeOpportunities(
-      parseFloat(minSpread as string)
-    );
+    let opportunities = await fundingArbitrageScanner.getCrossExchangeOpportunities(minSpreadValue);
+
+    const forceRefresh = refresh === 'true';
+    const isStale = opportunities.length > 0
+      ? Date.now() - opportunities[0].timestamp > staleThresholdMs
+      : false;
+
+    if (forceRefresh || opportunities.length === 0 || isStale) {
+      logger.info(
+        `[FundingAPI] Running live cross-exchange scan (force=${forceRefresh}, empty=${opportunities.length === 0}, stale=${isStale})`
+      );
+      await fundingArbitrageScanner.scanCrossExchangeArbitrage();
+      opportunities = await fundingArbitrageScanner.getCrossExchangeOpportunities(minSpreadValue);
+    }
     
     // Filter by urgency if specified
     if (urgency) {
@@ -300,6 +313,30 @@ router.get('/cross-exchange', async (req, res) => {
     });
   } catch (error) {
     logger.error('[FundingAPI] Failed to get cross-exchange opportunities:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/funding/cross-exchange/stats
+ * Get cross-exchange arbitrage statistics
+ */
+router.get('/cross-exchange/stats', async (req, res) => {
+  try {
+    await ensureInitialized();
+    
+    const stats = await fundingArbitrageScanner.getCrossExchangeStats();
+    
+    res.json({
+      success: true,
+      stats,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('[FundingAPI] Failed to get cross-exchange stats:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -335,30 +372,6 @@ router.get('/cross-exchange/:symbol', async (req, res) => {
     });
   } catch (error) {
     logger.error(`[FundingAPI] Failed to get cross-exchange opportunity for ${req.params.symbol}:`, error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * GET /api/funding/cross-exchange/stats
- * Get cross-exchange arbitrage statistics
- */
-router.get('/cross-exchange/stats', async (req, res) => {
-  try {
-    await ensureInitialized();
-    
-    const stats = await fundingArbitrageScanner.getCrossExchangeStats();
-    
-    res.json({
-      success: true,
-      stats,
-      timestamp: Date.now(),
-    });
-  } catch (error) {
-    logger.error('[FundingAPI] Failed to get cross-exchange stats:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

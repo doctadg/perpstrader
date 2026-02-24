@@ -1,12 +1,18 @@
 // Prediction Market Backtester Node
 
 import { PredictionAgentState } from '../state';
-import { PredictionBacktestResult } from '../../shared/types';
+import { PredictionBacktestResult, PredictionIdea, PredictionMarket } from '../../shared/types';
 import predictionStore from '../../data/prediction-store';
+import polymarketClient from '../polymarket-client';
 import logger from '../../shared/logger';
 
 const MIN_HISTORY = Number.parseInt(process.env.PREDICTION_MIN_HISTORY || '20', 10) || 20;
 const HORIZON = Number.parseInt(process.env.PREDICTION_BACKTEST_HORIZON || '5', 10) || 5;
+
+interface SeriesPoint {
+  timestamp: number;
+  price: number;
+}
 
 function mean(values: number[]): number {
   if (!values.length) return 0;
@@ -32,6 +38,42 @@ function maxDrawdown(returns: number[]): number {
   return Math.abs(drawdown);
 }
 
+function normalizeSeries(points: SeriesPoint[]): SeriesPoint[] {
+  const byTimestamp = new Map<number, number>();
+  for (const point of points) {
+    if (!Number.isFinite(point.timestamp)) continue;
+    if (!Number.isFinite(point.price) || point.price <= 0) continue;
+    byTimestamp.set(point.timestamp, point.price);
+  }
+
+  return Array.from(byTimestamp.entries())
+    .map(([timestamp, price]) => ({ timestamp, price }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function localSeriesFromSnapshots(
+  idea: PredictionIdea,
+  snapshots: ReturnType<typeof predictionStore.getMarketPrices>,
+): SeriesPoint[] {
+  const points: SeriesPoint[] = [];
+  for (const snapshot of snapshots) {
+    const price = idea.outcome === 'YES' ? snapshot.yesPrice : snapshot.noPrice;
+    if (!Number.isFinite(price) || (price as number) <= 0) continue;
+    points.push({ timestamp: snapshot.timestamp.getTime(), price: price as number });
+  }
+  return normalizeSeries(points);
+}
+
+function resolveOutcomeTokenId(idea: PredictionIdea, market: PredictionMarket | undefined): string | null {
+  if (!market?.outcomes?.length) return null;
+  const targetOutcome = market.outcomes.find(outcome => outcome.name.toUpperCase() === idea.outcome);
+  if (targetOutcome?.id) return String(targetOutcome.id);
+
+  if (idea.outcome === 'YES' && market.outcomes[0]?.id) return String(market.outcomes[0].id);
+  if (idea.outcome === 'NO' && market.outcomes[1]?.id) return String(market.outcomes[1].id);
+  return null;
+}
+
 export async function backtesterNode(state: PredictionAgentState): Promise<Partial<PredictionAgentState>> {
   logger.info(`[PredictionBacktester] Backtesting ${state.ideas.length} ideas`);
 
@@ -46,35 +88,28 @@ export async function backtesterNode(state: PredictionAgentState): Promise<Parti
   const results: PredictionBacktestResult[] = [];
 
   for (const idea of state.ideas) {
-    let series: number[] = [];
-    const localHistory = predictionStore.getMarketPrices(idea.marketId, 200);
+    const localHistory = predictionStore.getMarketPrices(idea.marketId, 300);
+    const localSeries = localSeriesFromSnapshots(idea, localHistory);
+    let seriesPoints = [...localSeries];
 
-    // Prefer local if enough data
-    if (localHistory.length >= MIN_HISTORY) {
-      series = localHistory
-        .map(point => idea.outcome === 'YES' ? point.yesPrice : point.noPrice)
-        .filter((price): price is number => typeof price === 'number' && Number.isFinite(price) && price > 0);
+    if (seriesPoints.length < MIN_HISTORY) {
+      const market = state.activeMarkets.find(m => m.id === idea.marketId)
+        || state.marketUniverse.find(m => m.id === idea.marketId);
+      const tokenId = resolveOutcomeTokenId(idea, market);
+
+      if (tokenId) {
+        const remoteCandles = await polymarketClient.fetchCandles(tokenId);
+        const remoteSeries = normalizeSeries(
+          remoteCandles.map(candle => ({
+            timestamp: candle.timestamp,
+            price: candle.price,
+          })),
+        );
+        seriesPoints = normalizeSeries([...localSeries, ...remoteSeries]);
+      }
     }
 
-    // Fallback to API if we don't have enough local history
-    if (series.length < MIN_HISTORY) {
-      import('../polymarket-client').then(async (mod) => {
-        // This is tricky because we're inside a sync loop, but backtesterNode is async
-        // We need to refactor the loop to be async-friendly or structure this differently
-        // Since the function is async, we can await inside the loop if we change it to 'for ... of'
-      });
-      // Note: The loop below needs to be awaited. 
-      // Checking file structure: it's a 'for (const idea of state.ideas)' loop inside 'async function'.
-      // So we can await directly.
-    }
-
-    // NOTE: Splitting this replacement to avoid complexity with imports. 
-    // I will replace the LOGIC block.
-    // Assuming 'polymarketClient' is imported or I can import it.
-    // 'polymarket-client' is NOT imported in original file.
-    // I need to add the import first!
-
-
+    const series = seriesPoints.map(point => point.price);
     const returns: number[] = [];
     for (let i = 0; i + HORIZON < series.length; i++) {
       const entry = series[i];
@@ -91,8 +126,8 @@ export async function backtesterNode(state: PredictionAgentState): Promise<Parti
       ideaId: idea.id,
       marketId: idea.marketId,
       period: {
-        start: localHistory.length > 0 ? localHistory[0].timestamp : new Date(),
-        end: localHistory.length > 0 ? localHistory[localHistory.length - 1].timestamp : new Date(),
+        start: seriesPoints.length > 0 ? new Date(seriesPoints[0].timestamp) : new Date(),
+        end: seriesPoints.length > 0 ? new Date(seriesPoints[seriesPoints.length - 1].timestamp) : new Date(),
       },
       totalReturn,
       averageReturn: avgReturn * 100,
@@ -100,6 +135,9 @@ export async function backtesterNode(state: PredictionAgentState): Promise<Parti
       maxDrawdown: maxDrawdown(returns) * 100,
       tradesSimulated: returns.length,
       sharpeRatio: sharpe,
+      strategyId: idea.strategyId || idea.id,
+      strategyName: idea.name || `${idea.marketTitle} (${idea.outcome})`,
+      totalTrades: returns.length,
     };
 
     predictionStore.storeBacktest(result);

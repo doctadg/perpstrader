@@ -1,6 +1,9 @@
 "use strict";
 // pump.fun Agent State Management
 // Manages the state of the pump.fun token analysis pipeline
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createInitialPumpFunState = createInitialPumpFunState;
 exports.validateState = validateState;
@@ -10,6 +13,7 @@ exports.addThought = addThought;
 exports.addError = addError;
 exports.updateStep = updateStep;
 const uuid_1 = require("uuid");
+const config_1 = __importDefault(require("../shared/config"));
 /**
  * Create initial state for a pump.fun analysis cycle
  */
@@ -66,6 +70,7 @@ function calculateAverageScore(state) {
  */
 function updateStats(state) {
     const analyzedTokens = state.analyzedTokens;
+    const minScoreThreshold = config_1.default.get().pumpfun?.minScoreThreshold ?? 0.7;
     // Count by recommendation
     const byRecommendation = {
         STRONG_BUY: 0,
@@ -78,7 +83,7 @@ function updateStats(state) {
         byRecommendation[token.recommendation]++;
     }
     // Calculate high confidence tokens
-    const highConfidenceTokens = analyzedTokens.filter(t => t.overallScore >= 0.7);
+    const highConfidenceTokens = analyzedTokens.filter(t => t.overallScore >= minScoreThreshold);
     return {
         ...state,
         highConfidenceTokens,

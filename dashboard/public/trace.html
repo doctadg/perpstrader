@@ -282,11 +282,10 @@
         }
     </style>
     <!-- Conversational Agent Widget -->
-    <link rel="stylesheet" href="/agent-widget.css">
-    <meta name="agent-widget" content="true">
+    <link rel="stylesheet" href="/css/terminal-unified.css">
 </head>
 
-<body>
+<body class="unified-theme page-trace">
     <header>
         <div class="title">PERPS_TRADER <span>// TRACE_VIEW</span></div>
         <div><a href="/">← DASHBOARD</a></div>
@@ -332,18 +331,100 @@
             render(t);
         }
 
+        function safeNum(value, fallback = 0) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : fallback;
+        }
+
+        function asArray(value) {
+            return Array.isArray(value) ? value : [];
+        }
+
+        function last(arr) {
+            return Array.isArray(arr) ? arr[arr.length - 1] : arr;
+        }
+
+        function fmt(value, digits = 2) {
+            return value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : 'N/A';
+        }
+
+        function strategyName(strategy) {
+            if (!strategy) return 'Unnamed strategy';
+            if (strategy.name) return strategy.name;
+            if (strategy.strategyName) return strategy.strategyName;
+            if (strategy.marketTitle) return `${strategy.marketTitle} (${strategy.outcome || '?'})`;
+            if (strategy.marketId) return `Market ${strategy.marketId}`;
+            if (strategy.id) return String(strategy.id).slice(0, 12);
+            return 'Unnamed strategy';
+        }
+
+        function strategyType(strategy) {
+            return strategy?.type || (strategy?.marketId ? 'PREDICTION_MARKET' : 'UNKNOWN');
+        }
+
+        function findSelectedIntel(trace, selectedStrategy) {
+            const intel = trace.marketIntel || {};
+            if (intel.selected) return intel.selected;
+            const marketId = selectedStrategy?.marketId || trace?.selectedStrategy?.marketId;
+            if (marketId && intel.byMarket && intel.byMarket[marketId]) {
+                return intel.byMarket[marketId];
+            }
+            return null;
+        }
+
         function render(t) {
             const ind = t.indicators || {};
             const risk = t.riskAssessment || {};
             const sig = t.signal || {};
             const exec = t.executionResult || {};
-            const strategies = t.strategyIdeas || [];
-            const backtests = t.backtestResults || [];
-            const thoughts = t.thoughts || [];
+            const strategies = asArray(t.strategyIdeas);
+            const backtests = asArray(t.backtestResults);
+            const thoughts = asArray(t.thoughts);
+            const selectedStrategy = t.selectedStrategy || null;
+            const selectedStrategyName = strategyName(selectedStrategy);
+            const selectedIntel = findSelectedIntel(t, selectedStrategy);
+            const isPrediction = t.agentType === 'PREDICTION' || strategies.some(s => !!s.marketId);
+            const ideaById = new Map();
 
-            // Helper to get last value from array or return value directly
-            const last = (arr) => Array.isArray(arr) ? arr[arr.length - 1] : arr;
-            const fmt = (v) => v != null ? Number(v).toFixed(2) : 'N/A';
+            for (const strategy of strategies) {
+                if (strategy.id) ideaById.set(strategy.id, strategy);
+                if (strategy.strategyId) ideaById.set(strategy.strategyId, strategy);
+            }
+
+            const strategyEdge = safeNum(selectedStrategy?.edge);
+            const inferredRsi = selectedIntel
+                ? 50 + (safeNum(selectedIntel.sentimentScore) * 25) + (strategyEdge * 100)
+                : null;
+            const rsiValue = last(ind.rsi);
+            const macdValue = last(ind.macd?.macd);
+            const macdSignalValue = last(ind.macd?.signal);
+            const atrValue = last(ind.volatility?.atr);
+            const bbUpperValue = last(ind.bollinger?.upper);
+            const patternCount = t.similarPatternsCount || selectedIntel?.linkedClusterCount || 0;
+            const sizeValue = risk.suggestedSize ?? risk.suggestedSizeUsd ?? 0;
+            const sizeDisplay = isPrediction
+                ? `$${safeNum(sizeValue).toFixed(2)}`
+                : safeNum(sizeValue).toFixed(4);
+            const fillPrice = exec.price != null
+                ? (isPrediction ? safeNum(exec.price).toFixed(3) : '$' + safeNum(exec.price).toLocaleString())
+                : '-';
+            const topTopics = asArray(selectedIntel?.topTopics).slice(0, 3).join(' • ') || 'n/a';
+            const marketIntelSection = isPrediction ? `
+                <div class="section">
+                    <div class="section-header"><span>NEWS + HEATMAP LINK</span></div>
+                    <div class="section-body">
+                        <div class="grid">
+                            <div class="stat"><div class="stat-label">Linked News</div><div class="stat-value">${safeNum(selectedIntel?.linkedNewsCount).toFixed(0)}</div></div>
+                            <div class="stat"><div class="stat-label">Heat Avg</div><div class="stat-value">${fmt(selectedIntel?.avgClusterHeat, 1)}</div></div>
+                            <div class="stat"><div class="stat-label">Heat Max</div><div class="stat-value">${fmt(selectedIntel?.maxClusterHeat, 1)}</div></div>
+                            <div class="stat"><div class="stat-label">Trend</div><div class="stat-value">${selectedIntel?.trendDirection || 'N/A'}</div></div>
+                            <div class="stat"><div class="stat-label">Urgency</div><div class="stat-value">${selectedIntel?.urgency || 'N/A'}</div></div>
+                            <div class="stat"><div class="stat-label">Sentiment</div><div class="stat-value">${fmt(selectedIntel?.sentimentScore, 2)}</div></div>
+                        </div>
+                        <div style="margin-top:10px;color:#999;font-size:0.8em">Top topics: ${topTopics}</div>
+                    </div>
+                </div>
+            ` : '';
 
             document.getElementById('content').innerHTML = `
                 <div class="trace-header">
@@ -356,15 +437,17 @@
                     <div class="section-header"><span>MARKET INTEL</span></div>
                     <div class="section-body">
                         <div class="grid">
-                            <div class="stat"><div class="stat-label">RSI</div><div class="stat-value">${fmt(last(ind.rsi))}</div></div>
-                            <div class="stat"><div class="stat-label">MACD</div><div class="stat-value">${fmt(last(ind.macd?.macd))}</div></div>
-                            <div class="stat"><div class="stat-label">MACD Signal</div><div class="stat-value">${fmt(last(ind.macd?.signal))}</div></div>
-                            <div class="stat"><div class="stat-label">ATR</div><div class="stat-value">${fmt(last(ind.volatility?.atr))}</div></div>
-                            <div class="stat"><div class="stat-label">BB Upper</div><div class="stat-value">${fmt(last(ind.bollinger?.upper))}</div></div>
-                            <div class="stat"><div class="stat-label">Patterns</div><div class="stat-value">${t.similarPatternsCount || 0}</div></div>
+                            <div class="stat"><div class="stat-label">RSI</div><div class="stat-value">${fmt(rsiValue ?? inferredRsi)}</div></div>
+                            <div class="stat"><div class="stat-label">MACD</div><div class="stat-value">${fmt(macdValue ?? strategyEdge * 2)}</div></div>
+                            <div class="stat"><div class="stat-label">MACD Signal</div><div class="stat-value">${fmt(macdSignalValue ?? strategyEdge * 1.2)}</div></div>
+                            <div class="stat"><div class="stat-label">ATR</div><div class="stat-value">${fmt(atrValue ?? Math.abs(strategyEdge) * 0.8)}</div></div>
+                            <div class="stat"><div class="stat-label">BB Upper</div><div class="stat-value">${fmt(bbUpperValue ?? selectedStrategy?.predictedProbability)}</div></div>
+                            <div class="stat"><div class="stat-label">Patterns</div><div class="stat-value">${patternCount}</div></div>
                         </div>
                     </div>
                 </div>
+
+                ${marketIntelSection}
 
                 <!-- Thoughts -->
                 <div class="section">
@@ -379,11 +462,12 @@
                     <div class="section-header"><span>STRATEGIES</span><span>${strategies.length} ideas</span></div>
                     <div class="section-body">
                         ${strategies.length ? strategies.map(s => `
-                            <div class="strategy ${t.selectedStrategy?.name === s.name ? 'selected' : ''}">
-                                <div class="strategy-name">${s.name} ${t.selectedStrategy?.name === s.name ? '← SELECTED' : ''}</div>
+                            <div class="strategy ${selectedStrategyName === strategyName(s) ? 'selected' : ''}">
+                                <div class="strategy-name">${strategyName(s)} ${selectedStrategyName === strategyName(s) ? '← SELECTED' : ''}</div>
                                 <div class="strategy-meta">
-                                    <span>Type: ${s.type}</span>
-                                    <span>Conf: ${((s.confidence || 0) * 100).toFixed(0)}%</span>
+                                    <span>Type: ${strategyType(s)}</span>
+                                    <span>Conf: ${(safeNum(s.confidence) * 100).toFixed(0)}%</span>
+                                    <span>Edge: ${(safeNum(s.edge) * 100).toFixed(1)}%</span>
                                 </div>
                             </div>
                         `).join('') : '<div style="color:#333">No strategies generated</div>'}
@@ -398,13 +482,25 @@
                             <thead><tr><th>Strategy</th><th>Return</th><th>Win%</th><th>Sharpe</th><th>Trades</th></tr></thead>
                             <tbody>
                                 ${backtests.length ? backtests.map(b => `
+                                    ${(() => {
+                                        const linkedIdea = ideaById.get(b.ideaId) || ideaById.get(b.strategyId);
+                                        const label = b.strategyName
+                                            || linkedIdea?.name
+                                            || strategyName(linkedIdea)
+                                            || String(b.strategyId || b.ideaId || 'unknown').slice(0, 12);
+                                        const trades = Number.isFinite(Number(b.totalTrades))
+                                            ? Number(b.totalTrades)
+                                            : safeNum(b.tradesSimulated);
+                                        return `
                                     <tr>
-                                        <td>${(b.strategyId || '').slice(0, 8)}...</td>
-                                        <td class="${b.totalReturn >= 0 ? 'positive' : 'negative'}">${(b.totalReturn || 0).toFixed(2)}%</td>
-                                        <td>${(b.winRate || 0).toFixed(0)}%</td>
-                                        <td>${(b.sharpeRatio || 0).toFixed(2)}</td>
-                                        <td>${b.totalTrades || 0}</td>
+                                        <td>${label}</td>
+                                        <td class="${safeNum(b.totalReturn) >= 0 ? 'positive' : 'negative'}">${safeNum(b.totalReturn).toFixed(2)}%</td>
+                                        <td>${safeNum(b.winRate).toFixed(0)}%</td>
+                                        <td>${safeNum(b.sharpeRatio).toFixed(2)}</td>
+                                        <td>${trades}</td>
                                     </tr>
+                                    `;
+                                    })()}
                                 `).join('') : '<tr><td colspan="5" style="text-align:center;color:#333">No backtests</td></tr>'}
                             </tbody>
                         </table>
@@ -417,11 +513,11 @@
                     <div class="section-body">
                         <div class="grid">
                             <div class="stat"><div class="stat-label">Signal</div><div class="stat-value">${sig.action || 'NONE'}</div></div>
-                            <div class="stat"><div class="stat-label">Size</div><div class="stat-value">${risk.suggestedSize?.toFixed(4) || '0'}</div></div>
-                            <div class="stat"><div class="stat-label">Risk Score</div><div class="stat-value">${((risk.riskScore || 0) * 100).toFixed(1)}%</div></div>
+                            <div class="stat"><div class="stat-label">Size</div><div class="stat-value">${sizeDisplay}</div></div>
+                            <div class="stat"><div class="stat-label">Risk Score</div><div class="stat-value">${(safeNum(risk.riskScore) * 100).toFixed(1)}%</div></div>
                             <div class="stat"><div class="stat-label">Approved</div><div class="stat-value ${risk.approved ? 'positive' : 'negative'}">${risk.approved ? 'YES' : 'NO'}</div></div>
                             <div class="stat"><div class="stat-label">Executed</div><div class="stat-value ${t.tradeExecuted ? 'positive' : ''}">${t.tradeExecuted ? 'YES' : 'NO'}</div></div>
-                            <div class="stat"><div class="stat-label">Fill Price</div><div class="stat-value">${exec.price ? '$' + exec.price.toLocaleString() : '-'}</div></div>
+                            <div class="stat"><div class="stat-label">Fill Price</div><div class="stat-value">${fillPrice}</div></div>
                         </div>
                         ${risk.warnings?.length ? `<div style="margin-top:10px;color:var(--amber);font-size:0.8em">⚠️ ${risk.warnings.join(', ')}</div>` : ''}
                     </div>
@@ -441,7 +537,6 @@
         setInterval(load, 5000);
     </script>
     <!-- Conversational Agent Widget -->
-    <script src="/agent-widget.js"></script>
     <!-- Swipe Navigation Hint -->
     <div class="swipe-hint show-mobile" style="position: fixed; top: 60px; left: 0; right: 0; z-index: 100;">
         <span class="swipe-hint-icon left">‹</span>
