@@ -469,7 +469,7 @@ export class SafetyMonitor {
             dailyLossLimit: this.safeNumber(configured?.dailyLossLimit, 50),
             maxDrawdownPercent: this.safeNumber(configured?.maxDrawdownPercent, 15),
             consecutiveLossLimit: Math.max(1, Math.floor(this.safeNumber(configured?.consecutiveLossLimit, 5))),
-            maxTradesPerDay: Math.max(1, Math.floor(this.safeNumber(configured?.maxTradesPerDay, 20))),
+            maxTradesPerDay: Math.max(1, Math.floor(this.safeNumber(configured?.maxTradesPerDay, 200))),
             maxTradesPerSymbol: Math.max(1, Math.floor(this.safeNumber(configured?.maxTradesPerSymbol, 5))),
             volatilityReduceThreshold: this.safeNumber(configured?.volatilityReduceThreshold, 5),
             volatilityStopThreshold: this.safeNumber(configured?.volatilityStopThreshold, 10),

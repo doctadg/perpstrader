@@ -11,7 +11,7 @@ export class SafetyMonitor {
   
   // Limits
   private readonly MAX_DAILY_LOSS = 50; // $50
-  private readonly MAX_DAILY_TRADES = 20;
+  private readonly MAX_DAILY_TRADES = 200;
   private readonly MAX_CONSECUTIVE_LOSSES = 5;
   private readonly MAX_DRAWDOWN_PCT = 0.15; // 15%
   
