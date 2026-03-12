@@ -15,7 +15,12 @@ export declare class OptimizedRiskManager {
     private dailyPnL;
     private lastResetDate;
     private positionPeakPnL;
+    private readonly MIN_STOP_LOSS_PCT;
+    private readonly DEFAULT_STOP_LOSS_PCT;
+    private readonly MIN_RISK_REWARD_RATIO;
     private trailingStopPct;
+    private trailingStopActivationPct;
+    private trailingStopMinProfitLockPct;
     private riskCache;
     private portfolioRiskCache;
     private positionRiskCache;
@@ -49,6 +54,7 @@ export declare class OptimizedRiskManager {
     private calculateRiskScore;
     private generateWarnings;
     private calculateStopLossAndTakeProfit;
+    private getRequiredRiskRewardRatio;
     /**
      * Check position risk with caching
      */

@@ -15,7 +15,7 @@ class SafetyMonitor {
     stopReason = '';
     // Limits
     MAX_DAILY_LOSS = 50; // $50
-    MAX_DAILY_TRADES = 20;
+    MAX_DAILY_TRADES = 200;
     MAX_CONSECUTIVE_LOSSES = 5;
     MAX_DRAWDOWN_PCT = 0.15; // 15%
     recordTrade(pnl, balance) {

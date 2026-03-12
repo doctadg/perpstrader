@@ -245,61 +245,59 @@ async function storeBacktestResult(
   const db = new BetterSqlite3(DB_PATH);
   
   try {
+    const metricsPayload = {
+      ...result.metrics,
+      ...assessment.metrics,
+      isViable: assessment.isViable,
+      performanceTier: assessment.performanceTier,
+      shouldActivate: assessment.shouldActivate,
+    };
+
     // Ensure backtest_results table exists
     db.exec(`
       CREATE TABLE IF NOT EXISTS backtest_results (
         id TEXT PRIMARY KEY,
-        strategy_id TEXT NOT NULL,
-        job_id TEXT,
-        symbol TEXT NOT NULL,
-        start_date TEXT NOT NULL,
-        end_date TEXT NOT NULL,
-        initial_capital REAL NOT NULL,
-        final_capital REAL NOT NULL,
-        total_return REAL NOT NULL,
-        annualized_return REAL NOT NULL,
-        sharpe_ratio REAL NOT NULL,
-        max_drawdown REAL NOT NULL,
-        win_rate REAL NOT NULL,
-        total_trades INTEGER NOT NULL,
-        profit_factor REAL,
-        calmar_ratio REAL,
-        sortino_ratio REAL,
-        is_viable INTEGER NOT NULL,
-        performance_tier TEXT NOT NULL,
-        should_activate INTEGER NOT NULL,
-        created_at TEXT NOT NULL
+        strategyId TEXT NOT NULL,
+        periodStart TEXT NOT NULL,
+        periodEnd TEXT NOT NULL,
+        initialCapital REAL NOT NULL,
+        finalCapital REAL NOT NULL,
+        totalReturn REAL NOT NULL,
+        annualizedReturn REAL NOT NULL,
+        sharpeRatio REAL NOT NULL,
+        maxDrawdown REAL NOT NULL,
+        winRate REAL NOT NULL,
+        totalTrades INTEGER NOT NULL,
+        trades TEXT NOT NULL,
+        metrics TEXT NOT NULL,
+        createdAt TEXT NOT NULL
       )
     `);
     
-    // Create index on strategy_id
+    // Create index on strategyId
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_backtest_strategy_id 
-      ON backtest_results(strategy_id)
+      ON backtest_results(strategyId)
     `);
     
-    // Create index on created_at
+    // Create index on createdAt
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_backtest_created_at 
-      ON backtest_results(created_at DESC)
+      ON backtest_results(createdAt DESC)
     `);
     
     // Insert result
     const stmt = db.prepare(`
       INSERT INTO backtest_results (
-        id, strategy_id, job_id, symbol, start_date, end_date,
-        initial_capital, final_capital, total_return, annualized_return,
-        sharpe_ratio, max_drawdown, win_rate, total_trades,
-        profit_factor, calmar_ratio, sortino_ratio,
-        is_viable, performance_tier, should_activate, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, strategyId, periodStart, periodEnd, initialCapital,
+        finalCapital, totalReturn, annualizedReturn, sharpeRatio,
+        maxDrawdown, winRate, totalTrades, trades, metrics, createdAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
       jobId,
       result.strategyId,
-      jobId,
-      result.period.start.toISOString().split('T')[0], // Store symbol from first trade or extract from elsewhere
       result.period.start.toISOString(),
       result.period.end.toISOString(),
       result.initialCapital,
@@ -310,12 +308,8 @@ async function storeBacktestResult(
       result.maxDrawdown,
       result.winRate,
       result.totalTrades,
-      assessment.metrics.profitFactor,
-      assessment.metrics.calmarRatio,
-      assessment.metrics.sortinoRatio,
-      assessment.isViable ? 1 : 0,
-      assessment.performanceTier,
-      assessment.shouldActivate ? 1 : 0,
+      JSON.stringify(result.trades),
+      JSON.stringify(metricsPayload),
       new Date().toISOString()
     );
     

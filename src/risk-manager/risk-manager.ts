@@ -1,31 +1,48 @@
 import { RiskAssessment, TradingSignal, Portfolio, Position, Strategy } from '../shared/types';
 import config from '../shared/config';
 import logger from '../shared/logger';
+import hyperliquidClient from '../execution-engine/hyperliquid-client';
 
 export class RiskManager {
   private maxPositionSize: number;
   private maxDailyLoss: number;
-  private maxLeverage: number;
+  private maxLeverage: number = 20; // CRITICAL FIX: Set to 20x max (was 10x, previously 40x)
   private readonly HARD_CAP_MAX_LOSS_PERCENT: number = 0.015; // 1.5% account loss cap per trade
+  private readonly MIN_STOP_LOSS_PCT: number = 0.006; // 0.6% minimum stop distance
+  private readonly DEFAULT_STOP_LOSS_PCT: number = 0.008; // 0.8% baseline hard stop
+  private readonly MIN_RISK_REWARD_RATIO: number = 3.0; // reward must be >= 3x risk
+  private readonly DAILY_LOSS_CIRCUIT_BREAKER_USD: number = 50; // hard daily stop in dollars
+  private readonly DAILY_LOSS_ALERT_1_USD: number = 40; // critical approach threshold 1
+  private readonly DAILY_LOSS_ALERT_2_USD: number = 45; // critical approach threshold 2
+  private readonly REVENGE_COOLDOWN_MS: number = 60 * 60 * 1000; // 1 hour cooldown after 4 consecutive losses
   private emergencyStopActive: boolean = false;
   private emergencyStopReason: string = '';
   private dailyPnL: number;
   private consecutiveLosses: number = 0;
   private lastResetDate: Date;
-  private circuitBreakerLoss: number = 50; // $50 daily loss circuit breaker (5% of $1k account)
+  private cooldownUntil: number | null = null;
+  private dailyLossAlert40Triggered: boolean = false;
+  private dailyLossAlert45Triggered: boolean = false;
   // NEW: Track peak unrealized PnL for trailing stops
   private positionPeakPnL: Map<string, number> = new Map();
   // Store trailing stops as retracement from peak %PnL once meaningful profit is reached.
-  private trailingStopPct: number = 0.35; // allow 35% retrace from peak profit before exit
-  private trailingStopActivationPct: number = 0.01; // arm trailing stop after +1.0% unrealized PnL
+  private trailingStopPct: number = 0.45; // allow 45% retrace from peak profit before exit
+  private trailingStopActivationPct: number = 0.025; // arm trailing stop after +2.5% unrealized PnL
+  private trailingStopMinProfitLockPct: number = 0.012; // trailing exits must lock at least +1.2%
+  private breakevenActivationPct: number = 0.03; // only arm breakeven after a meaningful +3.0% move
   // NEW: Track position open times for holding limits
   private positionOpenTimes: Map<string, number> = new Map();
+  // CRITICAL FIX: Track hard stops per position - these NEVER move
+  private positionHardStops: Map<string, number> = new Map();
+  // Track the trailing stop floor as unrealized PnL % relative to entry.
+  // This value is monotonic increasing (tightening) and is never reduced.
+  private positionTrailingStopFloors: Map<string, number> = new Map();
 
   constructor() {
     const riskConfig = config.getSection('risk');
     this.maxPositionSize = riskConfig.maxPositionSize;
     this.maxDailyLoss = riskConfig.maxDailyLoss;
-    this.maxLeverage = riskConfig.maxLeverage;
+    this.maxLeverage = riskConfig.maxLeverage ?? this.maxLeverage;
     this.emergencyStopActive = riskConfig.emergencyStop;
     this.dailyPnL = 0;
     this.lastResetDate = new Date();
@@ -37,6 +54,7 @@ export class RiskManager {
 
       // Reset daily P&L if it's a new day
       this.resetDailyPnLIfNeeded();
+      this.logDailyLossApproachAlerts();
 
       // Check emergency stop
       if (this.emergencyStopActive) {
@@ -51,14 +69,33 @@ export class RiskManager {
         };
       }
 
-      // Check daily loss limit
-      const hardDailyLossLimit = 0;
-      if (this.dailyPnL < -this.maxDailyLoss || this.dailyPnL < -hardDailyLossLimit) {
+      // Revenge-trading cooldown after 4 consecutive losses.
+      const cooldownRemainingMs = this.getCooldownRemainingMs();
+      if (cooldownRemainingMs > 0) {
         return {
           approved: false,
           suggestedSize: 0,
           riskScore: 1.0,
-          warnings: [`Daily loss limit exceeded: ${this.dailyPnL.toFixed(2)} (hard limit: 0.00)`],
+          warnings: [
+            `Trading cooldown active after ${this.consecutiveLosses} consecutive losses: ${(cooldownRemainingMs / 60000).toFixed(0)} minutes remaining`
+          ],
+          stopLoss: 0,
+          takeProfit: 0,
+          leverage: 0
+        };
+      }
+
+      // Hard daily loss circuit breaker at -$50 absolute loss.
+      if (this.dailyPnL <= -this.DAILY_LOSS_CIRCUIT_BREAKER_USD) {
+        this.emergencyStopReason = `Daily loss limit exceeded: $${this.dailyPnL.toFixed(2)} <= -$${this.DAILY_LOSS_CIRCUIT_BREAKER_USD.toFixed(2)}`;
+        await this.activateEmergencyStop();
+        return {
+          approved: false,
+          suggestedSize: 0,
+          riskScore: 1.0,
+          warnings: [
+            `Daily loss circuit breaker triggered at $${this.dailyPnL.toFixed(2)} (hard limit: -$${this.DAILY_LOSS_CIRCUIT_BREAKER_USD.toFixed(2)})`
+          ],
           stopLoss: 0,
           takeProfit: 0,
           leverage: 0
@@ -67,6 +104,26 @@ export class RiskManager {
 
       // Calculate stop loss and take profit first so position sizing can use real stop distance.
       const { stopLoss, takeProfit } = this.calculateStopLossAndTakeProfit(signal, portfolio);
+      const requiredRiskRewardRatio = Math.max(
+        this.MIN_RISK_REWARD_RATIO,
+        this.getRequiredRiskRewardRatio(signal.confidence)
+      );
+      const riskRewardRatio = stopLoss > 0 ? takeProfit / stopLoss : 0;
+      this.logRiskRewardCalculation(signal, stopLoss, takeProfit, riskRewardRatio, requiredRiskRewardRatio);
+
+      if (riskRewardRatio < requiredRiskRewardRatio) {
+        return {
+          approved: false,
+          suggestedSize: 0,
+          riskScore: 1.0,
+          warnings: [
+            `Trade rejected: R:R 1:${riskRewardRatio.toFixed(2)} below required 1:${requiredRiskRewardRatio.toFixed(2)}`
+          ],
+          stopLoss,
+          takeProfit,
+          leverage: 0
+        };
+      }
 
       // Calculate position size based on risk budget and stop distance.
       const suggestedSize = this.calculatePositionSize(signal, portfolio, stopLoss);
@@ -76,9 +133,16 @@ export class RiskManager {
 
       // Generate warnings
       const warnings = this.generateWarnings(signal, portfolio, riskScore);
+      warnings.push(
+        `R:R validated at 1:${riskRewardRatio.toFixed(2)} (required 1:${requiredRiskRewardRatio.toFixed(2)})`
+      );
 
       // Determine if approved
-      const approved = suggestedSize > 0 && riskScore < 0.7 && this.dailyPnL > -this.maxDailyLoss;
+      const approved = suggestedSize > 0 &&
+        riskScore < 0.7 &&
+        !this.isCooldownActive() &&
+        this.dailyPnL > -this.DAILY_LOSS_CIRCUIT_BREAKER_USD &&
+        riskRewardRatio >= requiredRiskRewardRatio;
 
       const assessment: RiskAssessment = {
         approved,
@@ -87,7 +151,7 @@ export class RiskManager {
         warnings,
         stopLoss,
         takeProfit,
-        leverage: 20 // Reduced from 40x to 20x maximum
+        leverage: 20 // CRITICAL FIX: Max 20x leverage
       };
 
       logger.info(`Risk assessment completed: ${JSON.stringify(assessment)}`);
@@ -100,13 +164,16 @@ export class RiskManager {
   }
 
   private calculatePositionSize(signal: TradingSignal, portfolio: Portfolio, stopLossPct: number): number {
-    if (this.consecutiveLosses >= 4) {
-      logger.warn(`[RiskManager] Blocking new trade after ${this.consecutiveLosses} consecutive losses`);
+    if (this.isCooldownActive()) {
+      const cooldownRemainingMs = this.getCooldownRemainingMs();
+      logger.error(
+        `[RiskManager] Trading cooldown active: ${Math.ceil(cooldownRemainingMs / 60000)} minute(s) remaining`
+      );
       return 0;
     }
 
     // Leverage is only a margin constraint. PnL risk is still based on notional * stop distance.
-    const LEVERAGE = Math.min(20, Math.max(1, this.maxLeverage));
+    const LEVERAGE = Math.min(20, Math.max(1, this.maxLeverage)); // CRITICAL FIX: 20x max leverage
     const price = Math.max(signal.price || 0, Number.EPSILON);
 
     // Risk 0.5% to 1.0% of available balance per trade based on confidence.
@@ -135,21 +202,21 @@ export class RiskManager {
       return 0;
     }
 
-    // Keep minimum trade size, but never exceed hard limits on small balances.
+    // Keep a baseline minimum trade size, but allow forced de-risking to cut below normal minimums.
     const dynamicMinNotional = Math.min(250, portfolio.availableBalance * 0.1 * LEVERAGE);
     const riskAlignedMinNotional = targetNotionalFromRisk * 0.35;
     const minNotional = Math.max(10, Math.min(dynamicMinNotional, riskAlignedMinNotional, hardMaxNotional));
     const boundedNotional = Math.max(minNotional, Math.min(exposureAdjustedNotional, hardMaxNotional));
 
-    const consecutiveLossMultiplier = Math.pow(0.75, this.consecutiveLosses);
-    if (this.consecutiveLosses > 0) {
+    const consecutiveLossMultiplier = this.consecutiveLosses >= 3 ? 0.5 : 1.0;
+    if (this.consecutiveLosses >= 3) {
       logger.warn(
-        `[RiskManager] Consecutive loss de-risking active: losses=${this.consecutiveLosses}, multiplier=${consecutiveLossMultiplier.toFixed(4)}`
+        `[RiskManager] Revenge prevention active: losses=${this.consecutiveLosses}, size multiplier=${consecutiveLossMultiplier.toFixed(2)}`
       );
     }
 
     const lossAdjustedNotional = Math.max(
-      minNotional,
+      10,
       Math.min(hardMaxNotional, boundedNotional * consecutiveLossMultiplier)
     );
 
@@ -210,7 +277,7 @@ export class RiskManager {
     riskScore += Math.min(sizeRisk, 1) * 0.2;
 
     // Daily P&L risk
-    const dailyRisk = Math.max(0, -this.dailyPnL / this.maxDailyLoss);
+    const dailyRisk = Math.max(0, -this.dailyPnL / this.DAILY_LOSS_CIRCUIT_BREAKER_USD);
     riskScore += dailyRisk * 0.3;
 
     // Confidence risk (inverse)
@@ -233,8 +300,10 @@ export class RiskManager {
       warnings.push(`High concentration in ${signal.symbol}: ${(exposure * 100).toFixed(1)}%`);
     }
 
-    if (this.dailyPnL < -this.maxDailyLoss * 0.8) {
-      warnings.push(`Approaching daily loss limit: ${this.dailyPnL.toFixed(2)}`);
+    if (this.dailyPnL <= -this.DAILY_LOSS_ALERT_2_USD) {
+      warnings.push(`CRITICAL: Daily loss at $${this.dailyPnL.toFixed(2)} (near -$${this.DAILY_LOSS_CIRCUIT_BREAKER_USD.toFixed(2)} limit)`);
+    } else if (this.dailyPnL <= -this.DAILY_LOSS_ALERT_1_USD) {
+      warnings.push(`CRITICAL: Daily loss warning at $${this.dailyPnL.toFixed(2)} (approaching -$${this.DAILY_LOSS_CIRCUIT_BREAKER_USD.toFixed(2)})`);
     }
 
     if (signal.confidence < 0.5) {
@@ -244,53 +313,198 @@ export class RiskManager {
     return warnings;
   }
 
-  private calculateStopLossAndTakeProfit(signal: TradingSignal, portfolio: Portfolio): { stopLoss: number; takeProfit: number } {
-    // Default stop loss and take profit percentages.
-    let stopLoss = 0.01; // 1.0%
-    let takeProfit = 0.04; // 4.0%
+  private normalizeStopLossPct(stopLossPct?: number, fallback: number = this.DEFAULT_STOP_LOSS_PCT): number {
+    const candidate = Number.isFinite(stopLossPct) ? (stopLossPct as number) : fallback;
+    return Math.max(this.MIN_STOP_LOSS_PCT, Math.min(this.DEFAULT_STOP_LOSS_PCT, candidate));
+  }
 
-    // Adjust based on signal confidence
+  private enforceMinimumRiskReward(stopLossPct: number, takeProfitPct: number, requiredRiskRewardRatio: number): {
+    stopLoss: number;
+    takeProfit: number;
+    riskRewardRatio: number;
+  } {
+    const stopLoss = this.normalizeStopLossPct(stopLossPct);
+    const minTakeProfit = stopLoss * Math.max(this.MIN_RISK_REWARD_RATIO, requiredRiskRewardRatio);
+    const safeTakeProfit = Number.isFinite(takeProfitPct) && takeProfitPct > 0
+      ? takeProfitPct
+      : minTakeProfit;
+    const takeProfit = Math.max(safeTakeProfit, minTakeProfit);
+
+    return {
+      stopLoss,
+      takeProfit,
+      riskRewardRatio: takeProfit / stopLoss
+    };
+  }
+
+  private setOrTightenHardStop(positionKey: string, requestedStopLossPct?: number): number {
+    const candidateStop = this.normalizeStopLossPct(requestedStopLossPct);
+    const existingStop = this.positionHardStops.get(positionKey);
+
+    if (existingStop === undefined) {
+      this.positionHardStops.set(positionKey, candidateStop);
+      return candidateStop;
+    }
+
+    const tightenedStop = Math.min(existingStop, candidateStop);
+    if (candidateStop > existingStop) {
+      logger.warn(
+        `[RiskManager] Prevented hard-stop widening for ${positionKey}: requested ${(candidateStop * 100).toFixed(2)}% > existing ${(existingStop * 100).toFixed(2)}%`
+      );
+    } else if (tightenedStop < existingStop) {
+      logger.info(
+        `[RiskManager] Tightened hard stop for ${positionKey}: ${(existingStop * 100).toFixed(2)}% -> ${(tightenedStop * 100).toFixed(2)}%`
+      );
+    }
+
+    this.positionHardStops.set(positionKey, tightenedStop);
+    return tightenedStop;
+  }
+
+  private getOrInitializeHardStop(positionKey: string): number {
+    const existingStop = this.positionHardStops.get(positionKey);
+    if (existingStop !== undefined) {
+      return this.normalizeStopLossPct(existingStop, this.DEFAULT_STOP_LOSS_PCT);
+    }
+
+    // Fail-safe for untracked positions: prefer stricter stop so we never widen risk on recovery paths.
+    const fallbackHardStop = this.MIN_STOP_LOSS_PCT;
+    logger.warn(
+      `[RiskManager] Missing hard stop for ${positionKey}; using strict fallback ${(fallbackHardStop * 100).toFixed(2)}%`
+    );
+    this.positionHardStops.set(positionKey, fallbackHardStop);
+    return fallbackHardStop;
+  }
+
+  private updatePositionPeakPnL(positionKey: string, unrealizedPnLPct: number): number {
+    const currentPeak = this.positionPeakPnL.get(positionKey) || 0;
+    if (unrealizedPnLPct > currentPeak) {
+      this.positionPeakPnL.set(positionKey, unrealizedPnLPct);
+      return unrealizedPnLPct;
+    }
+
+    if (!this.positionPeakPnL.has(positionKey)) {
+      this.positionPeakPnL.set(positionKey, 0);
+    }
+
+    return this.positionPeakPnL.get(positionKey) || 0;
+  }
+
+  private getOrTightenTrailingStopFloor(positionKey: string, hardStopPct: number, peakPnLPct: number): number {
+    const baseFloor = -hardStopPct;
+    const existingFloor = this.positionTrailingStopFloors.get(positionKey) ?? baseFloor;
+    const trailingRetention = Math.max(0, Math.min(1, 1 - this.trailingStopPct));
+    const candidateFloor = peakPnLPct >= this.trailingStopActivationPct
+      ? peakPnLPct * trailingRetention
+      : baseFloor;
+
+    // Trailing floor only tightens (moves up toward/through entry), never loosens.
+    const tightenedFloor = Math.max(existingFloor, candidateFloor);
+    this.positionTrailingStopFloors.set(positionKey, tightenedFloor);
+    return tightenedFloor;
+  }
+
+  private calculateStopLossAndTakeProfit(signal: TradingSignal, _portfolio: Portfolio): { stopLoss: number; takeProfit: number } {
+    const requiredRiskRewardRatio = Math.max(
+      this.MIN_RISK_REWARD_RATIO,
+      this.getRequiredRiskRewardRatio(signal.confidence)
+    );
+
+    // Baseline hard stop is 0.8% and can only tighten from there.
+    let stopLoss = this.DEFAULT_STOP_LOSS_PCT;
     if (signal.confidence > 0.8) {
-      // High confidence: tighter stop with larger reward multiple.
-      stopLoss = 0.008; // 0.8% stop
-      takeProfit = 0.048; // 4.8% target (1:4)
+      stopLoss = 0.0075; // tighten for high-confidence entries
     } else if (signal.confidence < 0.5) {
-      // Low confidence: keep stops wider, but avoid weak reward profiles.
-      stopLoss = 0.012; // 1.2% stop
-      takeProfit = 0.07; // 7.0% target (~1:3.5)
+      stopLoss = 0.0070; // low confidence must not widen stop
     }
 
-    // Adjust based on daily performance - REVERSED from revenge trading
-    // When losing: TIGHTEN stops and INCREASE profit targets (be more selective)
+    // Set baseline target from required confidence-adjusted R:R.
+    let takeProfit = stopLoss * requiredRiskRewardRatio;
+
+    // Higher-confidence setups can still aim for better payoff.
+    if (signal.confidence > 0.8) {
+      takeProfit = Math.max(takeProfit, stopLoss * 4.0);
+    }
+
+    // Revenge protection: when day is red, tighten stops and demand larger winners.
     if (this.dailyPnL < 0) {
-      stopLoss *= 0.85; // tighter stops when losing
-      takeProfit *= 1.15; // higher targets when losing
-
-      if (this.dailyPnL < -5) {
-        stopLoss *= 0.85; // extra tightening for larger daily losses
-        takeProfit *= 1.05;
-      }
+      stopLoss = Math.max(this.MIN_STOP_LOSS_PCT, stopLoss * 0.8);
+      takeProfit *= 1.2;
     }
 
-    // Keep stops realistic and enforce minimum reward multiple.
-    stopLoss = Math.max(0.006, stopLoss);
-    takeProfit = Math.max(takeProfit, stopLoss * 2.5);
+    // Enforce hard invariants: stop cannot widen above baseline and reward must meet confidence-adjusted minimum.
+    const enforced = this.enforceMinimumRiskReward(stopLoss, takeProfit, requiredRiskRewardRatio);
+    stopLoss = enforced.stopLoss;
+    takeProfit = enforced.takeProfit;
 
-    const riskRewardRatio = takeProfit / stopLoss;
-    if (riskRewardRatio < 2.5) {
-      throw new Error(`Invalid risk/reward ratio calculated: 1:${riskRewardRatio.toFixed(2)} (minimum is 1:2.5)`);
+    if (enforced.riskRewardRatio < requiredRiskRewardRatio) {
+      throw new Error(
+        `Invalid risk/reward ratio calculated: 1:${enforced.riskRewardRatio.toFixed(2)} ` +
+        `(required is 1:${requiredRiskRewardRatio.toFixed(1)})`
+      );
     }
+
+    logger.info(
+      `[RiskManager] Stop/Take Profit calc: SL=${(stopLoss * 100).toFixed(2)}%, TP=${(takeProfit * 100).toFixed(2)}%, ` +
+      `R:R=1:${enforced.riskRewardRatio.toFixed(2)} (required 1:${requiredRiskRewardRatio.toFixed(2)})`
+    );
 
     return { stopLoss, takeProfit };
+  }
+
+  private getRequiredRiskRewardRatio(confidence: number): number {
+    if (confidence < 0.45) {
+      return 5.0;
+    }
+
+    if (confidence < 0.60) {
+      return 4.0;
+    }
+
+    return this.MIN_RISK_REWARD_RATIO;
+  }
+
+  private logRiskRewardCalculation(
+    signal: TradingSignal,
+    stopLoss: number,
+    takeProfit: number,
+    actualRiskRewardRatio: number,
+    requiredRiskRewardRatio: number
+  ): void {
+    const compliance = actualRiskRewardRatio >= requiredRiskRewardRatio ? 'PASS' : 'FAIL';
+    logger.info(
+      `[RiskManager][RR][${compliance}] ${signal.symbol} ${signal.action} confidence=${signal.confidence.toFixed(2)} ` +
+      `SL=${(stopLoss * 100).toFixed(2)}% TP=${(takeProfit * 100).toFixed(2)}% ` +
+      `actual=1:${actualRiskRewardRatio.toFixed(2)} required=1:${requiredRiskRewardRatio.toFixed(2)}`
+    );
+  }
+
+  private isCooldownActive(): boolean {
+    return this.cooldownUntil !== null && Date.now() < this.cooldownUntil;
+  }
+
+  private getCooldownRemainingMs(): number {
+    if (!this.isCooldownActive() || this.cooldownUntil === null) {
+      return 0;
+    }
+
+    return Math.max(0, this.cooldownUntil - Date.now());
   }
 
   private trackTradeResult(won: boolean): void {
     if (won) {
       this.consecutiveLosses = 0;
+      this.cooldownUntil = null;
       return;
     }
 
     this.consecutiveLosses += 1;
+    if (this.consecutiveLosses >= 4 && !this.isCooldownActive()) {
+      this.cooldownUntil = Date.now() + this.REVENGE_COOLDOWN_MS;
+      logger.error(
+        `[RiskManager] CRITICAL: ${this.consecutiveLosses} consecutive losses - trading halted for 1 hour cooldown until ${new Date(this.cooldownUntil).toISOString()}`
+      );
+    }
   }
 
   private updateTradeResult(pnl: number): void {
@@ -332,33 +546,38 @@ export class RiskManager {
         }
       }
 
-      // Force exit if unrealized PnL < -3% at any time
-      if (unrealizedPnLPercentage < -0.03) {
-        warnings.push(`CRITICAL: Unrealized loss exceeded -3%: ${(unrealizedPnLPercentage * 100).toFixed(1)}%`);
+      // CRITICAL FIX: Use position-specific hard stop that NEVER moves outward.
+      const hardStopPct = this.getOrInitializeHardStop(positionKey);
+
+      // Force exit if unrealized PnL exceeds hard stop
+      if (unrealizedPnLPercentage <= -hardStopPct) {
+        warnings.push(
+          `CRITICAL: Hard stop triggered at -${(hardStopPct * 100).toFixed(2)}%: ` +
+          `unrealized ${(unrealizedPnLPercentage * 100).toFixed(2)}%`
+        );
         riskScore = Math.max(riskScore, 1.0);
       }
 
-      // Trailing stop and breakeven logic - track peak PnL and check if we should lock in profits.
-      const currentPeak = this.positionPeakPnL.get(positionKey) || 0;
-      if (unrealizedPnLPercentage > currentPeak) {
-        // Track peak PnL percentage, not raw USD PnL, to avoid noise-triggered exits.
-        this.positionPeakPnL.set(positionKey, unrealizedPnLPercentage);
-      }
-      const peakPnLPct = this.positionPeakPnL.get(positionKey) || 0;
+      // Trailing stop and breakeven logic - only lock winners after meaningful profit expansion.
+      const peakPnLPct = this.updatePositionPeakPnL(positionKey, unrealizedPnLPercentage);
+      const trailingStopFloorPct = this.getOrTightenTrailingStopFloor(positionKey, hardStopPct, peakPnLPct);
 
       const drawdownFromPeak = peakPnLPct > 0
         ? (peakPnLPct - unrealizedPnLPercentage) / peakPnLPct
         : 0;
 
-      if (peakPnLPct >= this.trailingStopActivationPct && unrealizedPnLPercentage > 0 && drawdownFromPeak > this.trailingStopPct) {
+      const trailingStopArmed = peakPnLPct >= this.trailingStopActivationPct
+        && trailingStopFloorPct >= this.trailingStopMinProfitLockPct;
+      if (trailingStopArmed && unrealizedPnLPercentage <= trailingStopFloorPct) {
         warnings.push(
-          `Trailing stop triggered: retraced ${(drawdownFromPeak * 100).toFixed(1)}% from peak unrealized PnL ${(peakPnLPct * 100).toFixed(2)}%`
+          `Trailing stop triggered: current ${(unrealizedPnLPercentage * 100).toFixed(2)}% <= floor ${(trailingStopFloorPct * 100).toFixed(2)}% ` +
+          `(peak ${(peakPnLPct * 100).toFixed(2)}%, retrace ${(drawdownFromPeak * 100).toFixed(1)}%)`
         );
         riskScore += 0.4;  // Increase risk score to signal exit
       }
 
-      // Breakeven stop: once +1.5% peak profit is reached, do not allow the trade to go negative.
-      if (peakPnLPct >= 0.015 && unrealizedPnLPercentage <= 0) {
+      // Breakeven stop: once a strong move has printed, do not allow full round-trip to a loss.
+      if (peakPnLPct >= this.breakevenActivationPct && unrealizedPnLPercentage <= 0) {
         warnings.push(
           `Breakeven stop triggered: peak ${(peakPnLPct * 100).toFixed(2)}%, ` +
           `current ${(unrealizedPnLPercentage * 100).toFixed(2)}%`
@@ -391,8 +610,8 @@ export class RiskManager {
         suggestedSize: position.size,
         riskScore,
         warnings,
-        stopLoss: 0.01,
-        takeProfit: 0.04,
+        stopLoss: this.DEFAULT_STOP_LOSS_PCT,
+        takeProfit: this.DEFAULT_STOP_LOSS_PCT * this.MIN_RISK_REWARD_RATIO,
         leverage: position.leverage
       };
 
@@ -408,15 +627,22 @@ export class RiskManager {
    */
   shouldClosePosition(position: Position): boolean {
     const positionKey = `${position.symbol}_${position.side}`;
-    const peakPnLPct = this.positionPeakPnL.get(positionKey) || 0;
     const positionNotional = Math.max(Math.abs(position.size * position.entryPrice), Number.EPSILON);
     const unrealizedPnLPct = position.unrealizedPnL / positionNotional;
     const trackedOpenTime = this.positionOpenTimes.get(positionKey);
     const entryTimeMs = position.entryTime ? new Date(position.entryTime).getTime() : undefined;
     const openTimeMs = trackedOpenTime ?? entryTimeMs;
 
-    if (unrealizedPnLPct <= -0.03) {
-      logger.warn(`[RiskManager] Hard stop triggered for ${position.symbol}: unrealized ${(unrealizedPnLPct * 100).toFixed(2)}%`);
+    // CRITICAL FIX: Use position-specific hard stop that NEVER moves outward.
+    const hardStopPct = this.getOrInitializeHardStop(positionKey);
+    const peakPnLPct = this.updatePositionPeakPnL(positionKey, unrealizedPnLPct);
+    const trailingStopFloorPct = this.getOrTightenTrailingStopFloor(positionKey, hardStopPct, peakPnLPct);
+
+    if (unrealizedPnLPct <= -hardStopPct) {
+      logger.warn(
+        `[RiskManager] HARD STOP triggered for ${position.symbol}: ` +
+        `unrealized ${(unrealizedPnLPct * 100).toFixed(2)}% <= -${(hardStopPct * 100).toFixed(2)}%`
+      );
       return true;
     }
 
@@ -432,18 +658,23 @@ export class RiskManager {
       }
     }
 
-    if (peakPnLPct >= 0.015 && unrealizedPnLPct <= 0) {
+    if (peakPnLPct >= this.breakevenActivationPct && unrealizedPnLPct <= 0) {
       logger.info(`[RiskManager] Breakeven stop triggered for ${position.symbol}: peak ${(peakPnLPct * 100).toFixed(2)}%, now ${(unrealizedPnLPct * 100).toFixed(2)}%`);
       return true;
     }
 
-    if (peakPnLPct >= this.trailingStopActivationPct && unrealizedPnLPct > 0) {
-      const drawdownFromPeak = (peakPnLPct - unrealizedPnLPct) / peakPnLPct;
-      if (drawdownFromPeak > this.trailingStopPct) {
-        logger.info(`[RiskManager] Trailing stop triggered for ${position.symbol}: ` +
-          `down ${(drawdownFromPeak * 100).toFixed(1)}% from peak`);
-        return true;
-      }
+    const trailingStopArmed = peakPnLPct >= this.trailingStopActivationPct
+      && trailingStopFloorPct >= this.trailingStopMinProfitLockPct;
+    if (trailingStopArmed && unrealizedPnLPct <= trailingStopFloorPct) {
+      const drawdownFromPeak = peakPnLPct > 0
+        ? (peakPnLPct - unrealizedPnLPct) / peakPnLPct
+        : 0;
+      logger.info(
+        `[RiskManager] Trailing stop triggered for ${position.symbol}: ` +
+        `current ${(unrealizedPnLPct * 100).toFixed(2)}% <= floor ${(trailingStopFloorPct * 100).toFixed(2)}% ` +
+        `(peak ${(peakPnLPct * 100).toFixed(2)}%, retrace ${(drawdownFromPeak * 100).toFixed(1)}%)`
+      );
+      return true;
     }
     return false;
   }
@@ -451,10 +682,18 @@ export class RiskManager {
   /**
    * Register a new position open time for holding limit tracking
    */
-  registerPositionOpen(symbol: string, side: string): void {
+  registerPositionOpen(symbol: string, side: string, stopLossPct?: number): void {
     const positionKey = `${symbol}_${side}`;
     this.positionOpenTimes.set(positionKey, Date.now());
-    logger.info(`[RiskManager] Position registered: ${positionKey} at ${new Date().toISOString()}`);
+
+    // CRITICAL FIX: Set hard stop that can only tighten.
+    const hardStop = this.setOrTightenHardStop(positionKey, stopLossPct ?? this.DEFAULT_STOP_LOSS_PCT);
+    this.positionPeakPnL.set(positionKey, 0);
+    this.positionTrailingStopFloors.set(positionKey, -hardStop);
+
+    logger.info(
+      `[RiskManager] Position registered: ${positionKey} at ${new Date().toISOString()} with HARD STOP at -${(hardStop * 100).toFixed(2)}%`
+    );
   }
 
   /**
@@ -464,6 +703,8 @@ export class RiskManager {
     const positionKey = `${symbol}_${side}`;
     this.positionOpenTimes.delete(positionKey);
     this.positionPeakPnL.delete(positionKey);
+    this.positionHardStops.delete(positionKey); // CRITICAL FIX: Clear hard stop
+    this.positionTrailingStopFloors.delete(positionKey);
     logger.info(`[RiskManager] Position tracking cleared: ${positionKey}`);
   }
 
@@ -497,13 +738,15 @@ export class RiskManager {
     this.updateTradeResult(pnl);
     this.dailyPnL += pnl;
     logger.info(`Daily P&L updated: ${this.dailyPnL.toFixed(2)}`);
+    this.logDailyLossApproachAlerts();
 
-    // NEW: Daily loss circuit breaker with hard 0.00 limit
-    const hardDailyLossLimit = 0;
-    if (this.dailyPnL < -this.circuitBreakerLoss || this.dailyPnL < -this.maxDailyLoss || this.dailyPnL < -hardDailyLossLimit) {
-      logger.error(`CRITICAL: Daily loss circuit breaker triggered! Loss: $${this.dailyPnL.toFixed(2)}, Hard limit: $${hardDailyLossLimit.toFixed(2)}, Configured maxDailyLoss: $${this.maxDailyLoss.toFixed(2)}, circuitBreakerLoss setting: $${this.circuitBreakerLoss.toFixed(2)}`);
+    if (this.dailyPnL <= -this.DAILY_LOSS_CIRCUIT_BREAKER_USD && !this.emergencyStopActive) {
+      logger.error(
+        `CRITICAL: Daily loss circuit breaker triggered at $${this.dailyPnL.toFixed(2)} ` +
+        `(hard limit -$${this.DAILY_LOSS_CIRCUIT_BREAKER_USD.toFixed(2)})`
+      );
       this.emergencyStopReason = `Daily loss limit exceeded: $${this.dailyPnL.toFixed(2)}`;
-      this.activateEmergencyStop();
+      void this.activateEmergencyStop();
     }
   }
 
@@ -514,6 +757,8 @@ export class RiskManager {
     if (!isSameDay) {
       this.dailyPnL = 0;
       this.lastResetDate = today;
+      this.dailyLossAlert40Triggered = false;
+      this.dailyLossAlert45Triggered = false;
       logger.info('Daily P&L reset for new day');
     }
   }
@@ -525,11 +770,7 @@ export class RiskManager {
         logger.error(`Emergency stop reason: ${this.emergencyStopReason}`);
       }
       this.emergencyStopActive = true;
-
-      // In a real implementation, this would:
-      // 1. Cancel all open orders
-      // 2. Close all positions (if configured)
-      // 3. Send notifications
+      await this.forceCloseAllPositions();
 
       logger.error('Emergency stop activated - all trading halted');
 
@@ -541,7 +782,72 @@ export class RiskManager {
 
   disableEmergencyStop(): void {
     this.emergencyStopActive = false;
+    this.emergencyStopReason = '';
     logger.info('Emergency stop disabled - trading resumed');
+  }
+
+  private logDailyLossApproachAlerts(): void {
+    if (this.dailyPnL <= -this.DAILY_LOSS_ALERT_1_USD && !this.dailyLossAlert40Triggered) {
+      this.dailyLossAlert40Triggered = true;
+      logger.error(
+        `CRITICAL: Approaching daily loss breaker: PnL=$${this.dailyPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_1_USD.toFixed(2)})`
+      );
+    }
+
+    if (this.dailyPnL <= -this.DAILY_LOSS_ALERT_2_USD && !this.dailyLossAlert45Triggered) {
+      this.dailyLossAlert45Triggered = true;
+      logger.error(
+        `CRITICAL: Approaching daily loss breaker: PnL=$${this.dailyPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_2_USD.toFixed(2)})`
+      );
+    }
+  }
+
+  private async forceCloseAllPositions(): Promise<void> {
+    try {
+      if (!hyperliquidClient.isConfigured()) {
+        logger.error('[RiskManager] CRITICAL: Unable to close positions - Hyperliquid client is not configured');
+        return;
+      }
+
+      const accountState = await hyperliquidClient.getAccountState();
+      if (accountState.positions.length === 0) {
+        logger.error('[RiskManager] CRITICAL: No open exchange positions found during emergency close');
+        return;
+      }
+
+      logger.error(`[RiskManager] CRITICAL: Closing ${accountState.positions.length} open position(s)`);
+      await hyperliquidClient.cancelAllOrders(true);
+
+      for (const position of accountState.positions) {
+        const closeSide: 'BUY' | 'SELL' = position.side === 'LONG' ? 'SELL' : 'BUY';
+        const result = await hyperliquidClient.placeOrder({
+          symbol: position.symbol,
+          side: closeSide,
+          size: Math.abs(position.size),
+          reduceOnly: true,
+          bypassCooldown: true,
+          orderType: 'market'
+        });
+
+        if (!result.success) {
+          logger.error(
+            `[RiskManager] CRITICAL: Failed closing ${position.symbol} ${position.side} size=${position.size}. ` +
+            `status=${result.status} error=${result.error || 'unknown'}`
+          );
+        } else {
+          logger.error(
+            `[RiskManager] CRITICAL: Close submitted for ${position.symbol} ${position.side} size=${position.size} status=${result.status}`
+          );
+        }
+      }
+    } catch (error) {
+      logger.error('[RiskManager] CRITICAL: Emergency position close failed:', error);
+    } finally {
+      this.positionOpenTimes.clear();
+      this.positionPeakPnL.clear();
+      this.positionHardStops.clear();
+      this.positionTrailingStopFloors.clear();
+    }
   }
 
   getRiskMetrics(): {
@@ -552,9 +858,9 @@ export class RiskManager {
   } {
     return {
       dailyPnL: this.dailyPnL,
-      maxDailyLoss: this.maxDailyLoss,
+      maxDailyLoss: this.DAILY_LOSS_CIRCUIT_BREAKER_USD,
       emergencyStop: this.emergencyStopActive,
-      riskUtilization: Math.abs(this.dailyPnL) / this.maxDailyLoss
+      riskUtilization: Math.abs(this.dailyPnL) / this.DAILY_LOSS_CIRCUIT_BREAKER_USD
     };
   }
 
@@ -600,7 +906,11 @@ export class RiskManager {
     leverageRisk = totalLeverage / (portfolio.positions.length || 1) / this.maxLeverage;
 
     // Calculate total risk
-    const totalRisk = (concentrationRisk * 0.4 + leverageRisk * 0.4 + Math.abs(this.dailyPnL) / this.maxDailyLoss * 0.2);
+    const totalRisk = (
+      concentrationRisk * 0.4 +
+      leverageRisk * 0.4 +
+      Math.abs(this.dailyPnL) / this.DAILY_LOSS_CIRCUIT_BREAKER_USD * 0.2
+    );
 
     return {
       totalRisk: Math.min(totalRisk, 1.0),

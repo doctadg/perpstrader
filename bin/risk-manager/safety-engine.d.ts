@@ -3,12 +3,17 @@ declare class SafetyEngine {
     private safetyRules;
     private isEnabled;
     private emergencyStopTriggered;
+    private readonly DAILY_LOSS_ALERT_1_USD;
+    private readonly DAILY_LOSS_ALERT_2_USD;
+    private dailyLossAlert40Triggered;
+    private dailyLossAlert45Triggered;
     private config;
     constructor();
     private initializeCircuitBreakers;
     private initializeSafetyRules;
     checkSafetyRules(): Promise<boolean>;
     checkCircuitBreakers(dailyPnL: number, maxDrawdown: number): Promise<boolean>;
+    private logDailyLossApproachAlerts;
     private executeCircuitBreaker;
     resetCircuitBreaker(breakerId: string): Promise<void>;
     emergencyStop(): Promise<void>;

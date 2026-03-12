@@ -8,8 +8,8 @@ import storyClusterStoreEnhanced from '../../data/story-cluster-store-enhanced';
 import crypto from 'crypto';
 import glmService from '../../shared/glm-service';
 import openrouterService from '../../shared/openrouter-service';
-import { getTitleFingerprint, isNonMarketMoving, validateAndFormatTopic } from '../../shared/title-cleaner';
-import { humanTitleFormatter } from '../../shared/human-title-formatter';
+import { getTitleFingerprint, isNonMarketMoving } from '../../shared/title-cleaner';
+import { validateAndFormatTopic } from '../../shared/human-title-formatter';
 import { messageBus, Channel } from '../../shared/message-bus';
 import EntityExtractor, { ExtractedEntity } from './entity-extraction';
 import AnomalyDetector, { HeatAnomaly } from './anomaly-detector';
@@ -29,6 +29,7 @@ const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.85;
 export interface EnhancedClusteringState {
     categorizedNews: NewsItem[];
     clusters: any[];
+    currentStep?: string;
     stats: {
         totalProcessed: number;
         newClusters: number;
@@ -146,7 +147,7 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
                         aiLabelsMap.set(article.id, glmLabel);
                     }
                 } catch (error) {
-                    logger.debug(`[EnhancedClusterNode] GLM failed: ${error.message}`);
+                    logger.debug(`[EnhancedClusterNode] GLM failed: ${error instanceof Error ? error.message : String(error)}`);
                 }
             }));
         }

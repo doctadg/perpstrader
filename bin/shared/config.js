@@ -58,7 +58,7 @@ class ConfigManager {
                 dailyLossLimit: parseFloat(process.env.SAFETY_DAILY_LOSS_LIMIT || '50'),
                 maxDrawdownPercent: parseFloat(process.env.SAFETY_MAX_DRAWDOWN_PERCENT || '15'),
                 consecutiveLossLimit: parseInt(process.env.SAFETY_CONSECUTIVE_LOSS_LIMIT || '5'),
-                maxTradesPerDay: parseInt(process.env.SAFETY_MAX_TRADES_PER_DAY || '20'),
+                maxTradesPerDay: parseInt(process.env.SAFETY_MAX_TRADES_PER_DAY || '200'),
                 maxTradesPerSymbol: parseInt(process.env.SAFETY_MAX_TRADES_PER_SYMBOL || '5'),
                 volatilityReduceThreshold: parseFloat(process.env.SAFETY_VOLATILITY_REDUCE_THRESHOLD || '5'),
                 volatilityStopThreshold: parseFloat(process.env.SAFETY_VOLATILITY_STOP_THRESHOLD || '10')

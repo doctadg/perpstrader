@@ -3,7 +3,6 @@
 
 import { AgentState } from '../state';
 import executionEngine from '../../execution-engine/execution-engine';
-import dataManager from '../../data-manager/data-manager';
 import logger from '../../shared/logger';
 
 /**
@@ -30,22 +29,22 @@ export async function executorNode(state: AgentState): Promise<Partial<AgentStat
 
         // Execute through execution engine
         const trade = await executionEngine.executeSignal(signal, riskAssessment);
-
-        // Save trade to database
-        await dataManager.saveTrade(trade);
+        const shouldLearn = trade.status === 'FILLED';
 
         const isPaperTrade = !executionEngine.isConfigured() || process.env.PAPER_TRADING === 'true';
         const modeLabel = isPaperTrade ? '[PAPER]' : '[LIVE]';
 
-        logger.info(`${modeLabel} Trade executed: ${trade.side} ${trade.size} ${trade.symbol} @ ${trade.price}`);
+        logger.info(
+            `${modeLabel} Trade result: ${trade.side} ${trade.size} ${trade.symbol} @ ${trade.price} (${trade.status})`
+        );
 
         return {
             currentStep: 'EXECUTION_COMPLETE',
             executionResult: trade,
-            shouldLearn: true,
+            shouldLearn,
             thoughts: [
                 ...state.thoughts,
-                `${modeLabel} Executed: ${trade.side} ${trade.size.toFixed(4)} ${trade.symbol} @ ${trade.price.toFixed(2)}`,
+                `${modeLabel} Executed: ${trade.side} ${trade.size.toFixed(4)} ${trade.symbol} @ ${trade.price.toFixed(2)} (${trade.status})`,
                 `Trade ID: ${trade.id}`,
                 `Status: ${trade.status}`,
             ],

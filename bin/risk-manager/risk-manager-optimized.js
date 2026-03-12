@@ -22,7 +22,12 @@ class OptimizedRiskManager {
     dailyPnL;
     lastResetDate;
     positionPeakPnL = new Map();
-    trailingStopPct = 0.015;
+    MIN_STOP_LOSS_PCT = 0.006;
+    DEFAULT_STOP_LOSS_PCT = 0.008;
+    MIN_RISK_REWARD_RATIO = 3.0;
+    trailingStopPct = 0.45;
+    trailingStopActivationPct = 0.025;
+    trailingStopMinProfitLockPct = 0.012;
     // Caches
     riskCache = new Map();
     portfolioRiskCache = null;
@@ -72,6 +77,11 @@ class OptimizedRiskManager {
             const hasPortfolioValue = portfolio.totalValue > 100; // Minimum $100 to trade
             const approved = hasPortfolioValue && riskScore < 0.8 && this.dailyPnL > -this.maxDailyLoss;
             const { stopLoss, takeProfit } = this.calculateStopLossAndTakeProfit(signal, portfolio);
+            const riskRewardRatio = stopLoss > 0 ? takeProfit / stopLoss : 0;
+            if (riskRewardRatio < this.MIN_RISK_REWARD_RATIO) {
+                warnings.push(`Trade rejected: R:R 1:${riskRewardRatio.toFixed(2)} below required 1:${this.MIN_RISK_REWARD_RATIO.toFixed(2)}`);
+                return this.createRejectedAssessment(warnings, stopLoss, takeProfit);
+            }
             if (!hasPortfolioValue) {
                 warnings.push('Portfolio value too low for position sizing');
             }
@@ -103,14 +113,14 @@ class OptimizedRiskManager {
     /**
      * Create a rejected assessment
      */
-    createRejectedAssessment(warnings) {
+    createRejectedAssessment(warnings, stopLoss = 0, takeProfit = 0) {
         return {
             approved: false,
             suggestedSize: 0,
             riskScore: 1.0,
             warnings,
-            stopLoss: 0,
-            takeProfit: 0,
+            stopLoss,
+            takeProfit,
             leverage: 0
         };
     }
@@ -135,7 +145,7 @@ class OptimizedRiskManager {
         this.riskCache.set(key, value);
     }
     calculatePositionSize(signal, portfolio) {
-        const LEVERAGE = 40;
+        const LEVERAGE = 20; // CRITICAL FIX: Reduced from 40x to 20x max leverage
         const price = signal.price || 1;
         const minMarginPercent = 0.15;
         const maxMarginPercent = 0.35;
@@ -190,21 +200,41 @@ class OptimizedRiskManager {
         return warnings;
     }
     calculateStopLossAndTakeProfit(signal, _portfolio) {
-        let stopLoss = 0.03;
-        let takeProfit = 0.06;
+        let stopLoss = this.DEFAULT_STOP_LOSS_PCT; // 0.8% default stop
+        const requiredRiskReward = this.getRequiredRiskRewardRatio(signal.confidence);
+        let takeProfit = stopLoss * requiredRiskReward;
         if (signal.confidence > 0.8) {
-            stopLoss = 0.02;
-            takeProfit = 0.08;
+            stopLoss = 0.0075; // tighten for high confidence
+            takeProfit = Math.max(stopLoss * requiredRiskReward, stopLoss * 4.0);
         }
         else if (signal.confidence < 0.5) {
-            stopLoss = 0.04;
-            takeProfit = 0.04;
+            stopLoss = 0.0070; // low confidence must never widen stop
+            takeProfit = stopLoss * requiredRiskReward;
         }
+        // CRITICAL FIX: Reverse stop widening - tighten when losing, don't widen
         if (this.dailyPnL < 0) {
-            stopLoss *= 1.5;
-            takeProfit *= 0.8;
+            stopLoss = Math.max(this.MIN_STOP_LOSS_PCT, stopLoss * 0.8);
+            takeProfit *= 1.2;
         }
+        // CRITICAL FIX: Enforce minimum 1:3 risk:reward ratio
+        const minRiskReward = Math.max(this.MIN_RISK_REWARD_RATIO, requiredRiskReward);
+        const currentRR = takeProfit / stopLoss;
+        if (currentRR < minRiskReward) {
+            takeProfit = stopLoss * minRiskReward;
+        }
+        // Hard limits: stop cannot widen beyond default baseline and never below minimum.
+        stopLoss = Math.max(this.MIN_STOP_LOSS_PCT, Math.min(this.DEFAULT_STOP_LOSS_PCT, stopLoss));
+        takeProfit = Math.max(stopLoss * minRiskReward, takeProfit);
         return { stopLoss, takeProfit };
+    }
+    getRequiredRiskRewardRatio(confidence) {
+        if (confidence < 0.45) {
+            return 5.0;
+        }
+        if (confidence < 0.60) {
+            return 4.0;
+        }
+        return this.MIN_RISK_REWARD_RATIO;
     }
     /**
      * Check position risk with caching
@@ -220,21 +250,24 @@ class OptimizedRiskManager {
             const positionKey = `${position.symbol}_${position.side}`;
             let riskScore = 0;
             const warnings = [];
-            // Trailing stop logic
-            if (position.unrealizedPnL > 0) {
-                const currentPeak = this.positionPeakPnL.get(positionKey) || 0;
-                if (position.unrealizedPnL > currentPeak) {
-                    this.positionPeakPnL.set(positionKey, position.unrealizedPnL);
-                }
-                const peakPnL = this.positionPeakPnL.get(positionKey) || 0;
-                const drawdownFromPeak = peakPnL > 0 ? (peakPnL - position.unrealizedPnL) / peakPnL : 0;
-                if (drawdownFromPeak > this.trailingStopPct && peakPnL > 0) {
-                    warnings.push(`Trailing stop triggered: down ${(drawdownFromPeak * 100).toFixed(1)}% from peak`);
-                    riskScore += 0.4;
-                }
+            // Trailing stop logic on unrealized PnL % so it scales consistently across position sizes.
+            const currentPeak = this.positionPeakPnL.get(positionKey) || 0;
+            if (unrealizedPnLPercentage > currentPeak) {
+                this.positionPeakPnL.set(positionKey, unrealizedPnLPercentage);
             }
-            else {
-                this.positionPeakPnL.set(positionKey, 0);
+            const peakPnLPct = this.positionPeakPnL.get(positionKey) || 0;
+            const trailingFloorPct = peakPnLPct >= this.trailingStopActivationPct
+                ? peakPnLPct * (1 - this.trailingStopPct)
+                : Number.NEGATIVE_INFINITY;
+            const trailingStopArmed = peakPnLPct >= this.trailingStopActivationPct
+                && trailingFloorPct >= this.trailingStopMinProfitLockPct;
+            if (trailingStopArmed && unrealizedPnLPercentage <= trailingFloorPct) {
+                const drawdownFromPeak = peakPnLPct > 0
+                    ? (peakPnLPct - unrealizedPnLPercentage) / peakPnLPct
+                    : 0;
+                warnings.push(`Trailing stop triggered: current ${(unrealizedPnLPercentage * 100).toFixed(2)}% <= floor ${(trailingFloorPct * 100).toFixed(2)}% ` +
+                    `(peak ${(peakPnLPct * 100).toFixed(2)}%, retrace ${(drawdownFromPeak * 100).toFixed(1)}%)`);
+                riskScore += 0.4;
             }
             if (unrealizedPnLPercentage < -0.1) {
                 riskScore += 0.5;
@@ -282,13 +315,26 @@ class OptimizedRiskManager {
     }
     shouldClosePosition(position) {
         const positionKey = `${position.symbol}_${position.side}`;
-        const peakPnL = this.positionPeakPnL.get(positionKey) || 0;
-        if (peakPnL > 0 && position.unrealizedPnL > 0) {
-            const drawdownFromPeak = (peakPnL - position.unrealizedPnL) / peakPnL;
-            if (drawdownFromPeak > this.trailingStopPct) {
-                logger_1.default.info(`[RiskManager] Trailing stop triggered for ${position.symbol}`);
-                return true;
-            }
+        const positionNotional = Math.max(Math.abs(position.size * position.entryPrice), Number.EPSILON);
+        const unrealizedPnLPct = position.unrealizedPnL / positionNotional;
+        const currentPeak = this.positionPeakPnL.get(positionKey) || 0;
+        if (unrealizedPnLPct > currentPeak) {
+            this.positionPeakPnL.set(positionKey, unrealizedPnLPct);
+        }
+        const peakPnLPct = this.positionPeakPnL.get(positionKey) || 0;
+        const trailingFloorPct = peakPnLPct >= this.trailingStopActivationPct
+            ? peakPnLPct * (1 - this.trailingStopPct)
+            : Number.NEGATIVE_INFINITY;
+        const trailingStopArmed = peakPnLPct >= this.trailingStopActivationPct
+            && trailingFloorPct >= this.trailingStopMinProfitLockPct;
+        if (trailingStopArmed && unrealizedPnLPct <= trailingFloorPct) {
+            const drawdownFromPeak = peakPnLPct > 0
+                ? (peakPnLPct - unrealizedPnLPct) / peakPnLPct
+                : 0;
+            logger_1.default.info(`[RiskManager] Trailing stop triggered for ${position.symbol}: ` +
+                `current ${(unrealizedPnLPct * 100).toFixed(2)}% <= floor ${(trailingFloorPct * 100).toFixed(2)}% ` +
+                `(peak ${(peakPnLPct * 100).toFixed(2)}%, retrace ${(drawdownFromPeak * 100).toFixed(1)}%)`);
+            return true;
         }
         return false;
     }
@@ -316,6 +362,12 @@ class OptimizedRiskManager {
     updateDailyPnL(pnl) {
         this.dailyPnL += pnl;
         logger_1.default.info(`Daily P&L updated: ${this.dailyPnL.toFixed(2)}`);
+        // CRITICAL FIX: Circuit breaker at -$50 daily loss
+        const CIRCUIT_BREAKER_THRESHOLD = -50;
+        if (this.dailyPnL <= CIRCUIT_BREAKER_THRESHOLD) {
+            logger_1.default.error(`CRITICAL: Circuit breaker triggered! Daily loss $${this.dailyPnL.toFixed(2)} exceeds limit $${Math.abs(CIRCUIT_BREAKER_THRESHOLD)}`);
+            this.activateEmergencyStop();
+        }
     }
     resetDailyPnLIfNeeded() {
         const today = new Date();

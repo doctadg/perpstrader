@@ -3,23 +3,47 @@ export declare class RiskManager {
     private maxPositionSize;
     private maxDailyLoss;
     private maxLeverage;
+    private readonly HARD_CAP_MAX_LOSS_PERCENT;
+    private readonly MIN_STOP_LOSS_PCT;
+    private readonly DEFAULT_STOP_LOSS_PCT;
+    private readonly MIN_RISK_REWARD_RATIO;
+    private readonly DAILY_LOSS_CIRCUIT_BREAKER_USD;
+    private readonly DAILY_LOSS_ALERT_1_USD;
+    private readonly DAILY_LOSS_ALERT_2_USD;
+    private readonly REVENGE_COOLDOWN_MS;
     private emergencyStopActive;
     private emergencyStopReason;
     private dailyPnL;
     private consecutiveLosses;
     private lastResetDate;
-    private circuitBreakerLoss;
+    private cooldownUntil;
+    private dailyLossAlert40Triggered;
+    private dailyLossAlert45Triggered;
     private positionPeakPnL;
     private trailingStopPct;
     private trailingStopActivationPct;
+    private trailingStopMinProfitLockPct;
+    private breakevenActivationPct;
     private positionOpenTimes;
+    private positionHardStops;
+    private positionTrailingStopFloors;
     constructor();
     evaluateSignal(signal: TradingSignal, portfolio: Portfolio): Promise<RiskAssessment>;
     private calculatePositionSize;
     private getCurrentExposure;
     private calculateRiskScore;
     private generateWarnings;
+    private normalizeStopLossPct;
+    private enforceMinimumRiskReward;
+    private setOrTightenHardStop;
+    private getOrInitializeHardStop;
+    private updatePositionPeakPnL;
+    private getOrTightenTrailingStopFloor;
     private calculateStopLossAndTakeProfit;
+    private getRequiredRiskRewardRatio;
+    private logRiskRewardCalculation;
+    private isCooldownActive;
+    private getCooldownRemainingMs;
     private trackTradeResult;
     private updateTradeResult;
     checkPositionRisk(position: Position, portfolio: Portfolio): Promise<RiskAssessment>;
@@ -31,7 +55,7 @@ export declare class RiskManager {
     /**
      * Register a new position open time for holding limit tracking
      */
-    registerPositionOpen(symbol: string, side: string): void;
+    registerPositionOpen(symbol: string, side: string, stopLossPct?: number): void;
     /**
      * Clear position tracking when position is closed
      */
@@ -41,6 +65,8 @@ export declare class RiskManager {
     private resetDailyPnLIfNeeded;
     activateEmergencyStop(): Promise<void>;
     disableEmergencyStop(): void;
+    private logDailyLossApproachAlerts;
+    private forceCloseAllPositions;
     getRiskMetrics(): {
         dailyPnL: number;
         maxDailyLoss: number;

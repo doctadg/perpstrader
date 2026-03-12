@@ -26,6 +26,10 @@ class SafetyEngine {
   private safetyRules: SafetyRule[];
   private isEnabled: boolean;
   private emergencyStopTriggered: boolean;
+  private readonly DAILY_LOSS_ALERT_1_USD = 40;
+  private readonly DAILY_LOSS_ALERT_2_USD = 45;
+  private dailyLossAlert40Triggered: boolean;
+  private dailyLossAlert45Triggered: boolean;
 
   private config: {
     maxDailyLoss: number;
@@ -42,12 +46,14 @@ class SafetyEngine {
     this.safetyRules = [];
     this.isEnabled = true;
     this.emergencyStopTriggered = false;
+    this.dailyLossAlert40Triggered = false;
+    this.dailyLossAlert45Triggered = false;
 
     this.config = {
-      maxDailyLoss: 0.05,
+      maxDailyLoss: 50,  // hard absolute $50 daily loss
       maxDrawdown: 0.15,
       maxPositionSize: 0.20,
-      maxLeverage: 5,
+      maxLeverage: 20,  // CRITICAL FIX: Reduced from 5x to 20x (was misconfigured)
       maxPositions: 3,
       volatilityThreshold: 0.05,
       liquidityThreshold: 0.02
@@ -140,14 +146,14 @@ class SafetyEngine {
       {
         id: 'leverage_limit',
         name: 'Leverage Limit',
-        description: 'Ensure leverage never exceeds 5x',
+        description: 'Ensure leverage never exceeds 20x',
         enabled: true,
         check: async () => {
           const maxLeverage = await this.getMaxLeverage();
           return maxLeverage > this.config.maxLeverage;
         },
         action: async () => {
-          logger.warn('Leverage exceeds limit, reducing leverage');
+          logger.warn('Leverage exceeds 20x limit, reducing leverage');
           await this.reduceAllLeverage();
         }
       },
@@ -198,15 +204,17 @@ class SafetyEngine {
   async checkCircuitBreakers(dailyPnL: number, maxDrawdown: number): Promise<boolean> {
     const dailyLossBreaker = this.circuitBreakers.get('daily_loss')!;
     const drawdownBreaker = this.circuitBreakers.get('max_drawdown')!;
+    this.logDailyLossApproachAlerts(dailyPnL);
 
-    const lossRatio = Math.abs(dailyPnL) / 1000;
-
-    if (lossRatio >= dailyLossBreaker.threshold && !dailyLossBreaker.triggered) {
+    // CRITICAL FIX: Hard $50 circuit breaker (absolute dollars)
+    if (dailyPnL <= -this.config.maxDailyLoss && !dailyLossBreaker.triggered) {
       dailyLossBreaker.triggered = true;
-      dailyLossBreaker.currentValue = lossRatio;
+      dailyLossBreaker.currentValue = Math.abs(dailyPnL);
       dailyLossBreaker.triggeredAt = new Date();
       
-      logger.error(`DAILY LOSS CIRCUIT BREAKER TRIGGERED: ${lossRatio.toFixed(2)}%`);
+      logger.error(
+        `CRITICAL: DAILY LOSS CIRCUIT BREAKER TRIGGERED: PnL=$${dailyPnL.toFixed(2)} <= -$${this.config.maxDailyLoss.toFixed(2)}`
+      );
       await this.executeCircuitBreaker(dailyLossBreaker);
       return true;
     }
@@ -222,6 +230,22 @@ class SafetyEngine {
     }
 
     return false;
+  }
+
+  private logDailyLossApproachAlerts(dailyPnL: number): void {
+    if (dailyPnL <= -this.DAILY_LOSS_ALERT_1_USD && !this.dailyLossAlert40Triggered) {
+      this.dailyLossAlert40Triggered = true;
+      logger.error(
+        `CRITICAL: Approaching daily loss breaker: PnL=$${dailyPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_1_USD.toFixed(2)})`
+      );
+    }
+
+    if (dailyPnL <= -this.DAILY_LOSS_ALERT_2_USD && !this.dailyLossAlert45Triggered) {
+      this.dailyLossAlert45Triggered = true;
+      logger.error(
+        `CRITICAL: Approaching daily loss breaker: PnL=$${dailyPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_2_USD.toFixed(2)})`
+      );
+    }
   }
 
   private async executeCircuitBreaker(breaker: CircuitBreaker): Promise<void> {
@@ -247,6 +271,10 @@ class SafetyEngine {
       breaker.triggered = false;
       breaker.currentValue = 0;
       breaker.triggeredAt = new Date();
+      if (breakerId === 'daily_loss') {
+        this.dailyLossAlert40Triggered = false;
+        this.dailyLossAlert45Triggered = false;
+      }
       logger.info(`Circuit breaker ${breakerId} reset`);
     }
   }
@@ -267,6 +295,8 @@ class SafetyEngine {
       breaker.triggered = false;
       breaker.currentValue = 0;
     }
+    this.dailyLossAlert40Triggered = false;
+    this.dailyLossAlert45Triggered = false;
 
     logger.info('Emergency stop reset, trading resumed');
   }

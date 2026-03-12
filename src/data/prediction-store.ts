@@ -170,6 +170,13 @@ class PredictionStore {
         )
       `);
 
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS prediction_daily_risk_state (
+          date TEXT PRIMARY KEY,
+          state TEXT NOT NULL
+        )
+      `);
+
       this.initialized = true;
       logger.info('[PredictionStore] Initialized prediction database');
     } catch (error) {
@@ -607,6 +614,61 @@ class PredictionStore {
         }
       })(),
     };
+  }
+
+  // ========================================================================
+  // RISK MANAGER SUPPORT
+  // ========================================================================
+
+  getPortfolioSnapshot(): { totalValue: number; availableBalance: number } {
+    const positions = this.getPositions();
+    const trades = this.getTrades(1000);
+    
+    // Calculate total value from positions
+    const positionValue = positions.reduce((sum, pos) => {
+      return sum + (pos.shares * pos.lastPrice);
+    }, 0);
+    
+    // Calculate realized PnL from closed trades
+    const realizedPnL = trades.reduce((sum, trade) => {
+      return sum + (trade.pnl ?? 0);
+    }, 0);
+    
+    // Base portfolio value (could be configurable or from external source)
+    const baseValue = 10000;
+    const totalValue = baseValue + realizedPnL + positionValue;
+    
+    return {
+      totalValue,
+      availableBalance: totalValue - positionValue,
+    };
+  }
+
+  getDailyRiskState(date: string): Record<string, any> | null {
+    if (!this.db) this.initialize();
+    if (!this.db) return null;
+
+    const row = this.db.prepare(`
+      SELECT state FROM prediction_daily_risk_state WHERE date = ?
+    `).get(date) as any;
+
+    if (!row) return null;
+
+    try {
+      return JSON.parse(row.state);
+    } catch {
+      return null;
+    }
+  }
+
+  saveDailyRiskState(state: Record<string, any>): void {
+    if (!this.db) this.initialize();
+    if (!this.db) return;
+
+    this.db.prepare(`
+      INSERT OR REPLACE INTO prediction_daily_risk_state (date, state)
+      VALUES (?, ?)
+    `).run(state.date, JSON.stringify(state));
   }
 }
 

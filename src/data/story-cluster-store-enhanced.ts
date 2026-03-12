@@ -945,6 +945,213 @@ class StoryClusterStoreEnhanced {
     }
 
     /**
+     * Get cluster ID by topic key
+     */
+    async getClusterIdByTopicKey(topicKey: string): Promise<string | null> {
+        await this.initialize();
+        if (!this.db) return null;
+
+        try {
+            const row = this.db.prepare(`
+                SELECT id FROM story_clusters
+                WHERE topic_key = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+            `).get(topicKey) as { id: string } | undefined;
+
+            return row?.id || null;
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to get cluster by topic key:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Get cluster by ID
+     */
+    async getClusterById(clusterId: string): Promise<any | null> {
+        await this.initialize();
+        if (!this.db) return null;
+
+        try {
+            const row = this.db.prepare(`
+                SELECT * FROM story_clusters WHERE id = ?
+            `).get(clusterId) as any;
+
+            if (!row) return null;
+
+            return {
+                id: row.id,
+                topic: row.topic,
+                topicKey: row.topic_key || undefined,
+                summary: row.summary,
+                category: row.category,
+                keywords: JSON.parse(row.keywords || '[]'),
+                heatScore: row.heat_score,
+                articleCount: row.article_count,
+                uniqueTitleCount: row.unique_title_count || row.article_count,
+                trendDirection: (row.trend_direction as 'UP' | 'DOWN' | 'NEUTRAL') || 'NEUTRAL',
+                urgency: (row.urgency as 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW') || 'MEDIUM',
+                subEventType: row.sub_event_type || undefined,
+                firstSeen: row.first_seen ? new Date(row.first_seen) : undefined,
+                createdAt: new Date(row.created_at),
+                updatedAt: new Date(row.updated_at)
+            };
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to get cluster by ID:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Check if cluster exists
+     */
+    async clusterExists(clusterId: string): Promise<boolean> {
+        await this.initialize();
+        if (!this.db) return false;
+
+        try {
+            const row = this.db.prepare(`
+                SELECT 1 FROM story_clusters WHERE id = ?
+            `).get(clusterId);
+
+            return !!row;
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to check cluster existence:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Upsert cluster
+     */
+    async upsertCluster(cluster: {
+        id: string;
+        topic: string;
+        topicKey?: string;
+        summary: string;
+        category: string;
+        keywords: string[];
+        heatScore: number;
+        articleCount: number;
+        uniqueTitleCount: number;
+        trendDirection?: string;
+        urgency?: string;
+        subEventType?: string;
+        firstSeen: Date;
+    }): Promise<void> {
+        await this.initialize();
+        if (!this.db) return;
+
+        try {
+            const now = new Date().toISOString();
+
+            this.db.prepare(`
+                INSERT OR REPLACE INTO story_clusters
+                (id, topic, topic_key, summary, category, keywords, heat_score, article_count,
+                 unique_title_count, trend_direction, urgency, sub_event_type, first_seen, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                cluster.id,
+                cluster.topic,
+                cluster.topicKey || null,
+                cluster.summary,
+                cluster.category,
+                JSON.stringify(cluster.keywords),
+                cluster.heatScore,
+                cluster.articleCount,
+                cluster.uniqueTitleCount,
+                cluster.trendDirection || 'NEUTRAL',
+                cluster.urgency || 'MEDIUM',
+                cluster.subEventType || null,
+                cluster.firstSeen.toISOString(),
+                now,
+                now
+            );
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to upsert cluster:', error);
+        }
+    }
+
+    /**
+     * Add article to cluster
+     */
+    async addArticleToCluster(
+        clusterId: string,
+        articleId: string,
+        titleFingerprint: string,
+        heatDelta: number,
+        trendDirection?: string
+    ): Promise<{ added: boolean }> {
+        await this.initialize();
+        if (!this.db) return { added: false };
+
+        try {
+            const now = new Date().toISOString();
+
+            // Insert cluster article link
+            this.db.prepare(`
+                INSERT OR IGNORE INTO cluster_articles
+                (cluster_id, article_id, title_fingerprint, added_at)
+                VALUES (?, ?, ?, ?)
+            `).run(clusterId, articleId, titleFingerprint, now);
+
+            // Update cluster stats
+            this.db.prepare(`
+                UPDATE story_clusters
+                SET article_count = article_count + 1,
+                    heat_score = heat_score + ?,
+                    trend_direction = COALESCE(?, trend_direction),
+                    updated_at = ?
+                WHERE id = ?
+            `).run(heatDelta, trendDirection || null, now, clusterId);
+
+            return { added: true };
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to add article to cluster:', error);
+            return { added: false };
+        }
+    }
+
+    /**
+     * Merge clusters
+     */
+    async mergeClusters(targetId: string, sourceId: string): Promise<{ moved: number }> {
+        await this.initialize();
+        if (!this.db) return { moved: 0 };
+
+        try {
+            // Move articles from source to target
+            const result = this.db.prepare(`
+                UPDATE cluster_articles
+                SET cluster_id = ?
+                WHERE cluster_id = ? AND article_id NOT IN (
+                    SELECT article_id FROM cluster_articles WHERE cluster_id = ?
+                )
+            `).run(targetId, sourceId, targetId);
+
+            const moved = result.changes;
+
+            // Transfer heat and counts
+            this.db.prepare(`
+                UPDATE story_clusters
+                SET article_count = article_count + ?,
+                    heat_score = heat_score + (SELECT heat_score FROM story_clusters WHERE id = ?),
+                    updated_at = ?
+                WHERE id = ?
+            `).run(moved, sourceId, new Date().toISOString(), targetId);
+
+            // Delete source cluster
+            this.db.prepare(`DELETE FROM story_clusters WHERE id = ?`).run(sourceId);
+
+            return { moved };
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to merge clusters:', error);
+            return { moved: 0 };
+        }
+    }
+
+    /**
      * Get hot clusters (copied from original store for API compatibility)
      */
     async getHotClusters(limit: number = 20, sinceHours: number = 24, category?: string): Promise<any[]> {

@@ -37,6 +37,11 @@ declare class AdvancedRiskEngine {
     private riskThresholds;
     private riskHistory;
     private maxHistorySize;
+    private readonly HARD_DAILY_LOSS_LIMIT_USD;
+    private readonly DAILY_LOSS_ALERT_1_USD;
+    private readonly DAILY_LOSS_ALERT_2_USD;
+    private dailyLossAlert40Triggered;
+    private dailyLossAlert45Triggered;
     constructor();
     calculateComprehensiveRisk(positions: Position[], marketData: Map<string, MarketData>, strategy: Strategy): Promise<RiskMetrics>;
     private calculatePositionRisk;
@@ -51,9 +56,11 @@ declare class AdvancedRiskEngine {
     getRiskTrend(): 'INCREASING' | 'STABLE' | 'DECREASING';
     shouldReducePosition(riskMetrics: RiskMetrics): boolean;
     getRecommendedPositionSize(riskMetrics: RiskMetrics, availableCapital: number): number;
-    getStopLossLevel(entryPrice: number, isLong: boolean): number;
-    getTakeProfitLevel(entryPrice: number, isLong: boolean): number;
-    checkDailyLoss(todayPnL: number, initialCapital: number): boolean;
+    private getRequiredRiskRewardRatio;
+    private resolveRiskRewardThresholds;
+    getStopLossLevel(entryPrice: number, isLong: boolean, confidence?: number): number;
+    getTakeProfitLevel(entryPrice: number, isLong: boolean, confidence?: number): number;
+    checkDailyLoss(todayPnL: number, _initialCapital: number): boolean;
     updateRiskThresholds(newThresholds: Partial<RiskThresholds>): void;
 }
 declare const _default: AdvancedRiskEngine;

@@ -163,7 +163,7 @@ export class OptimizedCircuitBreakerSystem {
             const backoffMs = this.calculateBackoff(breaker.recoveryAttempts);
 
             if (timeSinceOpen < backoffMs) {
-                metrics?.rejectedCalls++;
+                if (metrics) { metrics.rejectedCalls++; }
                 logger.warn(`[CircuitBreaker] ${breakerName} is OPEN, blocking execution (backoff: ${backoffMs}ms)`);
 
                 if (fallback) {

@@ -88,31 +88,31 @@ export declare const stateChannels: {
         default: () => string;
     };
     indicators: {
-        default: () => null;
+        default: () => any;
     };
     regime: {
-        default: () => null;
+        default: () => any;
     };
     patternBias: {
-        default: () => null;
+        default: () => any;
     };
     patternAvgReturn: {
         default: () => number;
     };
     portfolio: {
-        default: () => null;
+        default: () => any;
     };
     selectedStrategy: {
-        default: () => null;
+        default: () => any;
     };
     signal: {
-        default: () => null;
+        default: () => any;
     };
     riskAssessment: {
-        default: () => null;
+        default: () => any;
     };
     executionResult: {
-        default: () => null;
+        default: () => any;
     };
     shouldExecute: {
         default: () => boolean;
@@ -121,22 +121,22 @@ export declare const stateChannels: {
         default: () => boolean;
     };
     candles: {
-        default: () => never[];
+        default: () => any[];
     };
     similarPatterns: {
-        default: () => never[];
+        default: () => any[];
     };
     strategyIdeas: {
-        default: () => never[];
+        default: () => any[];
     };
     backtestResults: {
-        default: () => never[];
+        default: () => any[];
     };
     thoughts: {
-        default: () => never[];
+        default: () => any[];
     };
     errors: {
-        default: () => never[];
+        default: () => any[];
     };
 };
 //# sourceMappingURL=state.d.ts.map

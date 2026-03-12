@@ -402,13 +402,35 @@ Markets:\n${markets}`;
      */
     async optimizeStrategy(strategy: Strategy, performance: Strategy['performance']): Promise<Strategy> {
         logger.info(`[OpenRouter] Optimizing strategy: ${strategy.name}`);
-        // Return the same strategy with slightly adjusted parameters
+        // CRITICAL FIX: REVERSED revenge trading logic
+        // When losing: TIGHTEN stops (be more selective), when winning: can afford slightly wider stops
+        // Also enforce max 1:3 risk/reward ratio
+        let stopLoss = strategy.riskParameters.stopLoss;
+        let takeProfit = strategy.riskParameters.takeProfit;
+
+        // When win rate is low, TIGHTEN stops (opposite of revenge trading)
+        if (performance.winRate < 50) {
+            stopLoss = strategy.riskParameters.stopLoss * 0.90; // Tighten by 10%
+            takeProfit = strategy.riskParameters.takeProfit * 1.10; // Raise targets by 10%
+        } else {
+            // When winning, keep stops tight to preserve gains
+            stopLoss = strategy.riskParameters.stopLoss * 0.95;
+            takeProfit = strategy.riskParameters.takeProfit;
+        }
+
+        // Enforce max 1:3 risk/reward (reward must be at least 3x risk)
+        const minTakeProfit = stopLoss * 3.0;
+        if (takeProfit < minTakeProfit) {
+            takeProfit = minTakeProfit;
+            logger.warn(`[OpenRouter] Adjusted take profit to maintain 1:3 R:R ratio: ${(takeProfit * 100).toFixed(2)}%`);
+        }
+
         return {
             ...strategy,
             riskParameters: {
                 ...strategy.riskParameters,
-                stopLoss: performance.winRate > 50 ? strategy.riskParameters.stopLoss * 0.95 : strategy.riskParameters.stopLoss * 1.05,
-                takeProfit: performance.profitFactor > 1 ? strategy.riskParameters.takeProfit * 1.05 : strategy.riskParameters.takeProfit * 0.95,
+                stopLoss,
+                takeProfit,
             },
             updatedAt: new Date(),
         };

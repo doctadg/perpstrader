@@ -7,7 +7,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.executorNode = executorNode;
 const execution_engine_1 = __importDefault(require("../../execution-engine/execution-engine"));
-const data_manager_1 = __importDefault(require("../../data-manager/data-manager"));
 const logger_1 = __importDefault(require("../../shared/logger"));
 /**
  * Executor Node
@@ -29,18 +28,17 @@ async function executorNode(state) {
         logger_1.default.info(`[ExecutorNode] Executing: ${signal.action} ${signal.symbol} x${signal.size.toFixed(4)}`);
         // Execute through execution engine
         const trade = await execution_engine_1.default.executeSignal(signal, riskAssessment);
-        // Save trade to database
-        await data_manager_1.default.saveTrade(trade);
+        const shouldLearn = trade.status === 'FILLED';
         const isPaperTrade = !execution_engine_1.default.isConfigured() || process.env.PAPER_TRADING === 'true';
         const modeLabel = isPaperTrade ? '[PAPER]' : '[LIVE]';
-        logger_1.default.info(`${modeLabel} Trade executed: ${trade.side} ${trade.size} ${trade.symbol} @ ${trade.price}`);
+        logger_1.default.info(`${modeLabel} Trade result: ${trade.side} ${trade.size} ${trade.symbol} @ ${trade.price} (${trade.status})`);
         return {
             currentStep: 'EXECUTION_COMPLETE',
             executionResult: trade,
-            shouldLearn: true,
+            shouldLearn,
             thoughts: [
                 ...state.thoughts,
-                `${modeLabel} Executed: ${trade.side} ${trade.size.toFixed(4)} ${trade.symbol} @ ${trade.price.toFixed(2)}`,
+                `${modeLabel} Executed: ${trade.side} ${trade.size.toFixed(4)} ${trade.symbol} @ ${trade.price.toFixed(2)} (${trade.status})`,
                 `Trade ID: ${trade.id}`,
                 `Status: ${trade.status}`,
             ],

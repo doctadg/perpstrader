@@ -75,7 +75,7 @@ export declare class Selector {
         minFitness: number;
         maxFitness: number;
         stdDev: number;
-        bestGenome: StrategyGenome | undefined;
+        bestGenome: StrategyGenome;
     };
 }
 export default Selector;

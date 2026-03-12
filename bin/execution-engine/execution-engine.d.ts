@@ -8,16 +8,25 @@ interface SignalFingerprint {
 }
 export declare class ExecutionEngine {
     private readonly MIN_SIGNAL_CONFIDENCE;
+    private readonly MIN_MARKET_SIGNAL_CONFIDENCE;
     private readonly ORDER_COOLDOWN_MS;
     private readonly MIN_ORDER_COOLDOWN_MS;
+    private readonly FAILURE_COOLDOWN_BASE_MS;
+    private readonly FAILURE_COOLDOWN_MAX_MS;
+    private readonly MIN_ENTRY_NOTIONAL_USD;
     private readonly SIGNAL_DEDUP_WINDOW_MS;
     private readonly SIGNAL_PRICE_THRESHOLD;
     private readonly MAX_SIGNALS_PER_MINUTE;
     private readonly EXIT_PLAN_CHECK_INTERVAL_MS;
+    private orderStats;
     private lastOrderTime;
     private lastSignalFingerprint;
     private signalCountWindow;
+    private failureCooldownUntil;
+    private lastCancellationTime;
+    private readonly CANCELLATION_COOLDOWN_MS;
     private positionExitPlans;
+    private nativeStopOrders;
     private pendingManagedExitSymbols;
     private exitPlanMonitor;
     private isTestnet;
@@ -35,6 +44,9 @@ export declare class ExecutionEngine {
      * Check signal rate limiting (signals per minute)
      */
     private checkSignalRateLimit;
+    private applyFailureCooldown;
+    private clearFailureCooldown;
+    private classifyOrderFailure;
     /**
      * Update current price for a symbol (for portfolio valuation)
      */
@@ -42,6 +54,8 @@ export declare class ExecutionEngine {
     private isExitSignalForPosition;
     private registerManagedExitPlan;
     private clearManagedExitPlan;
+    private submitNativeStopOrders;
+    private cancelTrackedNativeStopOrders;
     private startExitPlanMonitor;
     private enforceManagedExitPlans;
     executeSignal(signal: TradingSignal, riskAssessment: RiskAssessment): Promise<Trade>;
@@ -80,10 +94,19 @@ export declare class ExecutionEngine {
      */
     getAntiChurnStats(): {
         cooldownActive: string[];
+        failureCooldownActive: string[];
+        cancellationCooldownActive: string[];
         recentSignals: Record<string, SignalFingerprint>;
         signalRateLimits: Record<string, {
             count: number;
             windowStart: number;
+        }>;
+        orderStats: Record<string, {
+            submitted: number;
+            filled: number;
+            cancelled: number;
+            fillRate: number;
+            cancelRatio: number;
         }>;
     };
 }

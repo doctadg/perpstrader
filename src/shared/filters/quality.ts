@@ -244,7 +244,7 @@ function calculateSimilarity(a: string, b: string): number {
  * Calculate Levenshtein distance between two strings
  */
 function levenshteinDistance(a: string, b: string): number {
-  const matrix = [];
+  const matrix: number[][] = [];
 
   for (let i = 0; i <= b.length; i++) {
     matrix[i] = [i];

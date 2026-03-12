@@ -5,6 +5,7 @@ import { EntityHeat } from '../../shared/types-enhanced';
 export interface EnhancedClusteringState {
     categorizedNews: NewsItem[];
     clusters: any[];
+    currentStep?: string;
     stats: {
         totalProcessed: number;
         newClusters: number;

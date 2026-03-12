@@ -147,7 +147,9 @@ class OptimizedCircuitBreakerSystem {
             const timeSinceOpen = breaker.openAt ? Date.now() - breaker.openAt.getTime() : 0;
             const backoffMs = this.calculateBackoff(breaker.recoveryAttempts);
             if (timeSinceOpen < backoffMs) {
-                metrics?.rejectedCalls++;
+                if (metrics) {
+                    metrics.rejectedCalls++;
+                }
                 logger_1.default.warn(`[CircuitBreaker] ${breakerName} is OPEN, blocking execution (backoff: ${backoffMs}ms)`);
                 if (fallback) {
                     return fallback();

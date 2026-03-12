@@ -14,6 +14,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const glm_service_1 = __importDefault(require("../../shared/glm-service"));
 const openrouter_service_1 = __importDefault(require("../../shared/openrouter-service"));
 const title_cleaner_1 = require("../../shared/title-cleaner");
+const human_title_formatter_1 = require("../../shared/human-title-formatter");
 const message_bus_1 = require("../../shared/message-bus");
 const entity_extraction_1 = __importDefault(require("./entity-extraction"));
 const heat_predictor_1 = __importDefault(require("./heat-predictor"));
@@ -102,7 +103,7 @@ async function enhancedStoryClusterNode(state) {
                     }
                 }
                 catch (error) {
-                    logger_1.default.debug(`[EnhancedClusterNode] GLM failed: ${error.message}`);
+                    logger_1.default.debug(`[EnhancedClusterNode] GLM failed: ${error instanceof Error ? error.message : String(error)}`);
                 }
             }));
         }
@@ -333,7 +334,7 @@ async function processArticleEnhanced(article, aiLabel, entities, useVectorMode,
         const newClusterId = crypto_1.default.randomUUID();
         const articleDate = article.publishedAt || new Date();
         const initialHeat = await story_cluster_store_enhanced_1.default.calculateEnhancedHeat(article, new Date(), 10);
-        const formattedTopic = (0, title_cleaner_1.validateAndFormatTopic)(topic, article.title);
+        const formattedTopic = (0, human_title_formatter_1.validateAndFormatTopic)(topic, article.title);
         await story_cluster_store_enhanced_1.default.upsertCluster({
             id: newClusterId,
             topic: formattedTopic,

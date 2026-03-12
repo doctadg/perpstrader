@@ -181,7 +181,7 @@ export class RiskManager {
     // 2. Daily Loss Limit Check
     const dailyLossCheck = this.checkDailyLossLimit(portfolioValue);
     if (!dailyLossCheck.allowed) {
-      warnings.push(dailyLossCheck.reason);
+      warnings.push(dailyLossCheck.reason!);
       approved = false;
     }
     
@@ -194,14 +194,14 @@ export class RiskManager {
     // 4. Cooldown Check
     const cooldownCheck = this.checkCooldown();
     if (!cooldownCheck.allowed) {
-      warnings.push(cooldownCheck.reason);
+      warnings.push(cooldownCheck.reason!);
       approved = false;
     }
     
     // 5. Portfolio Heat Check
     const heatCheck = this.checkPortfolioHeat(currentPositions, portfolioValue);
     if (!heatCheck.allowed) {
-      warnings.push(heatCheck.reason);
+      warnings.push(heatCheck.reason!);
       approved = false;
     }
     
@@ -215,7 +215,7 @@ export class RiskManager {
     if (this.config.enableCorrelationCheck) {
       const correlationCheck = this.checkCorrelation(idea, currentPositions);
       if (!correlationCheck.allowed) {
-        warnings.push(correlationCheck.reason);
+        warnings.push(correlationCheck.reason!);
         approved = false;
       }
     }

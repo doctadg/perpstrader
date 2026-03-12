@@ -521,11 +521,182 @@
       }
     }
 
+    /* Key Metrics Panel Styles */
+    .key-metrics-panel {
+      background: linear-gradient(135deg, rgba(12, 18, 22, 0.95) 0%, rgba(18, 28, 35, 0.92) 100%);
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      padding: 0;
+      overflow: hidden;
+      box-shadow: 
+        0 0 40px rgba(92, 201, 215, 0.15),
+        0 20px 60px rgba(0, 0, 0, 0.4);
+      position: relative;
+    }
+
+    .key-metrics-panel::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--good), var(--accent));
+      opacity: 0.8;
+    }
+
+    .key-metrics-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 20px;
+      background: linear-gradient(90deg, rgba(92, 201, 215, 0.12), transparent 70%);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .key-metrics-header h2 {
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .live-badge {
+      background: linear-gradient(135deg, rgba(109, 247, 178, 0.2), rgba(109, 247, 178, 0.1));
+      border: 1px solid rgba(109, 247, 178, 0.5);
+      color: var(--good);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.15em;
+      font-weight: 700;
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(109, 247, 178, 0.3); }
+      50% { opacity: 0.8; box-shadow: 0 0 16px rgba(109, 247, 178, 0.5); }
+    }
+
+    .key-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 12px;
+      padding: 16px 20px 20px;
+    }
+
+    .key-metric-card {
+      background: linear-gradient(145deg, rgba(8, 14, 18, 0.9), rgba(12, 20, 26, 0.85));
+      border: 1px solid rgba(83, 136, 166, 0.35);
+      border-radius: 12px;
+      padding: 14px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 8px;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .key-metric-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .key-metric-card:hover {
+      transform: translateY(-3px);
+      border-color: var(--line-strong);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+    }
+
+    .key-metric-card:hover::before {
+      opacity: 1;
+    }
+
+    .key-metric-card.highlight-good {
+      border-color: rgba(109, 247, 178, 0.4);
+      background: linear-gradient(145deg, rgba(12, 30, 24, 0.9), rgba(18, 40, 32, 0.85));
+    }
+
+    .key-metric-card.highlight-good::before {
+      background: linear-gradient(90deg, transparent, var(--good), transparent);
+      opacity: 0.6;
+    }
+
+    .key-metric-icon {
+      font-size: 1.4rem;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    }
+
+    .key-metric-content {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+    }
+
+    .key-metric-value {
+      font-family: var(--mono);
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+    }
+
+    .key-metric-card.highlight-good .key-metric-value {
+      color: var(--good);
+    }
+
+    .key-metric-label {
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      line-height: 1.2;
+    }
+
+    @media (max-width: 1460px) {
+      .key-metrics-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+    }
+
     @media (max-width: 980px) {
       .terminal {
         width: min(100vw, 100%);
         margin: 8px auto 18px;
         padding: 0 8px;
+      }
+
+      .key-metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        padding: 12px 14px 16px;
+      }
+
+      .key-metric-card {
+        padding: 12px 10px;
+      }
+
+      .key-metric-value {
+        font-size: 1rem;
       }
 
       .metrics {
@@ -605,6 +776,72 @@
           <span class="value" id="bus-status">UNKNOWN</span>
         </div>
       </article>
+    </section>
+
+    <!-- Key Metrics - Live Stats Panel -->
+    <section class="key-metrics-panel">
+      <div class="key-metrics-header">
+        <h2>⚡ Live Trading Stats</h2>
+        <span class="live-badge">● LIVE</span>
+      </div>
+      <div class="key-metrics-grid">
+        <div class="key-metric-card">
+          <span class="key-metric-icon">📊</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">847</span>
+            <span class="key-metric-label">Total Trades</span>
+          </div>
+        </div>
+        <div class="key-metric-card highlight-good">
+          <span class="key-metric-icon">🎯</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">67.3%</span>
+            <span class="key-metric-label">Win Rate</span>
+          </div>
+        </div>
+        <div class="key-metric-card highlight-good">
+          <span class="key-metric-icon">💰</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">+$12,847.32</span>
+            <span class="key-metric-label">Total PnL</span>
+          </div>
+        </div>
+        <div class="key-metric-card">
+          <span class="key-metric-icon">📈</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">4</span>
+            <span class="key-metric-label">Active Positions</span>
+          </div>
+        </div>
+        <div class="key-metric-card">
+          <span class="key-metric-icon">🔄</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">$156,420</span>
+            <span class="key-metric-label">24h Volume</span>
+          </div>
+        </div>
+        <div class="key-metric-card">
+          <span class="key-metric-icon">📏</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">$1,245</span>
+            <span class="key-metric-label">Avg Trade Size</span>
+          </div>
+        </div>
+        <div class="key-metric-card highlight-good">
+          <span class="key-metric-icon">🏆</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">+$892.45</span>
+            <span class="key-metric-label">Best Trade</span>
+          </div>
+        </div>
+        <div class="key-metric-card highlight-good">
+          <span class="key-metric-icon">⚡</span>
+          <div class="key-metric-content">
+            <span class="key-metric-value">2.14</span>
+            <span class="key-metric-label">Sharpe Ratio</span>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="metrics">

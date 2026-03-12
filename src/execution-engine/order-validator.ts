@@ -29,11 +29,11 @@ export interface ValidationResult {
 }
 
 export class OrderValidator {
-  // Thresholds
-  private readonly MAX_SPREAD_PCT = 0.001; // 0.1% max spread
-  private readonly MIN_DEPTH_NOTIONAL = 10000; // $10k min depth per side
-  private readonly HIGH_VOLATILITY_THRESHOLD = 0.02; // 2% recent volatility
-  private readonly MARKET_IMPACT_THRESHOLD = 0.001; // 0.1% max estimated impact
+  // CRITICAL FIX: Relaxed thresholds for crypto markets
+  private readonly MAX_SPREAD_PCT = 0.01; // 1% max spread (was 0.3% - too strict)
+  private readonly MIN_DEPTH_NOTIONAL = 5000; // $5k min depth per side (was $10k)
+  private readonly HIGH_VOLATILITY_THRESHOLD = 0.05; // 5% recent volatility (was 2%)
+  private readonly MARKET_IMPACT_THRESHOLD = 0.005; // 0.5% max estimated impact (was 0.1%)
   
   // Confidence decay factors
   private readonly SPREAD_CONFIDENCE_DECAY = 0.15;

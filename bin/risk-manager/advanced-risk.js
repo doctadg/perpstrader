@@ -46,17 +46,22 @@ class AdvancedRiskEngine {
     riskThresholds;
     riskHistory = [];
     maxHistorySize = 100;
+    HARD_DAILY_LOSS_LIMIT_USD = 50;
+    DAILY_LOSS_ALERT_1_USD = 40;
+    DAILY_LOSS_ALERT_2_USD = 45;
+    dailyLossAlert40Triggered = false;
+    dailyLossAlert45Triggered = false;
     constructor() {
         this.db = new better_sqlite3_1.default(process.env.DB_PATH || './data/trading.db');
         this.riskThresholds = {
             maxOverallRisk: 0.7,
             maxPositionRisk: 0.5,
-            maxLeverage: 40, // Increased from 5x to 40x for aggressive trading
+            maxLeverage: 20, // CRITICAL FIX: Reduced from 40x to 20x max leverage
             maxCorrelation: 0.8,
-            maxDailyLoss: 0.10, // Increased from 5% to 10%
-            stopLossThreshold: 0.022, // tighter default stop (~2.2%)
-            takeProfitThreshold: 0.075, // wider default target (~7.5%) for stronger R:R
-            maxPositionSize: 0.18 // reduce concentration when edge is uncertain
+            maxDailyLoss: this.HARD_DAILY_LOSS_LIMIT_USD, // absolute dollar breaker
+            stopLossThreshold: 0.008, // 0.8% stop
+            takeProfitThreshold: 0.032, // 3.2% target (1:4 baseline R:R)
+            maxPositionSize: 0.18
         };
         logger_1.default.info('Advanced Risk Engine initialized');
     }
@@ -276,23 +281,59 @@ Format as JSON with fields: type, level (0-1), message, recommendations[]`;
         const maxAllowed = availableCapital * this.riskThresholds.maxPositionSize;
         return Math.max(0, Math.min(maxAllowed, availableCapital * riskAdjusted));
     }
-    getStopLossLevel(entryPrice, isLong) {
-        const threshold = this.riskThresholds.stopLossThreshold;
-        if (isLong) {
-            return entryPrice * (1 - threshold);
+    getRequiredRiskRewardRatio(confidence = 0.5) {
+        if (confidence < 0.45) {
+            return 5.0;
         }
-        return entryPrice * (1 + threshold);
-    }
-    getTakeProfitLevel(entryPrice, isLong) {
-        const threshold = this.riskThresholds.takeProfitThreshold;
-        if (isLong) {
-            return entryPrice * (1 + threshold);
+        if (confidence < 0.60) {
+            return 4.0;
         }
-        return entryPrice * (1 - threshold);
+        return 3.0;
     }
-    checkDailyLoss(todayPnL, initialCapital) {
-        const lossRatio = Math.abs(todayPnL) / initialCapital;
-        return lossRatio >= this.riskThresholds.maxDailyLoss;
+    resolveRiskRewardThresholds(confidence = 0.5) {
+        let stopLossThreshold = this.riskThresholds.stopLossThreshold;
+        let takeProfitThreshold = this.riskThresholds.takeProfitThreshold;
+        const requiredRatio = this.getRequiredRiskRewardRatio(confidence);
+        if (confidence < 0.5) {
+            stopLossThreshold = Math.min(stopLossThreshold, 0.0075); // tighten for low-confidence setups
+        }
+        const minTakeProfitThreshold = stopLossThreshold * requiredRatio;
+        if (takeProfitThreshold < minTakeProfitThreshold) {
+            takeProfitThreshold = minTakeProfitThreshold;
+        }
+        const actualRatio = takeProfitThreshold / Math.max(stopLossThreshold, Number.EPSILON);
+        logger_1.default.info(`[AdvancedRisk][RR] confidence=${confidence.toFixed(2)} stop=${(stopLossThreshold * 100).toFixed(2)}% ` +
+            `target=${(takeProfitThreshold * 100).toFixed(2)}% actual=1:${actualRatio.toFixed(2)} required=1:${requiredRatio.toFixed(2)}`);
+        return { stopLossThreshold, takeProfitThreshold, actualRatio, requiredRatio };
+    }
+    getStopLossLevel(entryPrice, isLong, confidence = 0.5) {
+        const { stopLossThreshold } = this.resolveRiskRewardThresholds(confidence);
+        if (isLong) {
+            return entryPrice * (1 - stopLossThreshold);
+        }
+        return entryPrice * (1 + stopLossThreshold);
+    }
+    getTakeProfitLevel(entryPrice, isLong, confidence = 0.5) {
+        const { takeProfitThreshold } = this.resolveRiskRewardThresholds(confidence);
+        if (isLong) {
+            return entryPrice * (1 + takeProfitThreshold);
+        }
+        return entryPrice * (1 - takeProfitThreshold);
+    }
+    checkDailyLoss(todayPnL, _initialCapital) {
+        if (todayPnL <= -this.DAILY_LOSS_ALERT_1_USD && !this.dailyLossAlert40Triggered) {
+            this.dailyLossAlert40Triggered = true;
+            logger_1.default.error(`CRITICAL: Approaching daily loss breaker: PnL=$${todayPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_1_USD.toFixed(2)})`);
+        }
+        if (todayPnL <= -this.DAILY_LOSS_ALERT_2_USD && !this.dailyLossAlert45Triggered) {
+            this.dailyLossAlert45Triggered = true;
+            logger_1.default.error(`CRITICAL: Approaching daily loss breaker: PnL=$${todayPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_2_USD.toFixed(2)})`);
+        }
+        if (todayPnL <= -this.HARD_DAILY_LOSS_LIMIT_USD) {
+            logger_1.default.error(`CRITICAL: Circuit breaker triggered: PnL=$${todayPnL.toFixed(2)} <= -$${this.HARD_DAILY_LOSS_LIMIT_USD.toFixed(2)}`);
+            return true;
+        }
+        return false;
     }
     updateRiskThresholds(newThresholds) {
         this.riskThresholds = { ...this.riskThresholds, ...newThresholds };
