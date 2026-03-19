@@ -6,13 +6,15 @@ import hyperliquidClient from './hyperliquid-client';
 import orderValidator from './order-validator';
 import dataManager from '../data-manager/data-manager';
 import riskManager from '../risk-manager/risk-manager';
+import messageBus, { Channel, Message } from '../shared/message-bus';
+import { PaperPortfolioManager } from './paper-portfolio';
 
 // Track current prices for portfolio valuation
+const paperPortfolio = PaperPortfolioManager.getInstance();
 const currentPrices: Map<string, number> = new Map();
-// CRITICAL FIX: Lowered thresholds to allow more orders through
-// Market orders need lower threshold since they're time-sensitive
-const DEFAULT_MIN_SIGNAL_CONFIDENCE = 0.65;
-const DEFAULT_MIN_MARKET_SIGNAL_CONFIDENCE = 0.70;
+// ANTI-CHURN: Raised confidence thresholds to stop placing low-quality orders
+const DEFAULT_MIN_SIGNAL_CONFIDENCE = 0.60;
+const DEFAULT_MIN_MARKET_SIGNAL_CONFIDENCE = 0.65;
 const MAX_PRACTICAL_MIN_SIGNAL_CONFIDENCE = 0.80;
 const MAX_PRACTICAL_MIN_MARKET_SIGNAL_CONFIDENCE = 0.90;
 
@@ -102,6 +104,7 @@ interface ExecutionOrderStats {
 type OrderFailureCategory = 'CANCELLED' | 'REJECTED' | 'BLOCKED';
 
 const BLOCKED_ORDER_STATUSES = new Set([
+  'BLOCKED',
   'NO_WALLET',
   'CIRCUIT_BREAKER',
   'INVALID_SYMBOL',
@@ -166,9 +169,9 @@ export class ExecutionEngine {
     return Math.max(this.MIN_SIGNAL_CONFIDENCE, configured);
   })();
   
-  // CRITICAL FIX: Reduced cooldowns to match hyperliquid-client for consistency
-  private readonly ORDER_COOLDOWN_MS = 10000; // 10 seconds (reduced from 10 min - was too aggressive)
-  private readonly MIN_ORDER_COOLDOWN_MS = 5000; // 5 seconds minimum between any orders
+  // ANTI-CHURN: 30s cooldown between same-coin orders to prevent churn
+  private readonly ORDER_COOLDOWN_MS = 30000; // 30 seconds minimum between same-coin orders
+  private readonly MIN_ORDER_COOLDOWN_MS = 10000; // 10 seconds minimum between any orders
   private readonly FAILURE_COOLDOWN_BASE_MS = parsePositiveIntEnv(
     'EXECUTION_FAILURE_COOLDOWN_BASE_MS',
     15000
@@ -196,12 +199,20 @@ export class ExecutionEngine {
   private signalCountWindow: Map<string, { count: number; windowStart: number }> = new Map();
   private failureCooldownUntil: Map<string, number> = new Map();
   private lastCancellationTime: Map<string, number> = new Map(); // Track cancellations
-  private readonly CANCELLATION_COOLDOWN_MS = 5000; // 5-second cooldown after any cancellation
+  // ANTI-CHURN: 2-minute cooldown after cancellation before re-placing
+  private readonly CANCELLATION_COOLDOWN_MS = 120000; // 2 minutes after cancellation
+  private hourlyOrderAttempts: Map<string, { count: number; windowStart: number }> = new Map();
+  private readonly MAX_ORDERS_PER_COIN_PER_HOUR = 3;
   private positionExitPlans: Map<string, ManagedExitPlan> = new Map();
   private nativeStopOrders: Map<string, NativeStopOrderTracking> = new Map();
   private pendingManagedExitSymbols: Set<string> = new Set();
   private exitPlanMonitor: NodeJS.Timeout | null = null;
   private isTestnet: boolean;
+
+  // Message bus price subscription state (singleton guard)
+  private static priceSubscriptionInitialized = false;
+  private marketDataHandler: ((msg: Message<{ symbol: string; price: number }>) => void) | null = null;
+  private orderBookHandler: ((msg: Message<{ symbol: string; midPrice: number }>) => void) | null = null;
 
   constructor() {
     const hyperliquidConfig = config.getSection('hyperliquid');
@@ -217,6 +228,7 @@ export class ExecutionEngine {
     // Initialize the Hyperliquid client asynchronously
     this.initializeClient();
     this.startExitPlanMonitor();
+    this.subscribeToMarketPrices();
   }
 
   private async initializeClient(): Promise<void> {
@@ -233,6 +245,57 @@ export class ExecutionEngine {
     } catch (error) {
       logger.error('Failed to initialize Hyperliquid client:', error);
     }
+  }
+
+  /**
+   * Subscribe to MARKET_DATA and ORDER_BOOK_UPDATE channels to keep
+   * currentPrices fresh for SL/TP exit monitoring. Uses a static flag
+   * so the singleton never double-subscribes.
+   */
+  private subscribeToMarketPrices(): void {
+    if (ExecutionEngine.priceSubscriptionInitialized) {
+      logger.debug('[ExecutionEngine] Market price subscriptions already active, skipping');
+      return;
+    }
+    ExecutionEngine.priceSubscriptionInitialized = true;
+
+    // MARKET_DATA: { symbol, price, timestamp } — from ingester trades & order books
+    this.marketDataHandler = (msg: Message<{ symbol: string; price: number }>) => {
+      const { symbol, price } = msg.data;
+      if (symbol && Number.isFinite(price) && price > 0) {
+        currentPrices.set(symbol, price);
+      }
+    };
+    void messageBus.subscribe(Channel.MARKET_DATA, this.marketDataHandler);
+
+    // ORDER_BOOK_UPDATE: { symbol, midPrice, ... } — more granular from order book
+    this.orderBookHandler = (msg: Message<{ symbol: string; midPrice: number }>) => {
+      const { symbol, midPrice } = msg.data;
+      if (symbol && Number.isFinite(midPrice) && midPrice > 0) {
+        currentPrices.set(symbol, midPrice);
+      }
+    };
+    void messageBus.subscribe(Channel.ORDER_BOOK_UPDATE, this.orderBookHandler);
+
+    logger.info('[ExecutionEngine] Subscribed to MARKET_DATA and ORDER_BOOK_UPDATE for live price tracking');
+  }
+
+  /**
+   * Unsubscribe from market price channels (call on shutdown)
+   */
+  async unsubscribeFromMarketPrices(): Promise<void> {
+    const promises: Promise<void>[] = [];
+    if (this.marketDataHandler) {
+      promises.push(messageBus.unsubscribe(Channel.MARKET_DATA, this.marketDataHandler));
+      this.marketDataHandler = null;
+    }
+    if (this.orderBookHandler) {
+      promises.push(messageBus.unsubscribe(Channel.ORDER_BOOK_UPDATE, this.orderBookHandler));
+      this.orderBookHandler = null;
+    }
+    ExecutionEngine.priceSubscriptionInitialized = false;
+    await Promise.all(promises);
+    logger.info('[ExecutionEngine] Unsubscribed from MARKET_DATA and ORDER_BOOK_UPDATE');
   }
 
   /**
@@ -598,6 +661,91 @@ export class ExecutionEngine {
   }
 
   private async enforceManagedExitPlans(): Promise<void> {
+    // Paper trading branch: check paper portfolio positions against exit plans
+    if (!hyperliquidClient.isConfigured() && process.env.PAPER_TRADING === 'true') {
+      if (this.positionExitPlans.size === 0) return;
+      try {
+        const paperPositions = paperPortfolio.getPositions();
+        const activeSymbols = new Set<string>();
+
+        for (const position of paperPositions) {
+          const symbolKey = position.symbol.toUpperCase();
+          activeSymbols.add(symbolKey);
+
+          const plan = this.positionExitPlans.get(symbolKey);
+          if (!plan) continue;
+          if (this.pendingManagedExitSymbols.has(symbolKey)) continue;
+
+          // Check if position side matches plan (paper portfolio may track differently)
+          const entryPrice = plan.entryPrice;
+          if (!Number.isFinite(entryPrice) || entryPrice <= 0) continue;
+
+          const currentPrice = currentPrices.get(position.symbol) || position.entryPrice || 0;
+          if (currentPrice <= 0) continue;
+
+          const pnlPct = plan.side === 'LONG'
+            ? (currentPrice - entryPrice) / entryPrice
+            : (entryPrice - currentPrice) / entryPrice;
+
+          const stopLossTriggerPct = Math.max(0.001, plan.stopLossPct);
+          const takeProfitTriggerPct = plan.takeProfitPct;
+
+          let exitReason: string | null = null;
+          if (pnlPct <= -stopLossTriggerPct) {
+            exitReason = `paper stop-loss hit (${(pnlPct * 100).toFixed(2)}% <= -${(stopLossTriggerPct * 100).toFixed(2)}%)`;
+          } else if (pnlPct >= takeProfitTriggerPct) {
+            exitReason = `paper take-profit hit (${(pnlPct * 100).toFixed(2)}% >= ${(takeProfitTriggerPct * 100).toFixed(2)}%)`;
+          }
+
+          if (!exitReason) continue;
+
+          this.pendingManagedExitSymbols.add(symbolKey);
+          try {
+            logger.warn(`[PaperExit] ${symbolKey}: ${exitReason}`);
+
+            const closeSignal: TradingSignal = {
+              id: `paper-exit-${Date.now()}`,
+              symbol: position.symbol,
+              action: plan.side === 'LONG' ? 'SELL' : 'BUY',
+              size: Math.abs(position.size),
+              price: currentPrice,
+              type: 'MARKET',
+              timestamp: new Date(),
+              confidence: 1.0,
+              strategyId: 'risk-managed-exit',
+              reason: `Paper managed exit: ${exitReason}`,
+            };
+
+            const closeRiskAssessment: RiskAssessment = {
+              approved: true,
+              suggestedSize: Math.abs(position.size),
+              riskScore: 0,
+              warnings: ['Paper managed exit'],
+              stopLoss: 0,
+              takeProfit: 0,
+              leverage: 1,
+            };
+
+            await this.executeSignal(closeSignal, closeRiskAssessment);
+          } catch (error) {
+            logger.error(`[PaperExit] Failed for ${position.symbol}:`, error);
+          } finally {
+            this.pendingManagedExitSymbols.delete(symbolKey);
+          }
+        }
+
+        // Clean up plans for positions no longer open
+        for (const symbolKey of Array.from(this.positionExitPlans.keys())) {
+          if (!activeSymbols.has(symbolKey)) {
+            this.positionExitPlans.delete(symbolKey);
+          }
+        }
+      } catch (error) {
+        logger.error('[PaperExit] Monitor failed:', error);
+      }
+      return;
+    }
+
     if (
       !hyperliquidClient.isConfigured()
       || (this.positionExitPlans.size === 0 && this.nativeStopOrders.size === 0)
@@ -717,6 +865,70 @@ export class ExecutionEngine {
     const symbolKey = signal.symbol.toUpperCase();
     const now = Date.now();
 
+    // PAPER TRADING MODE: bypass Hyperliquid entirely
+    if (process.env.PAPER_TRADING === 'true') {
+      logger.info(
+        `[PAPER] Executing ${signal.action} ${signal.size} ${signal.symbol} @ ${signal.price} (confidence: ${signal.confidence?.toFixed(2)})`
+      );
+
+      if (signal.price) {
+        currentPrices.set(signal.symbol, signal.price);
+      }
+
+      const trade = await paperPortfolio.executeTrade(
+        signal.symbol,
+        signal.action as 'BUY' | 'SELL',
+        signal.size,
+        signal.price || currentPrices.get(signal.symbol) || 0,
+        signal.strategyId
+      );
+
+      // Register managed exit plan for paper entries (SL/TP monitoring)
+      if (trade.status === 'FILLED' && trade.entryExit === 'ENTRY') {
+        const entryPrice = trade.price > 0 ? trade.price : (signal.price || 0);
+        const entrySide: 'LONG' | 'SHORT' = signal.action === 'BUY' ? 'LONG' : 'SHORT';
+        this.registerManagedExitPlan(
+          signal.symbol,
+          entrySide,
+          entryPrice,
+          riskAssessment.stopLoss,
+          riskAssessment.takeProfit
+        );
+        try {
+          const rm = require('../risk-manager/risk-manager').default;
+          rm.registerPositionOpen(signal.symbol, entrySide, riskAssessment.stopLoss);
+        } catch (_) { /* non-critical */ }
+        logger.info(`[PAPER] Registered managed exit plan for ${signal.symbol}: SL=${riskAssessment.stopLoss}, TP=${riskAssessment.takeProfit}`);
+      }
+
+      // Persist paper trade to database (skip cancelled/rejected)
+      try {
+        if (trade.status === 'FILLED' || trade.status === 'PARTIAL') {
+          await dataManager.saveTrade(trade);
+        }
+      } catch (dbErr) {
+        logger.warn('[PaperPortfolio] Failed to persist trade:', dbErr);
+      }
+
+      // Feed trade result to safety monitor for breaker evaluation
+      try {
+        const { safetyMonitor } = require('../shared/circuit-breaker');
+        if (trade.pnl !== undefined && trade.pnl !== null) {
+          safetyMonitor.recordTrade({
+            symbol: trade.symbol,
+            pnl: trade.pnl,
+            timestamp: trade.timestamp,
+            id: trade.id,
+          });
+        }
+      } catch (_) { /* non-critical */ }
+
+      logger.info(
+        `[PAPER] ${trade.entryExit} ${trade.side} ${trade.size.toFixed(4)} ${trade.symbol} @ ${trade.price.toFixed(2)} PnL: $${trade.pnl.toFixed(2)}`
+      );
+      return trade;
+    }
+
     try {
       if (signal.action === 'HOLD') {
         throw new Error('Cannot execute HOLD signal');
@@ -765,7 +977,16 @@ export class ExecutionEngine {
           throw new Error(cooldownMessage);
         }
 
-        // CRITICAL FIX: 5-second cooldown after any cancellation
+        // ANTI-CHURN: Hourly attempt limit per coin (max 3 per hour)
+        const hourlyAttempts = this.hourlyOrderAttempts.get(symbolKey);
+        if (hourlyAttempts && now - hourlyAttempts.windowStart < 3600000 && hourlyAttempts.count >= this.MAX_ORDERS_PER_COIN_PER_HOUR) {
+          const remainingMin = Math.ceil((3600000 - (now - hourlyAttempts.windowStart)) / 60000);
+          const hourlyMessage = `Hourly order limit reached for ${signal.symbol}: ${hourlyAttempts.count}/${this.MAX_ORDERS_PER_COIN_PER_HOUR}. Retry in ${remainingMin}min`;
+          logger.warn(`[ExecutionEngine] [ChurnPrevention] ${hourlyMessage}`);
+          throw new Error(hourlyMessage);
+        }
+
+        // ANTI-CHURN: 2-minute cooldown after any cancellation
         const lastCancelTime = this.lastCancellationTime.get(symbolKey) || 0;
         if (lastCancelTime > 0 && now - lastCancelTime < this.CANCELLATION_COOLDOWN_MS) {
           const remainingSec = Math.ceil((this.CANCELLATION_COOLDOWN_MS - (now - lastCancelTime)) / 1000);
@@ -927,6 +1148,15 @@ export class ExecutionEngine {
       // Record order time and signal fingerprint BEFORE execution to prevent race conditions
       this.lastOrderTime.set(symbolKey, now);
       this.lastSignalFingerprint.set(symbolKey, signalFingerprint);
+      // Track hourly attempt count
+      if (!isExitOrder) {
+        const existing = this.hourlyOrderAttempts.get(symbolKey);
+        if (!existing || now - existing.windowStart >= 3600000) {
+          this.hourlyOrderAttempts.set(symbolKey, { count: 1, windowStart: now });
+        } else {
+          existing.count++;
+        }
+      }
 
       const result = await hyperliquidClient.placeOrder({
         symbol: signal.symbol,
@@ -953,15 +1183,22 @@ export class ExecutionEngine {
       const orderFilled = result.success && result.status === 'FILLED';
       const orderResting = result.success && (result.status === 'RESTING' || result.status === 'PENDING');
 
+      const tradeSize = orderFilled ? (result.filledSize || adjustedSize) : adjustedSize;
+      const tradePrice = orderFilled ? (result.filledPrice || signal.price || 0) : (signal.price || 0);
+
       const trade: Trade = {
         id: uuidv4(),
         strategyId: signal.strategyId,
         symbol: signal.symbol,
         side: signal.action as 'BUY' | 'SELL',
-        size: orderFilled ? (result.filledSize || adjustedSize) : adjustedSize,
-        price: orderFilled ? (result.filledPrice || signal.price || 0) : (signal.price || 0),
+        size: tradeSize,
+        price: tradePrice,
         fee: 0,
-        pnl: 0,
+        pnl: isExitOrder && openPosition
+          ? (openPosition.side === 'LONG'
+            ? (tradePrice - openPosition.entryPrice) * tradeSize
+            : (openPosition.entryPrice - tradePrice) * tradeSize)
+          : 0,
         timestamp: new Date(),
         type: signal.type,
         status: orderFilled ? 'FILLED' : (orderResting ? 'PARTIAL' : 'CANCELLED'),
@@ -1024,6 +1261,10 @@ export class ExecutionEngine {
             `[ExecutionEngine] Order accepted but not yet filled (${result.status}) for ${signal.symbol}; ` +
             `keeping lifecycle in pending state`
           );
+          // Persist partial trade to database for Dashboard (skip cancelled)
+          if (orderResting) {
+            await dataManager.saveTrade(trade);
+          }
         }
       } else {
         const failureCategory = this.classifyOrderFailure(result.status, result.error);

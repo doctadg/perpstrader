@@ -2,7 +2,7 @@
 // Critical for ensuring position accuracy and preventing orphaned positions
 
 import logger from '../../shared/logger';
-import predictionStore from '../../data/prediction-store';
+import predictionStore from '../data/prediction-store';
 import { PredictionPosition, PredictionMarket } from '../../shared/types';
 import { polymarketGammaClient } from './resilient-api-client';
 

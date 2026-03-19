@@ -11,7 +11,8 @@ ExecStart=/home/d/.nvm/versions/node/v22.22.0/bin/node /home/d/PerpsTrader/bin/n
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-Environment=SEARCH_API_URL=http://localhost:8000/api/v1
+Environment=SEARCH_API_URL=http://localhost:8888
+Environment=SEARXNG_URL=http://localhost:8888
 Environment=PATH=/usr/bin:/home/d/.local/bin
 
 # Logging

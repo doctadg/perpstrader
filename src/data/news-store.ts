@@ -268,15 +268,13 @@ class NewsStore {
           let publishedAtIso: string | null = null;
           if (article.publishedAt instanceof Date && !isNaN(article.publishedAt.getTime())) {
             publishedAtIso = article.publishedAt.toISOString();
-          } else if (typeof article.publishedAt === 'string' && article.publishedAt.length > 0) {
-            publishedAtIso = article.publishedAt;
+          } else if (String(article.publishedAt).length > 0) {
+            publishedAtIso = String(article.publishedAt);
           }
           
           let scrapedAtIso: string;
           if (article.scrapedAt instanceof Date && !isNaN(article.scrapedAt.getTime())) {
             scrapedAtIso = article.scrapedAt.toISOString();
-          } else if (typeof article.scrapedAt === 'string' && article.scrapedAt.length > 0) {
-            scrapedAtIso = article.scrapedAt;
           } else {
             scrapedAtIso = new Date().toISOString();
           }
@@ -284,8 +282,6 @@ class NewsStore {
           let createdAtIso: string;
           if (article.createdAt instanceof Date && !isNaN(article.createdAt.getTime())) {
             createdAtIso = article.createdAt.toISOString();
-          } else if (typeof article.createdAt === 'string' && article.createdAt.length > 0) {
-            createdAtIso = article.createdAt;
           } else {
             createdAtIso = new Date().toISOString();
           }

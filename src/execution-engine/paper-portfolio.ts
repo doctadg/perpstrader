@@ -110,6 +110,13 @@ export class PaperPortfolioManager {
     }
 
     /**
+     * Get all open paper positions (for managed exit monitoring)
+     */
+    getPositions(): PaperPosition[] {
+        return Array.from(this.positions.values());
+    }
+
+    /**
      * Execute a paper trade
      */
     async executeTrade(

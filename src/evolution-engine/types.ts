@@ -41,8 +41,10 @@ export interface StrategyParameters {
 
 export interface StrategyGenome {
   id: string;
+  strategyId?: string;
   parentIds: string[];
   generation: number;
+  mutationType?: string;
   parameters: StrategyParameters;
   fitness?: number;
   sharpeRatio?: number;

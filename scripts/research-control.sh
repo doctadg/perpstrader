@@ -175,16 +175,114 @@ show_stats() {
 
 # Function to trigger manual research cycle
 trigger_research() {
-    print_status $BLUE "🔄 Triggering manual research cycle..."
-    # This would require IPC or API endpoint - placeholder for now
-    print_status $YELLOW "⚠️  Manual trigger not yet implemented (requires API endpoint)"
+    print_status $BLUE "Triggering manual research cycle..."
+    redis-cli -p 6380 PUBLISH "research:autoresearch:trigger" '{"type":"manual","source":"cli"}' > /dev/null 2>&1
+    print_status $GREEN "Research cycle triggered via Redis"
 }
 
 # Function to trigger manual evolution cycle
 trigger_evolution() {
-    print_status $BLUE "🧬 Triggering manual evolution cycle..."
-    # This would require IPC or API endpoint - placeholder for now
-    print_status $YELLOW "⚠️  Manual trigger not yet implemented (requires API endpoint)"
+    print_status $BLUE "Triggering manual evolution cycle..."
+    redis-cli -p 6380 PUBLISH "research:autoresearch:trigger" '{"type":"evolution","source":"cli"}' > /dev/null 2>&1
+    print_status $GREEN "Evolution cycle triggered via Redis"
+}
+
+# ─── AutoResearch Bridge ──────────────────────────────────────────────
+
+# Function to show autoresearch bridge status
+show_autoresearch_status() {
+    print_status $BLUE "AutoResearch Bridge Status"
+    echo "===================================="
+    printf "%-30s %s\n" "Component" "Status"
+    printf "%-30s %s\n" "------------------------------" "------"
+    printf "%-30s %s\n" "perps-autoresearch (systemd)" "$(check_service perps-autoresearch)"
+    printf "%-30s %s\n" "Python bridge_client.py" "$([ -f /home/d/autoresearch/bridge_client.py ] && echo 'EXISTS' || echo 'MISSING')"
+    printf "%-30s %s\n" "Python experiment.py" "$([ -f /home/d/autoresearch/experiment.py ] && echo 'EXISTS' || echo 'MISSING')"
+    printf "%-30s %s\n" "Redis (6380)" "$(redis-cli -p 6380 ping 2>/dev/null || echo 'DOWN')"
+    echo ""
+
+    if systemctl is-active --quiet perps-autoresearch 2>/dev/null; then
+        print_status $GREEN "AutoResearch bridge is active"
+        echo ""
+        echo "Experiment stats:"
+        redis-cli -p 6380 GET "research:autoresearch:stats" 2>/dev/null || echo "  (no stats published yet)"
+    else
+        print_status $YELLOW "AutoResearch bridge is not running"
+        echo ""
+        echo "Start with: $0 autoresearch start"
+    fi
+}
+
+# Function to start autoresearch bridge
+start_autoresearch() {
+    print_status $BLUE "Starting AutoResearch bridge..."
+    sudo mkdir -p /var/log/perps-trader
+    sudo chown d:d /var/log/perps-trader
+    sudo cp "$PROJECT_DIR/perps-autoresearch.service" /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl start perps-autoresearch
+    sleep 2
+    if systemctl is-active --quiet perps-autoresearch; then
+        print_status $GREEN "AutoResearch bridge started"
+    else
+        print_status $RED "Failed to start AutoResearch bridge"
+        echo "Check: journalctl -u perps-autoresearch -n 20"
+    fi
+}
+
+# Function to stop autoresearch bridge
+stop_autoresearch() {
+    print_status $YELLOW "Stopping AutoResearch bridge..."
+    sudo systemctl stop perps-autoresearch 2>/dev/null
+    if ! systemctl is-active --quiet perps-autoresearch 2>/dev/null; then
+        print_status $GREEN "AutoResearch bridge stopped"
+    else
+        print_status $RED "Failed to stop AutoResearch bridge"
+    fi
+}
+
+# Function to restart autoresearch bridge
+restart_autoresearch() {
+    stop_autoresearch
+    sleep 1
+    start_autoresearch
+}
+
+# Function to show autoresearch logs
+autoresearch_logs() {
+    print_status $BLUE "AutoResearch bridge logs (Ctrl+C to exit)..."
+    journalctl -u perps-autoresearch -f
+}
+
+# Function to show autoresearch experiment stats
+show_autoresearch_stats() {
+    print_status $BLUE "AutoResearch Experiment Statistics"
+    echo "=========================================="
+
+    local db_path="/home/d/PerpsTrader/data/trading.db"
+    if [ -f "$db_path" ]; then
+        echo "Database: $db_path"
+        echo ""
+        local total=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM autoresearch_experiments;" 2>/dev/null || echo "N/A")
+        echo "Total experiments: $total"
+        local completed=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM autoresearch_experiments WHERE status='completed';" 2>/dev/null || echo "N/A")
+        echo "Completed: $completed"
+        local adopted=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM autoresearch_experiments WHERE result='adopted';" 2>/dev/null || echo "N/A")
+        echo "Adopted: $adopted"
+        local discarded=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM autoresearch_experiments WHERE result='discarded';" 2>/dev/null || echo "N/A")
+        echo "Discarded: $discarded"
+        local best=$(sqlite3 "$db_path" "SELECT metrics FROM autoresearch_experiments WHERE status='completed' ORDER BY json_extract(metrics, '$.sharpe_ratio') DESC LIMIT 1;" 2>/dev/null || echo "N/A")
+        echo "Best metrics: $best"
+    else
+        echo "Database not found at $db_path"
+    fi
+}
+
+# Function to trigger a single autoresearch experiment
+trigger_autoresearch_experiment() {
+    print_status $BLUE "Triggering AutoResearch experiment..."
+    redis-cli -p 6380 PUBLISH "research:autoresearch:trigger" "{\"type\":\"experiment\",\"params\":${2:-'{}'},\"source\":\"cli\"}" > /dev/null 2>&1
+    print_status $GREEN "Experiment triggered via Redis"
 }
 
 # Function to show help
@@ -193,22 +291,32 @@ show_help() {
     echo "Usage: $0 [COMMAND]"
     echo ""
     echo "Commands:"
-    echo "  status       Show research engine status"
-    echo "  start        Start the research engine"
-    echo "  stop         Stop the research engine"
-    echo "  restart      Restart the research engine"
-    echo "  logs         Show research engine logs"
-    echo "  enable       Enable research engine on boot"
-    echo "  disable      Disable research engine from boot"
-    echo "  stats        Show research engine statistics"
-    echo "  research     Trigger manual research cycle"
-    echo "  evolution    Trigger manual evolution cycle"
-    echo "  help         Show this help message"
+    echo "  status              Show research engine status"
+    echo "  start               Start the research engine"
+    echo "  stop                Stop the research engine"
+    echo "  restart             Restart the research engine"
+    echo "  logs                Show research engine logs"
+    echo "  enable              Enable research engine on boot"
+    echo "  disable             Disable research engine from boot"
+    echo "  stats               Show research engine statistics"
+    echo "  research            Trigger manual research cycle"
+    echo "  evolution           Trigger manual evolution cycle"
+    echo ""
+    echo "AutoResearch Bridge Commands:"
+    echo "  autoresearch status     Show autoresearch bridge status"
+    echo "  autoresearch start      Start the autoresearch bridge service"
+    echo "  autoresearch stop       Stop the autoresearch bridge service"
+    echo "  autoresearch restart    Restart the autoresearch bridge service"
+    echo "  autoresearch logs       Show autoresearch bridge logs"
+    echo "  autoresearch stats      Show experiment statistics"
+    echo "  autoresearch trigger    Trigger a single experiment"
     echo ""
     echo "Examples:"
-    echo "  $0 status    # Show current status"
-    echo "  $0 start     # Start the research engine"
-    echo "  $0 logs      # View logs in real-time"
+    echo "  $0 status               # Show current status"
+    echo "  $0 start                # Start the research engine"
+    echo "  $0 autoresearch start   # Start the autoresearch bridge"
+    echo "  $0 autoresearch trigger # Trigger a single experiment"
+    echo "  $0 logs                 # View logs in real-time"
 }
 
 # Main script logic
@@ -242,6 +350,35 @@ case "${1:-status}" in
         ;;
     "evolution")
         trigger_evolution
+        ;;
+    "autoresearch")
+        case "${2:-status}" in
+            "status")
+                show_autoresearch_status
+                ;;
+            "start")
+                start_autoresearch
+                ;;
+            "stop")
+                stop_autoresearch
+                ;;
+            "restart")
+                restart_autoresearch
+                ;;
+            "logs")
+                autoresearch_logs
+                ;;
+            "stats")
+                show_autoresearch_stats
+                ;;
+            "trigger")
+                trigger_autoresearch_experiment "$3"
+                ;;
+            *)
+                echo "Unknown autoresearch command: ${2:-}"
+                echo "Usage: $0 autoresearch [status|start|stop|restart|logs|stats|trigger]"
+                ;;
+        esac
         ;;
     "help"|*)
         show_help

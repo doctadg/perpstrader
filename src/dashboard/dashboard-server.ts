@@ -135,7 +135,7 @@ class DashboardServer {
       // Broadcast to clients
       this.io.emit('news_hot_clusters', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
@@ -146,7 +146,7 @@ class DashboardServer {
       // Broadcast new articles to clients
       this.io.emit('news_categorized', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
@@ -161,7 +161,7 @@ class DashboardServer {
       // Broadcast anomaly alerts to clients
       this.io.emit('anomaly_detected', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
@@ -172,7 +172,7 @@ class DashboardServer {
       // Broadcast predictions to clients
       this.io.emit('prediction_generated', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
@@ -183,7 +183,7 @@ class DashboardServer {
       // Broadcast cross-category links to clients
       this.io.emit('cross_category_linked', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
@@ -194,7 +194,7 @@ class DashboardServer {
       // Broadcast trending entities to clients
       this.io.emit('entity_trending', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
@@ -205,7 +205,7 @@ class DashboardServer {
       // Broadcast engagement updates to clients
       this.io.emit('user_engagement', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
@@ -216,73 +216,73 @@ class DashboardServer {
       // Broadcast quality metrics to clients
       this.io.emit('quality_metric', {
         timestamp: new Date(),
-        ...(message.data || {}),
+        ...((message.data || {}) as any),
       });
     });
 
     // Subscribe to trading cycle events
     await messageBus.subscribe(Channel.CYCLE_START, (message) => {
       logger.debug('[Dashboard] Trading cycle started:', message.data);
-      this.io.emit('cycle_start', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('cycle_start', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     await messageBus.subscribe(Channel.CYCLE_COMPLETE, (message) => {
       logger.debug('[Dashboard] Trading cycle completed:', message.data);
-      this.io.emit('cycle_complete', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('cycle_complete', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     await messageBus.subscribe(Channel.CYCLE_ERROR, (message) => {
       logger.warn('[Dashboard] Trading cycle error:', message.data);
-      this.io.emit('cycle_error', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('cycle_error', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     // Subscribe to execution events
     await messageBus.subscribe(Channel.EXECUTION_FILLED, (message) => {
       logger.info('[Dashboard] Execution filled:', message.data);
-      this.io.emit('execution_filled', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('execution_filled', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     await messageBus.subscribe(Channel.EXECUTION_FAILED, (message) => {
       logger.warn('[Dashboard] Execution failed:', message.data);
-      this.io.emit('execution_failed', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('execution_failed', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     // Subscribe to position events
     await messageBus.subscribe(Channel.POSITION_OPENED, (message) => {
       logger.info('[Dashboard] Position opened:', message.data);
-      this.io.emit('position_opened', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('position_opened', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     await messageBus.subscribe(Channel.POSITION_CLOSED, (message) => {
       logger.info('[Dashboard] Position closed:', message.data);
-      this.io.emit('position_closed', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('position_closed', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     // Subscribe to risk events
     await messageBus.subscribe(Channel.CIRCUIT_BREAKER_OPEN, (message) => {
       logger.warn('[Dashboard] Circuit breaker opened:', message.data);
-      this.io.emit('circuit_breaker_open', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('circuit_breaker_open', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     await messageBus.subscribe(Channel.CIRCUIT_BREAKER_CLOSED, (message) => {
       logger.info('[Dashboard] Circuit breaker closed:', message.data);
-      this.io.emit('circuit_breaker_closed', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('circuit_breaker_closed', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     // Subscribe to pump.fun events
     messageBus.subscribe('pumpfun:cycle:start', (message) => {
       logger.info('[Dashboard] pump.fun cycle started:', message.data);
-      this.io.emit('pumpfun_cycle_start', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('pumpfun_cycle_start', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('pumpfun:cycle:complete', (message) => {
       logger.info('[Dashboard] pump.fun cycle completed:', message.data);
-      this.io.emit('pumpfun_cycle_complete', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('pumpfun_cycle_complete', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('pumpfun:high:confidence', (message) => {
       logger.info('[Dashboard] pump.fun high confidence token discovered:', message.data);
-      this.io.emit('pumpfun_high_confidence', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('pumpfun_high_confidence', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     // =========================================================================
@@ -291,36 +291,36 @@ class DashboardServer {
 
     messageBus.subscribe('research:idea', (message) => {
       logger.debug('[Dashboard] Research idea generated:', message.data);
-      this.io.emit('research:idea', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('research:idea', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('research:backtest:start', (message) => {
       logger.debug('[Dashboard] Backtest started:', message.data);
-      this.io.emit('research:backtest:start', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('research:backtest:start', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('research:backtest:progress', (message) => {
-      this.io.emit('research:backtest:progress', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('research:backtest:progress', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('research:backtest:complete', (message) => {
       logger.debug('[Dashboard] Backtest completed:', message.data);
-      this.io.emit('research:backtest:complete', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('research:backtest:complete', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('research:generation', (message) => {
       logger.debug('[Dashboard] New generation:', message.data);
-      this.io.emit('research:generation', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('research:generation', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('research:regime', (message) => {
       logger.debug('[Dashboard] Market regime update:', message.data);
-      this.io.emit('research:regime', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('research:regime', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('research:leaderboard:update', (message) => {
       logger.debug('[Dashboard] Leaderboard update:', message.data);
-      this.io.emit('research:leaderboard:update', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('research:leaderboard:update', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     // =========================================================================
@@ -329,47 +329,47 @@ class DashboardServer {
 
     messageBus.subscribe('safekeeping:cycle:start', (message) => {
       logger.info('[Dashboard] Safekeeping cycle started:', message.data);
-      this.io.emit('safekeeping:cycle:start', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:cycle:start', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:cycle:complete', (message) => {
       logger.info('[Dashboard] Safekeeping cycle completed:', message.data);
-      this.io.emit('safekeeping:cycle:complete', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:cycle:complete', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:cycle:stop', (message) => {
       logger.info('[Dashboard] Safekeeping cycle stopped:', message.data);
-      this.io.emit('safekeeping:cycle:stop', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:cycle:stop', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:cycle:error', (message) => {
       logger.warn('[Dashboard] Safekeeping cycle error:', message.data);
-      this.io.emit('safekeeping:cycle:error', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:cycle:error', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:execution:submit', (message) => {
       logger.info('[Dashboard] Safekeeping execution submitted:', message.data);
-      this.io.emit('safekeeping:execution:submit', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:execution:submit', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:execution:complete', (message) => {
       logger.info('[Dashboard] Safekeeping execution completed:', message.data);
-      this.io.emit('safekeeping:execution:complete', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:execution:complete', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:position:opened', (message) => {
       logger.info('[Dashboard] Safekeeping position opened:', message.data);
-      this.io.emit('safekeeping:position:opened', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:position:opened', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:position:closed', (message) => {
       logger.info('[Dashboard] Safekeeping position closed:', message.data);
-      this.io.emit('safekeeping:position:closed', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:position:closed', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     messageBus.subscribe('safekeeping:emergency:halt', (message) => {
       logger.warn('[Dashboard] Safekeeping emergency halt:', message.data);
-      this.io.emit('safekeeping:emergency:halt', { timestamp: new Date(), ...(message.data || {}) });
+      this.io.emit('safekeeping:emergency:halt', { timestamp: new Date(), ...((message.data || {}) as any) });
     });
 
     logger.info('[Dashboard] Subscribed to all message bus channels');
@@ -469,9 +469,19 @@ class DashboardServer {
     // Health check
     // Health check
     this.app.get('/api/health', async (req, res) => {
+      // Safety timeout: if getHealthSummary() hangs, still respond
+      const HEALTH_ENDPOINT_TIMEOUT_MS = 20000;
+      let timer: NodeJS.Timeout;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Health endpoint timed out')), HEALTH_ENDPOINT_TIMEOUT_MS);
+      });
+
       try {
         const circuitBreaker = await import('../shared/circuit-breaker');
-        const healthSummary = await circuitBreaker.default.getHealthSummary();
+        const healthSummary = await Promise.race([
+          circuitBreaker.default.getHealthSummary(),
+          timeoutPromise,
+        ]);
 
         // Add message bus status
         const messageBusStatus = messageBus.getStatus();
@@ -511,6 +521,8 @@ class DashboardServer {
           timestamp: new Date().toISOString(),
           error: error instanceof Error ? error.message : String(error),
         });
+      } finally {
+        clearTimeout(timer as any);
       }
     });
 
@@ -710,15 +722,34 @@ class DashboardServer {
 
     // Live portfolio status
     this.app.get('/api/portfolio', async (req, res) => {
+      const PORTFOLIO_TIMEOUT_MS = 15000;
+      let timer: NodeJS.Timeout;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Portfolio endpoint timed out')), PORTFOLIO_TIMEOUT_MS);
+      });
+
       try {
         const executionEngine = require('../execution-engine/execution-engine').default;
 
-        // Fetch live data types (awaiting promises)
-        const [portfolio, positions, realizedPnL, trades] = await Promise.all([
-          executionEngine.getPortfolio().catch((e: any) => null),
-          executionEngine.getPositions().catch((e: any) => []),
-          executionEngine.getRealizedPnL().catch((e: any) => 0),
-          executionEngine.getRecentTrades().catch((e: any) => [])
+        // Fetch live data types (awaiting promises) with per-call timeout
+        const withTimeout = <T>(p: Promise<T>, ms: number) => {
+          const t = setTimeout(() => { /* let Promise.all catch handle it */ }, ms);
+          return Promise.race([
+            p,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Timed out')), ms)
+            ),
+          ]).finally(() => clearTimeout(t));
+        };
+
+        const [portfolio, positions, realizedPnL, trades] = await Promise.race([
+          Promise.all([
+            executionEngine.getPortfolio().catch((e: any) => null),
+            executionEngine.getPositions().catch((e: any) => []),
+            executionEngine.getRealizedPnL().catch((e: any) => 0),
+            executionEngine.getRecentTrades().catch((e: any) => [])
+          ]),
+          timeoutPromise,
         ]);
 
         res.json({
@@ -737,6 +768,8 @@ class DashboardServer {
           recentTrades: [],
           environment: 'LIVE',
         });
+      } finally {
+        clearTimeout(timer as any);
       }
     });
 
@@ -888,8 +921,8 @@ class DashboardServer {
         // Extract ideas from traces
         const ideas: any[] = [];
         for (const trace of traces) {
-          if (trace.strategyIdeas && Array.isArray(trace.strategyIdeas)) {
-            for (const idea of trace.strategyIdeas) {
+          if ((trace as any).strategyIdeas && Array.isArray((trace as any).strategyIdeas)) {
+            for (const idea of (trace as any).strategyIdeas) {
               ideas.push({
                 id: `idea_${trace.id}_${ideas.length}`,
                 name: idea.name || 'Unnamed Strategy',
@@ -1556,6 +1589,14 @@ class DashboardServer {
       res.sendFile(path.join(__dirname, '../../dashboard/public/research.html'));
     });
 
+    // Safekeeping fund dashboard page
+    this.app.get('/safekeeping', (req, res) => {
+      res.sendFile(path.join(__dirname, '../../dashboard/public/safekeeping.html'));
+    });
+    this.app.get('/safekeeping.html', (req, res) => {
+      res.sendFile(path.join(__dirname, '../../dashboard/public/safekeeping.html'));
+    });
+
     // =========================================================================
     // SAFEKEEPING FUND API
     // =========================================================================
@@ -1563,14 +1604,29 @@ class DashboardServer {
     // Safekeeping fund state
     this.app.get('/api/safekeeping', async (req, res) => {
       try {
-        // Try to get from Redis cache first
-        const cached = await redisCache.get('safekeeping', 'state');
-        if (cached) {
-          res.json(cached);
-          return;
+        // Try direct Redis read from the key the safekeeping agent writes to
+        const Redis = (await import('ioredis')).default;
+        const directRedis = new Redis({
+          host: process.env.REDIS_HOST || '127.0.0.1',
+          port: parseInt(process.env.REDIS_PORT || '6380', 10),
+          password: process.env.REDIS_PASSWORD || undefined,
+          db: parseInt(process.env.REDIS_DB || '0', 10),
+        });
+
+        try {
+          const rawState = await directRedis.get('safekeeping:state');
+          if (rawState) {
+            const parsed = JSON.parse(rawState);
+            res.json(parsed);
+            return;
+          }
+        } finally {
+          directRedis.disconnect();
         }
 
-        // Return default state if not yet initialized
+        // Fallback: check if messageBus has received any safekeeping events recently
+        // (the in-memory state from subscriptions will be more up-to-date once available)
+        // For now, return default state when no cached data exists yet
         res.json({
           tvl: 0,
           weightedAPR: 0,
@@ -1598,6 +1654,90 @@ class DashboardServer {
       } catch (error) {
         logger.error('[Dashboard] Safekeeping state error:', error);
         res.status(500).json({ error: 'Failed to get safekeeping state' });
+      }
+    });
+
+    // Safekeeping fund - last cycle history
+    this.app.get('/api/safekeeping/history', async (req, res) => {
+      try {
+        const Redis = (await import('ioredis')).default;
+        const directRedis = new Redis({
+          host: process.env.REDIS_HOST || '127.0.0.1',
+          port: parseInt(process.env.REDIS_PORT || '6380', 10),
+          password: process.env.REDIS_PASSWORD || undefined,
+          db: parseInt(process.env.REDIS_DB || '0', 10),
+        });
+
+        try {
+          const rawCycle = await directRedis.get('safekeeping:last-cycle');
+          if (rawCycle) {
+            res.json(JSON.parse(rawCycle));
+            return;
+          }
+        } finally {
+          directRedis.disconnect();
+        }
+
+        res.json({ duration: 0, step: 'NONE', rebalances: 0, errors: 0, message: 'No cycles completed yet' });
+      } catch (error) {
+        logger.error('[Dashboard] Safekeeping history error:', error);
+        res.status(500).json({ error: 'Failed to get safekeeping history' });
+      }
+    });
+
+    // Safekeeping fund - health check
+    this.app.get('/api/safekeeping/health', async (req, res) => {
+      try {
+        const Redis = (await import('ioredis')).default;
+        const directRedis = new Redis({
+          host: process.env.REDIS_HOST || '127.0.0.1',
+          port: parseInt(process.env.REDIS_PORT || '6380', 10),
+          password: process.env.REDIS_PASSWORD || undefined,
+          db: parseInt(process.env.REDIS_DB || '0', 10),
+        });
+
+        try {
+          // Check if state key exists and when it was last updated
+          const ttl = await directRedis.ttl('safekeeping:state');
+          const rawState = await directRedis.get('safekeeping:state');
+          let lastUpdate = null;
+          let cycleNumber = 0;
+
+          if (rawState) {
+            try {
+              const parsed = JSON.parse(rawState);
+              lastUpdate = parsed.lastUpdate || null;
+              cycleNumber = parsed.cycleNumber || 0;
+            } catch { /* ignore parse error */ }
+          }
+
+          const stateExists = ttl > -2; // -2 = key doesn't exist
+          const healthy = stateExists && ttl > 0;
+
+          res.json({
+            status: healthy ? 'healthy' : (stateExists ? 'stale' : 'no_data'),
+            agentRunning: stateExists,
+            stateKeyExists: stateExists,
+            ttlRemaining: ttl > 0 ? ttl : 0,
+            lastUpdate,
+            cycleNumber,
+            redisConnected: true,
+          });
+        } finally {
+          directRedis.disconnect();
+        }
+      } catch (error) {
+        logger.error('[Dashboard] Safekeeping health error:', error);
+        res.json({
+          status: 'error',
+          agentRunning: false,
+          stateKeyExists: false,
+          ttlRemaining: 0,
+          lastUpdate: null,
+          cycleNumber: 0,
+          redisConnected: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     });
 

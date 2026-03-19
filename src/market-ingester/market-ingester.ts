@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import { MarketData, OrderBookSnapshot, FundingRate, Trade } from './types';
 import logger from '../shared/logger';
 import config from '../shared/config';
+import messageBus, { Channel } from '../shared/message-bus';
 import Database from 'better-sqlite3';
 import { validateCandle } from '../shared/data-validation';
 import hyperliquidAllMarkets from './hyperliquid-all-markets';
@@ -1150,8 +1151,9 @@ class MarketIngester {
   }
 
   private saveOrderBook(snapshot: OrderBookSnapshot): void {
+    const symbol = snapshot.symbol.toUpperCase();
     this.orderBookQueue.push({
-      symbol: snapshot.symbol.toUpperCase(),
+      symbol,
       timestampSec: Math.floor(snapshot.timestamp.getTime() / 1000),
       bids: snapshot.bids,
       asks: snapshot.asks,
@@ -1159,17 +1161,44 @@ class MarketIngester {
       spread: snapshot.spread,
     });
     this.maybeFlush();
+
+    // Publish live price to message bus for execution engine exit monitoring
+    if (Number.isFinite(snapshot.midPrice) && snapshot.midPrice > 0) {
+      messageBus.publish(Channel.MARKET_DATA, {
+        symbol,
+        price: snapshot.midPrice,
+        timestamp: new Date(),
+      }).catch(() => { /* non-critical */ });
+    }
+    messageBus.publish(Channel.ORDER_BOOK_UPDATE, {
+      symbol,
+      midPrice: snapshot.midPrice,
+      bestBid: snapshot.bids[0]?.price ?? 0,
+      bestAsk: snapshot.asks[0]?.price ?? 0,
+      spread: snapshot.spread,
+      timestamp: new Date(),
+    }).catch(() => { /* non-critical */ });
   }
 
   private saveTrade(trade: Trade): void {
+    const symbol = trade.symbol.toUpperCase();
     this.tradeQueue.push({
       timestampSec: Math.floor(trade.timestamp.getTime() / 1000),
       price: trade.price,
       size: trade.size,
       side: trade.side,
-      symbol: trade.symbol.toUpperCase(),
+      symbol,
     });
     this.maybeFlush();
+
+    // Publish trade price to message bus for execution engine exit monitoring
+    if (Number.isFinite(trade.price) && trade.price > 0) {
+      messageBus.publish(Channel.MARKET_DATA, {
+        symbol,
+        price: trade.price,
+        timestamp: trade.timestamp,
+      }).catch(() => { /* non-critical */ });
+    }
   }
 
   private saveFunding(funding: FundingRate): void {

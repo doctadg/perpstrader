@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safekeeping Fund Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a1a; color: #e0e0e0; min-height: 100vh; }
+    .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px 30px; border-bottom: 1px solid #2a2a4a; }
+    .header h1 { font-size: 24px; color: #00d4ff; }
+    .header .subtitle { color: #888; font-size: 14px; margin-top: 4px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    .status-bar { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+    .status-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 16px 24px; flex: 1; min-width: 150px; }
+    .status-card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .status-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    .status-card .value.green { color: #00ff88; }
+    .status-card .value.blue { color: #00d4ff; }
+    .status-card .value.yellow { color: #ffd700; }
+    .status-card .value.red { color: #ff4444; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 20px; }
+    .panel h2 { font-size: 16px; color: #00d4ff; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #2a2a4a; }
+    .panel .empty { color: #666; font-style: italic; text-align: center; padding: 20px; }
+    .loading { display: flex; justify-content: center; padding: 40px; color: #666; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge.green { background: #00ff8820; color: #00ff88; }
+    .badge.yellow { background: #ffd70020; color: #ffd700; }
+    .badge.red { background: #ff444420; color: #ff4444; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #2a2a4a; font-size: 13px; }
+    th { color: #888; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+    .last-update { color: #666; font-size: 12px; text-align: right; margin-top: 10px; }
+    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } .status-bar { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Shield Safekeeping Fund</h1>
+    <div class="subtitle">24/7 Autonomous Multi-Chain DEX Liquidity Rebalancing Agent</div>
+  </div>
+  <div class="container">
+    <div class="status-bar" id="statusBar">
+      <div class="status-card">
+        <div class="label">Total Value Locked</div>
+        <div class="value green" id="tvl">$0.00</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Weighted APR</div>
+        <div class="value blue" id="apr">0.00%</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Active Positions</div>
+        <div class="value" id="positions">0</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Cycle</div>
+        <div class="value yellow" id="cycle">0</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Risk Level</div>
+        <div class="value" id="risk">MEDIUM</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Market Regime</div>
+        <div class="value" id="regime">SIDEWAYS</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Success Rate</div>
+        <div class="value green" id="success">100%</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Gas Spent</div>
+        <div class="value" id="gas">$0.00</div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="panel">
+        <h2>Positions</h2>
+        <div id="positionsPanel"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Recent Rebalances</h2>
+        <div id="rebalancesPanel"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>Top Opportunities</h2>
+        <div id="opportunitiesPanel"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel">
+        <h2>AI Analysis</h2>
+        <div id="analysisPanel"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Chain Status</h2>
+        <div id="chainPanel"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+    <div class="last-update" id="lastUpdate">Last update: --</div>
+  </div>
+  <script>
+    const API_BASE = window.location.origin;
+    let refreshTimer;
+
+    async function fetchState() {
+      try {
+        const resp = await fetch(API_BASE + '/api/safekeeping');
+        const data = await resp.json();
+        renderState(data);
+      } catch (e) {
+        console.error('Failed to fetch safekeeping state:', e);
+      }
+    }
+
+    function renderState(s) {
+      document.getElementById('tvl').textContent = '$' + (s.tvl || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('apr').textContent = (s.weightedAPR || 0).toFixed(2) + '%';
+      document.getElementById('positions').textContent = s.activePositions || 0;
+      document.getElementById('cycle').textContent = s.cycleNumber || 0;
+      document.getElementById('success').textContent = (s.successRate || 100) + '%';
+      document.getElementById('gas').textContent = '$' + (s.gasSpent || 0).toFixed(4);
+
+      const riskEl = document.getElementById('risk');
+      riskEl.textContent = s.aiRiskLevel || 'MEDIUM';
+      riskEl.className = 'value ' + ({ LOW: 'green', MEDIUM: 'yellow', HIGH: 'red' }[s.aiRiskLevel] || 'yellow');
+
+      const regimeEl = document.getElementById('regime');
+      regimeEl.textContent = s.marketRegime || 'SIDEWAYS';
+
+      // Positions
+      const pp = document.getElementById('positionsPanel');
+      if (s.positions && s.positions.length > 0) {
+        let html = '<table><tr><th>Pool</th><th>Chain</th><th>Value</th><th>APR</th></tr>';
+        s.positions.slice(0, 20).forEach(p => {
+          html += `<tr><td>${p.pool || p.name || '-'}</td><td>${p.chain || '-'}</td><td>$${(p.value || 0).toFixed(2)}</td><td>${(p.apr || 0).toFixed(2)}%</td></tr>`;
+        });
+        html += '</table>';
+        pp.innerHTML = html;
+      } else {
+        pp.innerHTML = '<div class="empty">No active positions</div>';
+      }
+
+      // Rebalances
+      const rp = document.getElementById('rebalancesPanel');
+      if (s.rebalances && s.rebalances.length > 0) {
+        let html = '<table><tr><th>Pool</th><th>Action</th><th>Amount</th><th>Status</th></tr>';
+        s.rebalances.slice(0, 10).forEach(r => {
+          const statusClass = r.success !== false ? 'green' : 'red';
+          const statusText = r.success !== false ? 'Success' : 'Failed';
+          html += `<tr><td>${r.pool || '-'}</td><td>${r.action || r.type || '-'}</td><td>$${(r.amount || 0).toFixed(2)}</td><td><span class="badge ${statusClass}">${statusText}</span></td></tr>`;
+        });
+        html += '</table>';
+        rp.innerHTML = html;
+      } else {
+        rp.innerHTML = '<div class="empty">No recent rebalances</div>';
+      }
+
+      // Opportunities
+      const op = document.getElementById('opportunitiesPanel');
+      const opps = s.topOpportunities || s.opportunities || [];
+      if (opps.length > 0) {
+        let html = '<table><tr><th>Pool</th><th>Chain</th><th>APR</th><th>TVL</th></tr>';
+        opps.slice(0, 10).forEach(o => {
+          html += `<tr><td>${o.pool || o.name || '-'}</td><td>${o.chain || '-'}</td><td>${(o.apr || 0).toFixed(2)}%</td><td>$${(o.tvl || o.totalValueLocked || 0).toLocaleString()}</td></tr>`;
+        });
+        html += '</table>';
+        op.innerHTML = html;
+      } else {
+        op.innerHTML = '<div class="empty">No opportunities detected</div>';
+      }
+
+      // AI Analysis
+      const ap = document.getElementById('analysisPanel');
+      if (s.aiAnalysis) {
+        let html = `<p style="margin-bottom:12px">${s.aiAnalysis.summary || 'No analysis available'}</p>`;
+        if (s.aiAnalysis.recommendations && s.aiAnalysis.recommendations.length > 0) {
+          html += '<ul style="padding-left:20px">';
+          s.aiAnalysis.recommendations.slice(0, 5).forEach(r => { html += `<li style="margin-bottom:4px">${r}</li>`; });
+          html += '</ul>';
+        }
+        if (s.aiAnalysis.anomalies && s.aiAnalysis.anomalies.length > 0) {
+          html += '<h3 style="margin-top:12px;color:#ff4444;font-size:13px">Anomalies</h3><ul style="padding-left:20px">';
+          s.aiAnalysis.anomalies.slice(0, 5).forEach(a => {
+            const cls = ({ high: 'red', medium: 'yellow', low: 'green' }[a.severity?.toLowerCase()] || 'yellow');
+            html += `<li style="margin-bottom:4px"><span class="badge ${cls}">${a.severity || '?'}</span> ${a.type || ''} - ${a.description || ''}</li>`;
+          });
+          html += '</ul>';
+        }
+        ap.innerHTML = html;
+      } else {
+        ap.innerHTML = '<div class="empty">No AI analysis available</div>';
+      }
+
+      // Chain Status
+      const cp = document.getElementById('chainPanel');
+      const chains = s.chainStatus || {};
+      const chainNames = Object.keys(chains);
+      if (chainNames.length > 0) {
+        let html = '<table><tr><th>Chain</th><th>Connected</th><th>Positions</th><th>APR</th><th>Value</th></tr>';
+        chainNames.forEach(c => {
+          const cs = chains[c];
+          html += `<tr><td>${c.charAt(0).toUpperCase() + c.slice(1)}</td><td>${cs.connected ? 'Yes' : 'No'}</td><td>${cs.positions || 0}</td><td>${(cs.apr || 0).toFixed(2)}%</td><td>$${(cs.value || 0).toFixed(2)}</td></tr>`;
+        });
+        html += '</table>';
+        cp.innerHTML = html;
+      } else {
+        cp.innerHTML = '<div class="empty">No chain status data</div>';
+      }
+
+      document.getElementById('lastUpdate').textContent = 'Last update: ' + (s.lastUpdate || new Date().toISOString());
+    }
+
+    // Initial fetch
+    fetchState();
+    // Refresh every 15 seconds
+    refreshTimer = setInterval(fetchState, 15000);
+  </script>
+</body>
+</html>

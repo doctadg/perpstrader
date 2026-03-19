@@ -9,6 +9,7 @@ import http from 'http';
 import configManager from './config';
 import logger from './logger';
 import redisCache from './redis-cache';
+import { acquireRateLimitSlot, reportRateLimitHit } from './shared-rate-limiter';
 import { getTitleFingerprint } from './title-cleaner';
 
 const config = configManager.get();
@@ -112,6 +113,9 @@ class OpenRouterService {
     this.cacheMisses++;
 
     try {
+      // Shared rate limit: enforce 1 call per 10s across all z.ai services
+      await acquireRateLimitSlot('OpenRouter-embedding');
+
       const safeText = text.substring(0, 8000);
 
       const response = await axiosInstance.post<OpenRouterEmbeddingResponse>(
@@ -147,7 +151,17 @@ class OpenRouterService {
 
       logger.warn('[OpenRouter] Unexpected embedding response format');
       return null;
-    } catch (error) {
+    } catch (error: any) {
+      // Report 429 to shared rate limiter for adaptive backoff
+      if (error?.response?.status === 429) {
+        const retryAfter = error?.response?.headers?.['retry-after'];
+        let retryAfterMs: number | undefined;
+        if (retryAfter) {
+          const parsed = parseInt(retryAfter, 10);
+          if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+        }
+        reportRateLimitHit('OpenRouter-embedding', retryAfterMs);
+      }
       logger.debug(`[OpenRouter] Embedding generation failed: ${this.safeErrorMessage(error)}`);
       return null;
     }
@@ -258,6 +272,9 @@ Return JSON ONLY:
 }`;
 
     try {
+      // Shared rate limit: enforce 1 call per 10s across all z.ai services
+      await acquireRateLimitSlot('OpenRouter-eventLabel');
+
       const response = await axiosInstance.post<OpenRouterChatResponse>(
         `${this.baseUrl}/chat/completions`,
         {
@@ -340,7 +357,17 @@ Return JSON ONLY:
       await redisCache.setEventLabel(fingerprint, result);
 
       return result;
-    } catch (error) {
+    } catch (error: any) {
+      // Report 429 to shared rate limiter for adaptive backoff
+      if (error?.response?.status === 429) {
+        const retryAfter = error?.response?.headers?.['retry-after'];
+        let retryAfterMs: number | undefined;
+        if (retryAfter) {
+          const parsed = parseInt(retryAfter, 10);
+          if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+        }
+        reportRateLimitHit('OpenRouter-eventLabel', retryAfterMs);
+      }
       logger.debug(`[OpenRouter] Event label generation failed: ${this.safeErrorMessage(error)}`);
       return null;
     }
@@ -452,6 +479,9 @@ Return JSON ONLY in this format:
 }`;
 
     try {
+      // Shared rate limit: enforce 1 call per 10s across all z.ai services
+      await acquireRateLimitSlot('OpenRouter-batchEventLabel');
+
       const response = await axiosInstance.post<OpenRouterChatResponse>(
         `${this.baseUrl}/chat/completions`,
         {
@@ -562,7 +592,17 @@ Return JSON ONLY in this format:
         logger.warn(`[OpenRouter] Batch ${batchIndex}: No JSON found in response. Length: ${content.length}, Preview: ${content.substring(0, 200)}...`);
       }
       logger.info(`[OpenRouter] Batch ${batchIndex}: ${results.size} labeled from ${batch.length} articles`);
-    } catch (error) {
+    } catch (error: any) {
+      // Report 429 to shared rate limiter for adaptive backoff
+      if (error?.response?.status === 429) {
+        const retryAfter = error?.response?.headers?.['retry-after'];
+        let retryAfterMs: number | undefined;
+        if (retryAfter) {
+          const parsed = parseInt(retryAfter, 10);
+          if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+        }
+        reportRateLimitHit('OpenRouter-batchEventLabel', retryAfterMs);
+      }
       logger.warn(`[OpenRouter] Batch ${batchIndex} failed: ${this.safeErrorMessage(error)}`);
     }
 
@@ -684,6 +724,9 @@ Return JSON in this format:
 }`;
 
     try {
+      // Shared rate limit: enforce 1 call per 10s across all z.ai services
+      await acquireRateLimitSlot('OpenRouter-batchCategorization');
+
       const response = await axiosInstance.post<OpenRouterChatResponse>(
         `${this.baseUrl}/chat/completions`,
         {

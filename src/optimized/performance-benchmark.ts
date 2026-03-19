@@ -198,7 +198,7 @@ class PerformanceBenchmark {
 
         const optimizedTime = await this.measureAsync('Optimized Position Analysis', async () => {
             for (let i = 0; i < 100; i++) {
-                await positionRecoveryOptimized.analyzePositions(mockPortfolio as any);
+                await positionRecoveryOptimized.checkAndRecoverPositions();
             }
         });
 

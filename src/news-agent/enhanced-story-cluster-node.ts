@@ -2,14 +2,14 @@
 // Integrates improved semantic clustering with title clustering fixes
 // Replaces original story-cluster-node.ts
 
-import logger from '../../shared/logger';
-import newsVectorStore from '../../data/news-vector-store';
-import storyClusterStoreEnhanced from '../../data/story-cluster-store-enhanced';
+import logger from '../shared/logger';
+import newsVectorStore from '../data/news-vector-store';
+import storyClusterStoreEnhanced from '../data/story-cluster-store-enhanced';
 import crypto from 'crypto';
 import glmService from '../../shared/glm-service';
 import openrouterService from '../../shared/openrouter-service';
-import { getTitleFingerprint, isNonMarketMoving, validateAndFormatTopic } from '../../shared/title-cleaner';
-import { humanTitleFormatter } from '../../shared/human-title-formatter';
+import { getTitleFingerprint, isNonMarketMoving, formatTitle as validateAndFormatTopic } from '../../shared/title-cleaner';
+import { validateAndFormatTopic as formatTopic } from '../../shared/human-title-formatter';
 import { messageBus, Channel } from '../../shared/message-bus';
 import EntityExtractor, { ExtractedEntity } from './entity-extraction';
 import AnomalyDetector, { HeatAnomaly } from './anomaly-detector';
@@ -34,6 +34,10 @@ const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '20
 const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.80; // Slightly lowered for better merging
 
 export interface EnhancedClusteringState {
+    currentStep?: string;
+    anomalies?: any[];
+    predictions?: any[];
+    trendingEntities?: any[];
     categorizedNews: NewsItem[];
     clusters: any[];
     stats: {
@@ -55,7 +59,7 @@ export interface EnhancedClusteringState {
 export interface ClusteringResult {
     clusters: any[];
     stats: EnhancedClusteringState['stats'];
-    anomalies: HeatAnomaly[];
+    anomalies: any[];
     predictions: HeatPrediction[];
     trendingEntities: EntityHeat[];
 }
@@ -97,7 +101,7 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
         semanticMatches: 0
     };
 
-    const anomalies: HeatAnomaly[] = [];
+    const anomalies: any[] = [];
     const predictions: HeatPrediction[] = [];
 
     const vectorStats = await newsVectorStore.getStats();
@@ -215,7 +219,7 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
             processedArticles.push({
                 article,
                 aiLabel,
-                entities: entityResult.entities,
+                entities: entityResult.entities as any,
                 titleClusterId: titleCluster?.id
             });
         }
@@ -524,7 +528,7 @@ async function processArticleEnhanced(
         );
 
         if (useVectorMode) {
-            await newsVectorStore.storeArticle(article, assignedClusterId);
+            await newsVectorStore.storeArticle(article as any, assignedClusterId);
         }
 
         // Link entities to cluster
@@ -545,7 +549,7 @@ async function processArticleEnhanced(
         const articleDate = article.publishedAt || new Date();
         const initialHeat = await storyClusterStoreEnhanced.calculateEnhancedHeat(article, new Date(), 10);
 
-        const formattedTopic = validateAndFormatTopic(topic, article.title);
+        const formattedTopic = formatTopic(topic, article.title);
 
         await storyClusterStoreEnhanced.upsertCluster({
             id: newClusterId,
@@ -573,7 +577,7 @@ async function processArticleEnhanced(
         );
 
         if (useVectorMode) {
-            await newsVectorStore.storeArticle(article, newClusterId);
+            await newsVectorStore.storeArticle(article as any, newClusterId);
         }
 
         // Link entities to cluster
@@ -791,7 +795,7 @@ function validateTopicQuality(topic: string, articleTitle: string): { valid: boo
         return { valid: false, reason: 'No proper nouns found' };
     }
 
-    return { valid: true };
+    return { valid: true, reason: 'Valid' };
 }
 
 /**

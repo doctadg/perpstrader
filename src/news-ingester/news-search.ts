@@ -673,7 +673,7 @@ class NewsSearchService {
    * Fallback search using SearXNG directly
    */
   private async searchSearXNG(query: string, numResults: number = 25): Promise<SearchResult[]> {
-    const searxngUrl = process.env.SEARXNG_URL || 'http://localhost:8080';
+    const searxngUrl = process.env.SEARXNG_URL || 'http://localhost:8888';
     
     try {
       const params = new URLSearchParams({

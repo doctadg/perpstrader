@@ -11,9 +11,9 @@ export class RiskManager {
   private readonly MIN_STOP_LOSS_PCT: number = 0.006; // 0.6% minimum stop distance
   private readonly DEFAULT_STOP_LOSS_PCT: number = 0.008; // 0.8% baseline hard stop
   private readonly MIN_RISK_REWARD_RATIO: number = 3.0; // reward must be >= 3x risk
-  private readonly DAILY_LOSS_CIRCUIT_BREAKER_USD: number = 50; // hard daily stop in dollars
-  private readonly DAILY_LOSS_ALERT_1_USD: number = 40; // critical approach threshold 1
-  private readonly DAILY_LOSS_ALERT_2_USD: number = 45; // critical approach threshold 2
+  private readonly DAILY_LOSS_CIRCUIT_BREAKER_USD: number = 30; // hard daily stop in dollars
+  private readonly DAILY_LOSS_ALERT_1_USD: number = 20; // critical approach threshold 1
+  private readonly DAILY_LOSS_ALERT_2_USD: number = 25; // critical approach threshold 2
   private readonly REVENGE_COOLDOWN_MS: number = 60 * 60 * 1000; // 1 hour cooldown after 4 consecutive losses
   private emergencyStopActive: boolean = false;
   private emergencyStopReason: string = '';

@@ -5,6 +5,7 @@ import { ChromaClient, Collection } from 'chromadb';
 import { MarketData, TechnicalIndicators } from '../shared/types';
 import { PatternMatch } from '../langgraph/state';
 import logger from '../shared/logger';
+import { ensureEmbeddingFunctionsRegistered, ManualPatternEmbeddingFunction } from '../shared/chroma-embedding-function';
 
 /**
  * Pattern metadata stored alongside embeddings
@@ -27,6 +28,8 @@ export class VectorStore {
     private patternCollection: Collection | null = null;
     private tradeCollection: Collection | null = null;
     private initialized: boolean = false;
+
+    private readonly patternEmbeddingFn = new ManualPatternEmbeddingFunction();
 
     constructor() {
         const chromaUrl = process.env.CHROMA_URL || process.env.CHROMADB_URL;
@@ -63,20 +66,39 @@ export class VectorStore {
 
         try {
             logger.info('Initializing vector store...');
+            ensureEmbeddingFunctionsRegistered();
 
             // Collection for price patterns
             this.patternCollection = await this.client.getOrCreateCollection({
                 name: 'price_patterns',
                 metadata: { description: 'Historical price patterns with outcomes' },
-                embeddingFunction: null,
+                embeddingFunction: this.patternEmbeddingFn as any,
             });
 
             // Collection for trade outcomes
             this.tradeCollection = await this.client.getOrCreateCollection({
                 name: 'trade_outcomes',
                 metadata: { description: 'Trade results for learning' },
-                embeddingFunction: null,
+                embeddingFunction: this.patternEmbeddingFn as any,
             });
+
+            // Fix existing collections that were created with embeddingFunction: null
+            // This updates the server-side config so future getOrCreateCollection calls
+            // don't trigger "No embedding function configuration found" warnings.
+            for (const col of [this.patternCollection, this.tradeCollection]) {
+                try {
+                    const config = (col as any).configuration;
+                    if (config && !config.embedding_function) {
+                        await (col as any).modify({
+                            configuration: { embeddingFunction: this.patternEmbeddingFn },
+                        });
+                        logger.info(`[VectorStore] Updated embedding function config for collection: ${(col as any).name}`);
+                    }
+                } catch (modifyErr: any) {
+                    // Non-critical: collection still works, just shows warning on next startup
+                    logger.debug(`[VectorStore] Could not update collection config (non-critical): ${modifyErr?.message}`);
+                }
+            }
 
             this.initialized = true;
             logger.info('Vector store initialized successfully');

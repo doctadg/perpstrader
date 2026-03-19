@@ -840,37 +840,41 @@ class CircuitBreakerSystem {
             threshold: 10, // More tolerant for API issues
             timeout: 120000, // 2 minute recovery timeout
         });
+        // Non-critical infrastructure (degraded, does not block trading)
         this.registerBreaker('database', {
             threshold: 5,
             timeout: 30000,
+            critical: false,
         });
         this.registerBreaker('vector-store', {
             threshold: 5,
             timeout: 60000,
+            critical: false,
         });
         this.registerBreaker('glm-service', {
             threshold: 3,
             timeout: 120000,
+            critical: false,
         });
-        // Trading pipeline nodes
-        this.registerBreaker('market-data', { threshold: 5, timeout: 30000 });
-        this.registerBreaker('pattern-recall', { threshold: 5, timeout: 60000 });
-        this.registerBreaker('strategy-ideation', { threshold: 4, timeout: 60000 });
-        this.registerBreaker('backtester', { threshold: 4, timeout: 45000 });
-        this.registerBreaker('strategy-selector', { threshold: 4, timeout: 30000 });
-        this.registerBreaker('risk-gate', { threshold: 3, timeout: 30000 });
-        this.registerBreaker('executor', { threshold: 5, timeout: 60000 });
-        this.registerBreaker('learner', { threshold: 4, timeout: 30000 });
-        // News pipeline nodes
-        this.registerBreaker('news-execution', { threshold: 5, timeout: 60000 });
-        this.registerBreaker('search', { threshold: 5, timeout: 30000 });
-        this.registerBreaker('scrape', { threshold: 5, timeout: 30000 });
-        this.registerBreaker('quality-filter', { threshold: 4, timeout: 30000 });
-        this.registerBreaker('categorize', { threshold: 4, timeout: 30000 });
-        this.registerBreaker('topic-generation', { threshold: 4, timeout: 30000 });
-        this.registerBreaker('redundancy-filter', { threshold: 4, timeout: 30000 });
-        this.registerBreaker('cluster', { threshold: 4, timeout: 45000 });
-        this.registerBreaker('cluster-fallback', { threshold: 4, timeout: 45000 });
+        // Trading pipeline nodes (non-critical - supplementary analysis, should not block trading)
+        this.registerBreaker('market-data', { threshold: 5, timeout: 30000, critical: false });
+        this.registerBreaker('pattern-recall', { threshold: 5, timeout: 60000, critical: false });
+        this.registerBreaker('strategy-ideation', { threshold: 4, timeout: 60000, critical: false });
+        this.registerBreaker('backtester', { threshold: 4, timeout: 45000, critical: false });
+        this.registerBreaker('strategy-selector', { threshold: 4, timeout: 30000, critical: false });
+        this.registerBreaker('risk-gate', { threshold: 3, timeout: 30000, critical: false });
+        this.registerBreaker('executor', { threshold: 5, timeout: 60000, critical: false });
+        this.registerBreaker('learner', { threshold: 4, timeout: 30000, critical: false });
+        // News pipeline nodes (non-critical - supplementary, should not block trading)
+        this.registerBreaker('news-execution', { threshold: 5, timeout: 60000, critical: false });
+        this.registerBreaker('search', { threshold: 5, timeout: 30000, critical: false });
+        this.registerBreaker('scrape', { threshold: 5, timeout: 30000, critical: false });
+        this.registerBreaker('quality-filter', { threshold: 4, timeout: 30000, critical: false });
+        this.registerBreaker('categorize', { threshold: 4, timeout: 30000, critical: false });
+        this.registerBreaker('topic-generation', { threshold: 4, timeout: 30000, critical: false });
+        this.registerBreaker('redundancy-filter', { threshold: 4, timeout: 30000, critical: false });
+        this.registerBreaker('cluster', { threshold: 4, timeout: 45000, critical: false });
+        this.registerBreaker('cluster-fallback', { threshold: 4, timeout: 45000, critical: false });
     }
     /**
      * Register a new circuit breaker
@@ -885,6 +889,7 @@ class CircuitBreakerSystem {
             successCount: 0,
             threshold: config.threshold,
             timeout: config.timeout,
+            critical: config.critical !== false, // Default to critical for backwards compatibility
         });
         logger_1.default.debug(`[CircuitBreaker] Registered breaker: ${name} (threshold: ${config.threshold}, timeout: ${config.timeout}ms)`);
     }
@@ -956,10 +961,10 @@ class CircuitBreakerSystem {
             breaker.openAt = new Date();
             breaker.successCount = 0;
             logger_1.default.error(`[CircuitBreaker] ${breakerName} circuit OPENED after ${breaker.errorCount} errors: ${errorMsg}`);
-            // Trigger alert
+            // Trigger alert (non-critical breakers report as DEGRADED)
             this.triggerAlert({
                 component: breakerName,
-                status: 'CRITICAL',
+                status: breaker.critical ? 'CRITICAL' : 'DEGRADED',
                 message: `Circuit breaker opened: ${errorMsg}`,
                 timestamp: new Date(),
                 metrics: { errorCount: breaker.errorCount, threshold: breaker.threshold },
@@ -1013,17 +1018,25 @@ class CircuitBreakerSystem {
         }
     }
     /**
-     * Run health check for all components
+     * Wrap a promise with a timeout so it never hangs indefinitely.
      */
+    withTimeout(promise, ms, label) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+        });
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    }
     async runAllHealthChecks() {
+        const CHECK_TIMEOUT_MS = 15000; // 15s per check max
         const results = await Promise.allSettled([
-            this.checkExecutionEngine(),
-            this.checkRiskManager(),
-            this.checkAPIConnectivity(),
-            this.checkDatabase(),
-            this.checkVectorStore(),
-            this.checkGLMService(),
-            this.checkSafetyMonitor(),
+            this.withTimeout(this.checkExecutionEngine(), CHECK_TIMEOUT_MS, 'checkExecutionEngine'),
+            this.withTimeout(this.checkRiskManager(), CHECK_TIMEOUT_MS, 'checkRiskManager'),
+            this.withTimeout(this.checkAPIConnectivity(), CHECK_TIMEOUT_MS, 'checkAPIConnectivity'),
+            this.withTimeout(this.checkDatabase(), CHECK_TIMEOUT_MS, 'checkDatabase'),
+            this.withTimeout(this.checkVectorStore(), CHECK_TIMEOUT_MS, 'checkVectorStore'),
+            this.withTimeout(this.checkGLMService(), CHECK_TIMEOUT_MS, 'checkGLMService'),
+            this.withTimeout(this.checkSafetyMonitor(), CHECK_TIMEOUT_MS, 'checkSafetyMonitor'),
         ]);
         const healthResults = results
             .filter((r) => r.status === 'fulfilled')
@@ -1395,13 +1408,13 @@ class CircuitBreakerSystem {
         const breakers = this.getAllBreakerStatuses();
         const safety = this.getSafetyStatus();
         let overall = 'HEALTHY';
-        // Check for critical issues
-        if (components.some((c) => c.status === 'CRITICAL') || breakers.some((b) => b.isOpen)) {
+        // Check for critical issues (only critical breakers can make system CRITICAL)
+        if (components.some((c) => c.status === 'CRITICAL') || breakers.some((b) => b.isOpen && b.critical)) {
             overall = 'CRITICAL';
         }
-        // Check for unhealthy components
-        else if (components.some((c) => c.status === 'UNHEALTHY')) {
-            overall = 'UNHEALTHY';
+        // Check for unhealthy components or open non-critical breakers
+        else if (components.some((c) => c.status === 'UNHEALTHY') || breakers.some((b) => b.isOpen && !b.critical)) {
+            overall = 'DEGRADED'; // Non-critical open breakers degrade rather than unhealthy
         }
         // Check for degraded components
         else if (components.some((c) => c.status === 'DEGRADED')) {

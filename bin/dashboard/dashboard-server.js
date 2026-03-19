@@ -429,9 +429,18 @@ class DashboardServer {
         // Health check
         // Health check
         this.app.get('/api/health', async (req, res) => {
+            // Safety timeout: if getHealthSummary() hangs, still respond
+            const HEALTH_ENDPOINT_TIMEOUT_MS = 20000;
+            let timer;
+            const timeoutPromise = new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('Health endpoint timed out')), HEALTH_ENDPOINT_TIMEOUT_MS);
+            });
             try {
                 const circuitBreaker = await Promise.resolve().then(() => __importStar(require('../shared/circuit-breaker')));
-                const healthSummary = await circuitBreaker.default.getHealthSummary();
+                const healthSummary = await Promise.race([
+                    circuitBreaker.default.getHealthSummary(),
+                    timeoutPromise,
+                ]);
                 // Add message bus status
                 const messageBusStatus = message_bus_1.default.getStatus();
                 const cacheStatus = redis_cache_1.default.getStatus();
@@ -469,6 +478,9 @@ class DashboardServer {
                     timestamp: new Date().toISOString(),
                     error: error instanceof Error ? error.message : String(error),
                 });
+            }
+            finally {
+                clearTimeout(timer);
             }
         });
         // Circuit breaker status
@@ -660,14 +672,29 @@ class DashboardServer {
         });
         // Live portfolio status
         this.app.get('/api/portfolio', async (req, res) => {
+            const PORTFOLIO_TIMEOUT_MS = 15000;
+            let timer;
+            const timeoutPromise = new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('Portfolio endpoint timed out')), PORTFOLIO_TIMEOUT_MS);
+            });
             try {
                 const executionEngine = require('../execution-engine/execution-engine').default;
-                // Fetch live data types (awaiting promises)
-                const [portfolio, positions, realizedPnL, trades] = await Promise.all([
-                    executionEngine.getPortfolio().catch((e) => null),
-                    executionEngine.getPositions().catch((e) => []),
-                    executionEngine.getRealizedPnL().catch((e) => 0),
-                    executionEngine.getRecentTrades().catch((e) => [])
+                // Fetch live data types (awaiting promises) with per-call timeout
+                const withTimeout = (p, ms) => {
+                    const t = setTimeout(() => { }, ms);
+                    return Promise.race([
+                        p,
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out')), ms)),
+                    ]).finally(() => clearTimeout(t));
+                };
+                const [portfolio, positions, realizedPnL, trades] = await Promise.race([
+                    Promise.all([
+                        executionEngine.getPortfolio().catch((e) => null),
+                        executionEngine.getPositions().catch((e) => []),
+                        executionEngine.getRealizedPnL().catch((e) => 0),
+                        executionEngine.getRecentTrades().catch((e) => [])
+                    ]),
+                    timeoutPromise,
                 ]);
                 res.json({
                     portfolio: portfolio || { totalValue: 0, availableBalance: 0, positions: [] },
@@ -686,6 +713,9 @@ class DashboardServer {
                     recentTrades: [],
                     environment: 'LIVE',
                 });
+            }
+            finally {
+                clearTimeout(timer);
             }
         });
         // Active strategies
@@ -1454,19 +1484,41 @@ class DashboardServer {
         this.app.get('/research.html', (req, res) => {
             res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/research.html'));
         });
+        // Safekeeping fund dashboard page
+        this.app.get('/safekeeping', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/safekeeping.html'));
+        });
+        this.app.get('/safekeeping.html', (req, res) => {
+            res.sendFile(path_1.default.join(__dirname, '../../dashboard/public/safekeeping.html'));
+        });
         // =========================================================================
         // SAFEKEEPING FUND API
         // =========================================================================
         // Safekeeping fund state
         this.app.get('/api/safekeeping', async (req, res) => {
             try {
-                // Try to get from Redis cache first
-                const cached = await redis_cache_1.default.get('safekeeping', 'state');
-                if (cached) {
-                    res.json(cached);
-                    return;
+                // Try direct Redis read from the key the safekeeping agent writes to
+                const Redis = (await Promise.resolve().then(() => __importStar(require('ioredis')))).default;
+                const directRedis = new Redis({
+                    host: process.env.REDIS_HOST || '127.0.0.1',
+                    port: parseInt(process.env.REDIS_PORT || '6380', 10),
+                    password: process.env.REDIS_PASSWORD || undefined,
+                    db: parseInt(process.env.REDIS_DB || '0', 10),
+                });
+                try {
+                    const rawState = await directRedis.get('safekeeping:state');
+                    if (rawState) {
+                        const parsed = JSON.parse(rawState);
+                        res.json(parsed);
+                        return;
+                    }
                 }
-                // Return default state if not yet initialized
+                finally {
+                    directRedis.disconnect();
+                }
+                // Fallback: check if messageBus has received any safekeeping events recently
+                // (the in-memory state from subscriptions will be more up-to-date once available)
+                // For now, return default state when no cached data exists yet
                 res.json({
                     tvl: 0,
                     weightedAPR: 0,
@@ -1495,6 +1547,87 @@ class DashboardServer {
             catch (error) {
                 logger_1.default.error('[Dashboard] Safekeeping state error:', error);
                 res.status(500).json({ error: 'Failed to get safekeeping state' });
+            }
+        });
+        // Safekeeping fund - last cycle history
+        this.app.get('/api/safekeeping/history', async (req, res) => {
+            try {
+                const Redis = (await Promise.resolve().then(() => __importStar(require('ioredis')))).default;
+                const directRedis = new Redis({
+                    host: process.env.REDIS_HOST || '127.0.0.1',
+                    port: parseInt(process.env.REDIS_PORT || '6380', 10),
+                    password: process.env.REDIS_PASSWORD || undefined,
+                    db: parseInt(process.env.REDIS_DB || '0', 10),
+                });
+                try {
+                    const rawCycle = await directRedis.get('safekeeping:last-cycle');
+                    if (rawCycle) {
+                        res.json(JSON.parse(rawCycle));
+                        return;
+                    }
+                }
+                finally {
+                    directRedis.disconnect();
+                }
+                res.json({ duration: 0, step: 'NONE', rebalances: 0, errors: 0, message: 'No cycles completed yet' });
+            }
+            catch (error) {
+                logger_1.default.error('[Dashboard] Safekeeping history error:', error);
+                res.status(500).json({ error: 'Failed to get safekeeping history' });
+            }
+        });
+        // Safekeeping fund - health check
+        this.app.get('/api/safekeeping/health', async (req, res) => {
+            try {
+                const Redis = (await Promise.resolve().then(() => __importStar(require('ioredis')))).default;
+                const directRedis = new Redis({
+                    host: process.env.REDIS_HOST || '127.0.0.1',
+                    port: parseInt(process.env.REDIS_PORT || '6380', 10),
+                    password: process.env.REDIS_PASSWORD || undefined,
+                    db: parseInt(process.env.REDIS_DB || '0', 10),
+                });
+                try {
+                    // Check if state key exists and when it was last updated
+                    const ttl = await directRedis.ttl('safekeeping:state');
+                    const rawState = await directRedis.get('safekeeping:state');
+                    let lastUpdate = null;
+                    let cycleNumber = 0;
+                    if (rawState) {
+                        try {
+                            const parsed = JSON.parse(rawState);
+                            lastUpdate = parsed.lastUpdate || null;
+                            cycleNumber = parsed.cycleNumber || 0;
+                        }
+                        catch { /* ignore parse error */ }
+                    }
+                    const stateExists = ttl > -2; // -2 = key doesn't exist
+                    const healthy = stateExists && ttl > 0;
+                    res.json({
+                        status: healthy ? 'healthy' : (stateExists ? 'stale' : 'no_data'),
+                        agentRunning: stateExists,
+                        stateKeyExists: stateExists,
+                        ttlRemaining: ttl > 0 ? ttl : 0,
+                        lastUpdate,
+                        cycleNumber,
+                        redisConnected: true,
+                    });
+                }
+                finally {
+                    directRedis.disconnect();
+                }
+            }
+            catch (error) {
+                logger_1.default.error('[Dashboard] Safekeeping health error:', error);
+                res.json({
+                    status: 'error',
+                    agentRunning: false,
+                    stateKeyExists: false,
+                    ttlRemaining: 0,
+                    lastUpdate: null,
+                    cycleNumber: 0,
+                    redisConnected: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         });
         // Trigger manual rebalance

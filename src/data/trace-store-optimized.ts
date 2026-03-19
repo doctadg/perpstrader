@@ -62,6 +62,10 @@ export class LRUCache<K, V> {
     clear(): void {
         this.cache.clear();
     }
+
+    delete(key: K): boolean {
+        return this.cache.delete(key);
+    }
 }
 
 /**

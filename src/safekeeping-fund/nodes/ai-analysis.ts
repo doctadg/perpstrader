@@ -76,7 +76,7 @@ async function performAIAnalysis(state: SafekeepingFundState): Promise<AIAnalysi
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
-        model: 'anthropic/claude-3.5-sonnet',
+        model: 'z-ai/glm-4.7-flash', // Cheap fast model instead of expensive Claude
         messages: [
           {
             role: 'system',

@@ -1,6 +1,6 @@
 // Strategy Generator - Uses GLM service to generate new strategy ideas from market conditions
 
-import { GLMAIService } from '../shared/glm-service';
+import glmService from '../shared/glm-service';
 import logger from '../shared/logger';
 import { MarketRegime } from './market-analyzer';
 import { StrategyIdea, IdeaStatus } from './idea-queue';
@@ -26,10 +26,9 @@ export interface GeneratedStrategy {
 }
 
 export class StrategyGenerator {
-  private glmService: GLMAIService;
+  private glmService = glmService; // Use singleton for shared rate limiting
 
   constructor() {
-    this.glmService = new GLMAIService();
   }
 
   /**

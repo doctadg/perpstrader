@@ -26,8 +26,8 @@ class SafetyEngine {
   private safetyRules: SafetyRule[];
   private isEnabled: boolean;
   private emergencyStopTriggered: boolean;
-  private readonly DAILY_LOSS_ALERT_1_USD = 40;
-  private readonly DAILY_LOSS_ALERT_2_USD = 45;
+  private readonly DAILY_LOSS_ALERT_1_USD = 20;
+  private readonly DAILY_LOSS_ALERT_2_USD = 25;
   private dailyLossAlert40Triggered: boolean;
   private dailyLossAlert45Triggered: boolean;
 
@@ -50,7 +50,7 @@ class SafetyEngine {
     this.dailyLossAlert45Triggered = false;
 
     this.config = {
-      maxDailyLoss: 50,  // hard absolute $50 daily loss
+      maxDailyLoss: 30,  // hard absolute $30 daily loss
       maxDrawdown: 0.15,
       maxPositionSize: 0.20,
       maxLeverage: 20,  // CRITICAL FIX: Reduced from 5x to 20x (was misconfigured)

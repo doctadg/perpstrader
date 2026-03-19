@@ -14,13 +14,14 @@ export interface AnomalyConfig {
 
 export interface HeatAnomaly {
     clusterId: string;
+    isAnomaly?: boolean;
     type: 'SUDDEN_SPIKE' | 'SUDDEN_DROP' | 'VELOCITY_ANOMALY' | 'CROSS_SYNDICATION';
-    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-    zScore: number;
-    currentValue: number;
-    expectedRange: [number, number];
-    detectedAt: Date;
-    description: string;
+    severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    zScore?: number;
+    currentValue?: number;
+    expectedRange?: [number, number];
+    detectedAt?: Date;
+    description?: string;
 }
 
 export interface CrossSyndicationEvent {
@@ -147,7 +148,7 @@ class AnomalyDetector {
         const events: CrossSyndicationEvent[] = [];
 
         // Group clusters by topic key (case-insensitive)
-        const topicGroups = new Map<string, Array<{ id: string; category: string; heat: number }>>();
+        const topicGroups = new Map<string, Array<{ id: string; clusterId: string; category: string; heat: number; similarity: number }>>();
 
         for (const cluster of clusters) {
             const key = cluster.topicKey?.toLowerCase() || '';
@@ -156,14 +157,18 @@ class AnomalyDetector {
                 topicGroups.set(key, []);
             }
 
+
             topicGroups.get(key)!.push({
                 id: cluster.id,
+                clusterId: cluster.id,
                 category: cluster.category,
-                heat: cluster.heatScore
+                heat: cluster.heatScore,
+                similarity: 0
             });
         }
 
         // Find topic keys appearing in multiple categories
+
         for (const [topicKey, clusterList] of topicGroups) {
             if (clusterList.length < 2) continue;
 

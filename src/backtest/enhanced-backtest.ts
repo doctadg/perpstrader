@@ -137,23 +137,18 @@ export class BacktestEngine {
     private updateOrderBook(candle: MarketData): void {
         const book = this.orderBooks.get(candle.symbol);
         if (book) {
-            const bidsEntries = Array.from(book.bids?.entries() || []) as [number, number][];
-            const asksEntries = Array.from(book.asks?.entries() || []) as [number, number][];
+            const priceDelta = candle.close - (book.midPrice || candle.close);
 
             const updatedBook = {
                 ...book,
-                bids: new Map(
-                    bidsEntries.map(([price, size]: [number, number]) => [
-                        price + (candle.close - (book.midPrice || candle.close)),
-                        size,
-                    ])
-                ),
-                asks: new Map(
-                    asksEntries.map(([price, size]: [number, number]) => [
-                        price + (candle.close - (book.midPrice || candle.close)),
-                        size,
-                    ])
-                ),
+                bids: (book.bids || []).map((level: any) => ({
+                    price: (level.price || 0) + priceDelta,
+                    size: level.size || 0,
+                })),
+                asks: (book.asks || []).map((level: any) => ({
+                    price: (level.price || 0) + priceDelta,
+                    size: level.size || 0,
+                })),
                 midPrice: candle.close,
                 lastUpdate: candle.timestamp.getTime(),
             };
@@ -173,7 +168,7 @@ export class BacktestEngine {
     }
 
     /**
-     * Generate trading signals from strategy
+     * Generate trading signals from strategy using indicator-based logic
      */
     private generateSignals(
         strategy: Strategy,
@@ -181,46 +176,132 @@ export class BacktestEngine {
         state: any
     ): SimulatedOrder[] {
         const signals: SimulatedOrder[] = [];
-
-        // Simple implementation - can be extended with full strategy evaluation
         const params = strategy.parameters || {};
+        const positionSize = (this.capital * (strategy.riskParameters?.maxPositionSize || 0.05)) / candle.close;
+
+        // Build close price history from tracked candles
+        if (!state.closes) state.closes = [];
+        state.closes.push(candle.close);
+        const closes = state.closes;
+
+        // Helper: compute RSI from close series
+        const rsi = (period: number): number => {
+            if (closes.length <= period) return 50;
+            let gains = 0, losses = 0;
+            for (let i = closes.length - period; i < closes.length; i++) {
+                const change = closes[i] - closes[i - 1];
+                if (change > 0) gains += change; else losses -= change;
+            }
+            const avgGain = gains / period;
+            const avgLoss = losses / period;
+            return avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+        };
+
+        // Helper: compute SMA from close series
+        const sma = (period: number): number => {
+            if (closes.length < period) return closes[closes.length - 1] || 0;
+            let sum = 0;
+            for (let i = closes.length - period; i < closes.length; i++) sum += closes[i];
+            return sum / period;
+        };
+
+        // Helper: compute Bollinger Bands
+        const bollinger = (period: number, stdMult: number): { upper: number; middle: number; lower: number } => {
+            const middle = sma(period);
+            if (closes.length < period) return { upper: middle, middle, lower: middle };
+            let sumSq = 0;
+            for (let i = closes.length - period; i < closes.length; i++) sumSq += (closes[i] - middle) ** 2;
+            const std = Math.sqrt(sumSq / period);
+            return { upper: middle + std * stdMult, middle, lower: middle - std * stdMult };
+        };
 
         switch (strategy.type) {
-            case 'TREND_FOLLOWING':
-                // Simple MA crossover signal
-                const fastPeriod = params.fastPeriod || 10;
-                const slowPeriod = params.slowPeriod || 30;
+            case 'TREND_FOLLOWING': {
+                const fastPeriod = params.fastPeriod || params.smaFast || params.fast || 10;
+                const slowPeriod = params.slowPeriod || params.smaSlow || params.slow || 30;
+                const minBars = Math.max(fastPeriod, slowPeriod) + 1;
 
-                // Would calculate indicators here
-                // For now, generate dummy signals for testing
-                if (Math.random() > 0.95) {
-                    signals.push({
-                        orderId: uuidv4(),
-                        symbol: candle.symbol,
-                        side: Math.random() > 0.5 ? 'BUY' : 'SELL',
-                        type: 'MARKET',
-                        quantity: (this.capital * 0.1) / candle.close,
-                        timestamp: this.clock.timestamp(),
-                    });
+                if (closes.length >= minBars) {
+                    const fastNow = sma(fastPeriod);
+                    const slowNow = sma(slowPeriod);
+                    const fastPrev = closes.length >= minBars + 1
+                        ? closes.slice(0, -1).reduce((s, v, i, a) => i >= a.length - fastPeriod ? s + v : s, 0) / fastPeriod
+                        : fastNow;
+                    const slowPrev = closes.length >= minBars + 1
+                        ? closes.slice(0, -1).reduce((s, v, i, a) => i >= a.length - slowPeriod ? s + v : s, 0) / slowPeriod
+                        : slowNow;
+
+                    if (fastNow > slowNow && fastPrev <= slowPrev) {
+                        signals.push(this.createBuySignal(candle, positionSize));
+                    } else if (fastNow < slowNow && fastPrev >= slowPrev) {
+                        signals.push(this.createSellSignal(candle, positionSize));
+                    }
                 }
                 break;
+            }
 
-            case 'MEAN_REVERSION':
-                // RSI-based signals
-                if (Math.random() > 0.95) {
-                    signals.push({
-                        orderId: uuidv4(),
-                        symbol: candle.symbol,
-                        side: Math.random() > 0.5 ? 'BUY' : 'SELL',
-                        type: 'MARKET',
-                        quantity: (this.capital * 0.1) / candle.close,
-                        timestamp: this.clock.timestamp(),
-                    });
+            case 'MEAN_REVERSION': {
+                const rsiPeriod = params.rsiPeriod || params.rsiLength || 14;
+                const oversold = params.oversold || params.rsiOversold || 35;
+                const overbought = params.overbought || params.rsiOverbought || 65;
+                const bbPeriod = params.bbPeriod || params.bollingerPeriod || 20;
+                const bbStdDev = params.bbStdDev || params.bollingerStdDev || 2;
+
+                if (closes.length > Math.max(rsiPeriod, bbPeriod)) {
+                    const currentRSI = rsi(rsiPeriod);
+                    const bb = bollinger(bbPeriod, bbStdDev);
+                    const price = candle.close;
+
+                    if (price < bb.lower && currentRSI < oversold) {
+                        signals.push(this.createBuySignal(candle, positionSize));
+                    } else if (price > bb.upper && currentRSI > overbought) {
+                        signals.push(this.createSellSignal(candle, positionSize));
+                    }
                 }
                 break;
+            }
+
+            default: {
+                // Generic RSI-based signals for MARKET_MAKING, ARBITRAGE, AI_PREDICTION, etc.
+                const rsiPeriod = params.rsiPeriod || params.rsiLength || 14;
+                const oversold = params.oversold || params.rsiOversold || 30;
+                const overbought = params.overbought || params.rsiOverbought || 70;
+
+                if (closes.length > rsiPeriod) {
+                    const currentRSI = rsi(rsiPeriod);
+                    if (currentRSI < oversold) {
+                        signals.push(this.createBuySignal(candle, positionSize));
+                    } else if (currentRSI > overbought) {
+                        signals.push(this.createSellSignal(candle, positionSize));
+                    }
+                }
+                break;
+            }
         }
 
         return signals;
+    }
+
+    private createBuySignal(candle: MarketData, quantity: number): SimulatedOrder {
+        return {
+            orderId: uuidv4(),
+            symbol: candle.symbol,
+            side: 'BUY',
+            type: 'MARKET',
+            quantity,
+            timestamp: this.clock.timestamp(),
+        };
+    }
+
+    private createSellSignal(candle: MarketData, quantity: number): SimulatedOrder {
+        return {
+            orderId: uuidv4(),
+            symbol: candle.symbol,
+            side: 'SELL',
+            type: 'MARKET',
+            quantity,
+            timestamp: this.clock.timestamp(),
+        };
     }
 
     /**
@@ -247,6 +328,12 @@ export class BacktestEngine {
                 [fill]
             );
 
+            // Determine if this fill is an entry or exit based on position direction.
+            // A fill is an EXIT when it reduces an existing position (opposite direction).
+            const fillSignedQty = fill.side === 'BUY' ? fill.quantity : -fill.quantity;
+            const isExit = currentPos.qty !== 0 &&
+                Math.sign(fillSignedQty) !== Math.sign(currentPos.qty);
+
             this.positions.set(symbol, {
                 qty,
                 avgPx,
@@ -267,7 +354,7 @@ export class BacktestEngine {
                 timestamp: new Date(currentTime),
                 type: 'MARKET',
                 status: 'FILLED',
-                entryExit: 'ENTRY',
+                entryExit: isExit ? 'EXIT' : 'ENTRY',
             });
         }
     }
@@ -283,10 +370,11 @@ export class BacktestEngine {
             if (!riskParams) continue;
 
             const currentPrice = candle.close;
+            const absQty = Math.abs(pos.qty);
             const unrealizedPnL = pos.side === 'LONG'
-                ? (currentPrice - pos.avgPx) * pos.qty
-                : (pos.avgPx - currentPrice) * pos.qty;
-            const pnlPercent = (unrealizedPnL / (pos.avgPx * pos.qty)) * 100;
+                ? (currentPrice - pos.avgPx) * absQty
+                : (pos.avgPx - currentPrice) * absQty;
+            const pnlPercent = (unrealizedPnL / (pos.avgPx * absQty)) * 100;
 
             // Check stop loss
             if (pnlPercent <= -riskParams.stopLoss) {
@@ -306,7 +394,7 @@ export class BacktestEngine {
         const pos = this.positions.get(symbol);
         if (!pos || pos.qty === 0) return;
 
-        const closeQty = pos.qty;
+        const closeQty = Math.abs(pos.qty);
         const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
         const pnl = pos.side === 'LONG'
             ? (price - pos.avgPx) * closeQty
@@ -398,6 +486,7 @@ export class BacktestEngine {
             winRate,
             totalTrades: exitTrades.length,
             trades: this.trades,
+            profitFactor,
             metrics: {
                 calmarRatio: maxDrawdown > 0 ? totalReturn / maxDrawdown : 0,
                 sortinoRatio: sharpeRatio * 1.2, // Simplified

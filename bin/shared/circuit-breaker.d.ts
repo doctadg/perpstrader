@@ -7,6 +7,7 @@ interface CircuitBreakerState {
     successCount: number;
     threshold: number;
     timeout: number;
+    critical: boolean;
 }
 interface HealthCheckResult {
     component: string;
@@ -156,6 +157,7 @@ export declare class CircuitBreakerSystem {
     registerBreaker(name: string, config: {
         threshold: number;
         timeout: number;
+        critical?: boolean;
     }): void;
     /**
      * Execute a function with circuit breaker protection
@@ -182,8 +184,9 @@ export declare class CircuitBreakerSystem {
      */
     stopHealthChecks(): void;
     /**
-     * Run health check for all components
+     * Wrap a promise with a timeout so it never hangs indefinitely.
      */
+    private withTimeout;
     runAllHealthChecks(): Promise<HealthCheckResult[]>;
     /**
      * Check execution engine health

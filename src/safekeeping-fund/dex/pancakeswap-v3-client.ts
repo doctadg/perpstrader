@@ -104,8 +104,8 @@ export interface PancakeswapV3ClientConfig {
  * Handles interaction with PancakeSwap V3 on BSC
  */
 export class PancakeswapV3Client extends BaseDEXClient {
-  private publicClient: PublicClient<HttpTransport, ViemChain>;
-  private walletClient: WalletClient<HttpTransport, ViemChain, Account>;
+  private publicClient: any;
+  private walletClient: any;
   private account: Account;
   private positions: Map<string, LiquidityPosition> = new Map();
 

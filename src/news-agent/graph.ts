@@ -147,12 +147,12 @@ export class NewsOrchestrator {
 
           // Merge enhanced results into state
           state = {
-            ...state,
+            ...(state as any),
             clusters: enhancedResult.clusters || [],
             anomalies: enhancedResult.anomalies || [],
             predictions: enhancedResult.predictions || [],
             trendingEntities: enhancedResult.trendingEntities || [],
-          };
+          } as typeof state;
 
           // Update stats with enhanced clustering metrics
           if (enhancedResult.stats) {

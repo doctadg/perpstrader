@@ -4,6 +4,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../shared/logger';
 import config from '../shared/config';
@@ -121,6 +122,7 @@ export class IdeaQueue {
           rationale TEXT,
           status TEXT DEFAULT 'PENDING',
           market_context TEXT,
+          params_hash TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -129,6 +131,11 @@ export class IdeaQueue {
       // Create index on status for faster queries
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS idx_strategy_ideas_status ON strategy_ideas(status)
+      `);
+
+      // Create index on params_hash for dedup lookups
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_strategy_ideas_params_hash ON strategy_ideas(params_hash)
       `);
 
       // Backtest jobs table
@@ -194,8 +201,8 @@ export class IdeaQueue {
       INSERT INTO strategy_ideas (
         id, name, description, type, symbols, timeframe, parameters,
         entry_conditions, exit_conditions, risk_parameters, confidence,
-        rationale, status, market_context, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        rationale, status, market_context, params_hash, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertJob = this.db.prepare(`
@@ -203,16 +210,22 @@ export class IdeaQueue {
       VALUES (?, ?, 'PENDING', ?)
     `);
 
+    const checkDuplicate = this.db!.prepare(
+      'SELECT id FROM strategy_ideas WHERE params_hash = ? AND status != ?'
+    );
+
     const transaction = this.db.transaction((items: StrategyIdea[]) => {
       for (const idea of items) {
         try {
-          // Check if idea with same name already exists and is pending
-          const existing = this.db!.prepare(
-            'SELECT id FROM strategy_ideas WHERE name = ? AND status = ?'
-          ).get(idea.name, 'PENDING');
+          // Compute params_hash from name + parameters for dedup
+          const hashInput = idea.name + JSON.stringify(idea.parameters);
+          const paramsHash = crypto.createHash('sha256').update(hashInput).digest('hex');
+
+          // Check if idea with same params_hash already exists and is not archived
+          const existing = checkDuplicate.get(paramsHash, 'ARCHIVED');
 
           if (existing) {
-            logger.debug(`[IdeaQueue] Skipping duplicate idea: ${idea.name}`);
+            logger.debug(`[IdeaQueue] Skipping duplicate idea (params_hash=${paramsHash.slice(0, 8)}): ${idea.name}`);
             continue;
           }
 
@@ -231,6 +244,7 @@ export class IdeaQueue {
             idea.rationale,
             idea.status,
             JSON.stringify(idea.marketContext || {}),
+            paramsHash,
             idea.createdAt.toISOString(),
             idea.updatedAt.toISOString()
           );

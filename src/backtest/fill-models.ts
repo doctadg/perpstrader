@@ -348,8 +348,13 @@ export class OrderBookBuilder {
      * Build order book from market data
      */
     static fromMarketData(data: MarketData, depth: number = 10): OrderBook {
-        const midPrice = ((data.bid ?? data.close) + (data.ask ?? data.close)) / 2;
-        const spread = (data.ask && data.bid) ? data.ask - data.bid : midPrice * 0.0001;
+        // Use bid/ask only if they are positive (not null, undefined, or 0).
+        // The DB stores 0 for missing bid/ask, and ?? only coalesces null/undefined.
+        const hasValidBidAsk = data.bid != null && data.ask != null && data.bid > 0 && data.ask > 0;
+        const effectiveBid = hasValidBidAsk ? data.bid! : data.close;
+        const effectiveAsk = hasValidBidAsk ? data.ask! : data.close;
+        const midPrice = (effectiveBid + effectiveAsk) / 2;
+        const spread = hasValidBidAsk ? (effectiveAsk - effectiveBid) : midPrice * 0.0001;
 
         const bids: BookLevel[] = [];
         const asks: BookLevel[] = [];
@@ -461,7 +466,7 @@ export class PositionCalculator {
         }
 
         return {
-            qty: Math.abs(qty),
+            qty,  // Keep sign to distinguish LONG (+) from SHORT (-)
             avgPx,
             realizedPnL,
         };

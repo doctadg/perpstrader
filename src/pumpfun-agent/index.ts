@@ -1,22 +1,34 @@
 // pump.fun Agent - Main Entry Point
-// Autonomous AI agent for vetting pump.fun token launches
+// Autonomous AI agent for vetting + sniping pump.fun token launches
 
 import 'dotenv/config';
 import configManager from '../shared/config';
 import logger from '../shared/logger';
 import { runPumpFunCycle } from './graph';
 import pumpfunStore from '../data/pumpfun-store';
+import bondingCurveService from './services/bonding-curve';
+import snipeService from './services/snipe-service';
 
 const config = configManager.get();
 const cycleIntervalMs = config.pumpfun?.cycleIntervalMs || 60000;
 
 /**
- * Main function - runs continuous pump.fun analysis cycles
+ * Main function - runs continuous pump.fun analysis cycles + snipe loop
  */
 async function main() {
   logger.info('═════════════════════════════════════════════════════════');
-  logger.info('  pump.fun Token Analysis Agent - Starting');
+  logger.info('  pump.fun Token Agent + Sniper - Starting');
   logger.info('═════════════════════════════════════════════════════════');
+
+  // Initialize bonding curve service
+  try {
+    await bondingCurveService.initialize();
+    const portfolio = bondingCurveService.getPortfolioSummary();
+    logger.info(`[Main] Bonding curve service: ${portfolio.mode} mode | ${portfolio.solBalance.toFixed(2)} SOL`);
+  } catch (error) {
+    logger.error('[Main] Failed to initialize bonding curve service:', error);
+    process.exit(1);
+  }
 
   // Initialize storage
   try {
@@ -27,6 +39,28 @@ async function main() {
     process.exit(1);
   }
 
+  // Start WebSocket snipe listener (real-time token detection + auto-buy)
+  try {
+    await snipeService.start();
+
+    // When a new token is detected via WS, feed it into the analysis pipeline
+    snipeService.onToken(async (event) => {
+      logger.info(`[Main] WS detected: $${event.tokenSymbol} -- feeding to analysis pipeline`);
+    });
+
+    // Log snipe decisions
+    snipeService.onSnipe((candidate) => {
+      const emoji = candidate.buyExecuted ? '[SNIPED]' : '[WATCH]';
+      logger.info(
+        `${emoji} $${candidate.event.tokenSymbol} | Score: ${candidate.score.toFixed(2)} | ${candidate.recommendation}`
+      );
+    });
+
+  } catch (error) {
+    logger.error('[Main] Failed to start snipe service:', error);
+    // Continue without snipe service -- analysis pipeline still works
+  }
+
   // Publish start event
   try {
     const messageBus = (await import('../shared/message-bus')).default;
@@ -35,6 +69,7 @@ async function main() {
     }
     await messageBus.publish('pumpfun:cycle:start', {
       timestamp: new Date(),
+      mode: bondingCurveService.isPaperMode() ? 'PAPER' : 'LIVE',
       config: {
         subscribeDurationMs: config.pumpfun?.subscribeDurationMs,
         minScoreThreshold: config.pumpfun?.minScoreThreshold,
@@ -46,7 +81,7 @@ async function main() {
 
   let cycleCount = 0;
 
-  // Main loop
+  // Main analysis loop (separate from the real-time snipe listener)
   while (true) {
     cycleCount++;
 
@@ -80,6 +115,14 @@ async function main() {
         }
       }
 
+      // Snipe status
+      const snipeStatus = snipeService.getStatus();
+      if (snipeStatus.running) {
+        logger.info(`[Sniper] Positions: ${snipeStatus.openPositions} | Queue: ${snipeStatus.queueDepth} | Hour: ${snipeStatus.snipesThisHour}/${snipeStatus.maxSnipesPerHour}`);
+        const portfolio = bondingCurveService.getPortfolioSummary();
+        logger.info(`[Portfolio] ${portfolio.mode} | Balance: ${portfolio.solBalance.toFixed(2)} SOL | Invested: ${portfolio.totalInvested.toFixed(2)} SOL | Realized: ${portfolio.totalRealized.toFixed(4)} SOL`);
+      }
+
     } catch (error) {
       logger.error(`[Main] Cycle ${cycleCount} failed:`, error);
     }
@@ -105,6 +148,13 @@ function sleep(ms: number): Promise<void> {
 async function shutdown(signal: string) {
   logger.info(``);
   logger.info(`[Main] Received ${signal}, shutting down...`);
+
+  // Stop snipe service
+  snipeService.stop();
+
+  // Log final portfolio
+  const portfolio = bondingCurveService.getPortfolioSummary();
+  logger.info(`[Portfolio] Final: ${portfolio.solBalance.toFixed(2)} SOL | ${portfolio.openPositions} positions | Realized: ${portfolio.totalRealized.toFixed(4)} SOL`);
 
   // Close storage
   pumpfunStore.close();

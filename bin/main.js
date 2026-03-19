@@ -61,6 +61,21 @@ const CHILD_PROCESS_CONFIGS = [
         scriptPath: '/home/d/PerpsTrader/bin/research-engine/entry.js',
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
+    {
+        name: 'safekeeping-fund',
+        scriptPath: '/home/d/PerpsTrader/bin/safekeeping-fund/main.js',
+        restartDelayMs: INITIAL_RESTART_DELAY_MS,
+    },
+    {
+        name: 'funding-arbitrage',
+        scriptPath: '/home/d/PerpsTrader/bin/market-ingester/funding-arbitrage-job.js',
+        restartDelayMs: INITIAL_RESTART_DELAY_MS,
+    },
+    {
+        name: 'pumpfun-agent',
+        scriptPath: '/home/d/PerpsTrader/bin/pumpfun-agent/index.js',
+        restartDelayMs: INITIAL_RESTART_DELAY_MS,
+    },
 ];
 function spawnChildProcess(config) {
     const { name, scriptPath } = config;

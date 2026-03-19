@@ -37,7 +37,7 @@
                 items: [
                     { id: 'predictions', label: 'Predictions', path: '/predictions', icon: '◊', shortcut: 'P', desc: 'Prediction markets' },
                     { id: 'funding-arbitrage', label: 'Funding Arbitrage', path: '/funding-arbitrage', icon: '💰', shortcut: 'F', desc: 'Funding rate opportunities' },
-                    { id: 'pools', label: 'Safekeeping Pools', path: '/pools', icon: '◐', shortcut: 'S', desc: 'Yield & safekeeping' },
+                    { id: 'safekeeping', label: 'Safekeeping Fund', path: '/safekeeping', icon: '◐', shortcut: 'S', desc: 'Multi-chain yield fund' },
                     { id: 'pumpfun', label: 'PumpFun Analyzer', path: '/pumpfun', icon: '●', shortcut: 'U', desc: 'Token analysis' },
                 ]
             }

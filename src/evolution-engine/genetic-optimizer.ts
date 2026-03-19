@@ -104,9 +104,11 @@ export class GeneticOptimizer {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS strategy_generations (
         id TEXT PRIMARY KEY,
+        strategy_id TEXT,
         parent_id TEXT,
         generation INTEGER NOT NULL,
         parameters TEXT NOT NULL,
+        mutation_type TEXT,
         fitness REAL,
         sharpe_ratio REAL,
         total_return REAL,
@@ -117,6 +119,7 @@ export class GeneticOptimizer {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE INDEX IF NOT EXISTS idx_strategy_gen_strategy ON strategy_generations(strategy_id);
       CREATE INDEX IF NOT EXISTS idx_strategy_gen_generation ON strategy_generations(generation);
       CREATE INDEX IF NOT EXISTS idx_strategy_gen_parent ON strategy_generations(parent_id);
       CREATE INDEX IF NOT EXISTS idx_strategy_gen_fitness ON strategy_generations(fitness);
@@ -168,7 +171,7 @@ export class GeneticOptimizer {
     // If no strategies with performance, load active strategies
     const activeRows = this.db.prepare(`
       SELECT * FROM strategies 
-      WHERE is_active = 1
+      WHERE isActive = 1
       LIMIT ?
     `).all(count);
 
@@ -288,17 +291,19 @@ export class GeneticOptimizer {
 
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO strategy_generations (
-        id, parent_id, generation, parameters, fitness,
+        id, strategy_id, parent_id, generation, parameters, mutation_type, fitness,
         sharpe_ratio, total_return, max_drawdown, win_rate, total_trades,
         backtest_result, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       genome.id,
-      genome.parentIds.join(','),
+      genome.strategyId || null,
+      genome.parentIds && genome.parentIds.length > 0 ? genome.parentIds.join(',') : null,
       genome.generation,
       JSON.stringify(genome.parameters),
+      genome.mutationType || null,
       genome.fitness,
       genome.sharpeRatio,
       genome.totalReturn,

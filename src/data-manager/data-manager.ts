@@ -43,9 +43,48 @@ export class DataManager {
           riskParameters TEXT NOT NULL,
           isActive INTEGER DEFAULT 0,
           performance TEXT NOT NULL,
+          params_hash TEXT,
           createdAt TEXT NOT NULL,
           updatedAt TEXT NOT NULL
-        )
+        );
+        CREATE INDEX IF NOT EXISTS idx_strategies_params_hash ON strategies(name, params_hash);
+      `);
+
+      // Strategy generations (evolution tracking)
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS strategy_generations (
+          id TEXT PRIMARY KEY,
+          strategy_id TEXT,
+          parent_id TEXT,
+          generation INTEGER NOT NULL,
+          parameters TEXT NOT NULL,
+          mutation_type TEXT,
+          fitness REAL,
+          sharpe_ratio REAL,
+          total_return REAL,
+          max_drawdown REAL,
+          win_rate REAL,
+          total_trades INTEGER,
+          backtest_result TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_strategy_gen_strategy ON strategy_generations(strategy_id);
+        CREATE INDEX IF NOT EXISTS idx_strategy_gen_generation ON strategy_generations(generation);
+        CREATE INDEX IF NOT EXISTS idx_strategy_gen_parent ON strategy_generations(parent_id);
+        CREATE INDEX IF NOT EXISTS idx_strategy_gen_fitness ON strategy_generations(fitness);
+        CREATE INDEX IF NOT EXISTS idx_strategy_gen_created ON strategy_generations(created_at);
+
+        CREATE TABLE IF NOT EXISTS evolution_sessions (
+          id TEXT PRIMARY KEY,
+          start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          end_time TIMESTAMP,
+          config TEXT,
+          status TEXT DEFAULT 'running',
+          best_genome_id TEXT,
+          generations_completed INTEGER DEFAULT 0,
+          final_fitness REAL,
+          termination_reason TEXT
+        );
       `);
 
       // Trades table
@@ -224,6 +263,72 @@ export class DataManager {
       logger.error('Failed to get all strategies:', error);
       throw error;
     }
+  }
+
+  /**
+   * Get active strategies that match a given symbol.
+   * Strategies store symbols as a JSON array; this checks if the symbol appears in that array.
+   * Returns strategies ordered by updated date (most recently promoted first).
+   */
+  async getActiveStrategiesForSymbol(symbol: string): Promise<Strategy[]> {
+    try {
+      const stmt = this.db.prepare(
+        `SELECT * FROM strategies
+         WHERE isActive = 1
+         ORDER BY updatedAt DESC`
+      );
+      const rows = stmt.all() as any[];
+
+      // Filter to strategies that include this symbol in their symbols array
+      const matched = rows
+        .map(row => this.mapRowToStrategy(row))
+        .filter(s => {
+          try {
+            return s.symbols.includes(symbol);
+          } catch {
+            return false;
+          }
+        });
+
+      // Deduplicate by type: keep only the best-performing strategy per type
+      const bestByType = new Map<string, Strategy>();
+      for (const s of matched) {
+        const existing = bestByType.get(s.type);
+        if (!existing) {
+          bestByType.set(s.type, s);
+        } else {
+          // Compare: prefer strategy with higher winRate, then more trades, then newer
+          const sScore = (s.performance?.winRate || 0) * 100 + (s.performance?.totalTrades || 0);
+          const eScore = (existing.performance?.winRate || 0) * 100 + (existing.performance?.totalTrades || 0);
+          if (sScore > eScore) {
+            bestByType.set(s.type, s);
+          }
+        }
+      }
+      return Array.from(bestByType.values());
+
+    } catch (error) {
+      logger.error(`Failed to get active strategies for ${symbol}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get the best active strategy for a symbol based on performance score.
+   * Falls back to the most recently updated strategy if no performance data exists.
+   */
+  async getBestActiveStrategyForSymbol(symbol: string): Promise<Strategy | null> {
+    const strategies = await this.getActiveStrategiesForSymbol(symbol);
+    if (strategies.length === 0) return null;
+
+    // Sort by performance: prefer strategies with more totalTrades and positive sharpeRatio
+    strategies.sort((a, b) => {
+      const aScore = (a.performance?.sharpeRatio || 0) * 10 + (a.performance?.totalTrades || 0);
+      const bScore = (b.performance?.sharpeRatio || 0) * 10 + (b.performance?.totalTrades || 0);
+      return bScore - aScore;
+    });
+
+    return strategies[0];
   }
 
   async deleteStrategy(id: string): Promise<boolean> {

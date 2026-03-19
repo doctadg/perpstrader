@@ -391,7 +391,7 @@ async function processSingleArticle(
             topic: formattedTopic,
             topicKey: trendTopicKey,
             summary: article.summary || '',
-            category: article.categories[0] || 'GENERAL',
+            category: article.categories[0] || 'CRYPTO',
             keywords: keywords,
             heatScore: initialHeat,
             articleCount: 1,
@@ -624,7 +624,7 @@ async function createFallbackClusters(
 
     // Group by category
     for (const article of articles) {
-        const category = article.categories?.[0] || 'GENERAL';
+        const category = article.categories?.[0] || 'CRYPTO';
         if (!categoryGroups.has(category)) {
             categoryGroups.set(category, []);
         }

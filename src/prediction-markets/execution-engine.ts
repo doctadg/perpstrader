@@ -190,7 +190,7 @@ class PredictionExecutionEngine {
       marketId: signal.marketId,
       marketTitle,
       outcome: signal.outcome,
-      side: signal.action,
+      side: (signal.action === "HOLD" ? "BUY" : signal.action) as "BUY" | "SELL",
       shares,
       price,
       fee: price * shares * (this.isRealTrading ? 0.02 : 0.001), // 2% fee on real Polymarket
@@ -204,11 +204,11 @@ class PredictionExecutionEngine {
     predictionStore.storeTrade(trade);
 
     // Structured logging for audit trail
-    logger.info({
+    logger.info(JSON.stringify({
       event: 'TRADE_EXECUTED',
       tradeId: orderId,
       marketId: signal.marketId,
-      side: signal.action,
+      side: (signal.action === "HOLD" ? "BUY" : signal.action) as "BUY" | "SELL",
       outcome: signal.outcome,
       shares: shares.toFixed(4),
       price: price.toFixed(4),
@@ -216,7 +216,7 @@ class PredictionExecutionEngine {
       fee: trade.fee.toFixed(4),
       pnl: pnl.toFixed(2),
       portfolioValue: this.getPortfolio().totalValue.toFixed(2),
-    }, `[PredictionExecution] ${signal.action} ${shares.toFixed(2)} ${signal.outcome} @ ${price.toFixed(3)} (${marketTitle})`);
+    }), `[PredictionExecution] ${signal.action} ${shares.toFixed(2)} ${signal.outcome} @ ${price.toFixed(3)} (${marketTitle})`);
 
     return trade;
   }

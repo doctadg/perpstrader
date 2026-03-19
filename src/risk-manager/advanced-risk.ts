@@ -47,9 +47,9 @@ class AdvancedRiskEngine {
   private riskThresholds: RiskThresholds;
   private riskHistory: RiskMetrics[] = [];
   private maxHistorySize = 100;
-  private readonly HARD_DAILY_LOSS_LIMIT_USD = 50;
-  private readonly DAILY_LOSS_ALERT_1_USD = 40;
-  private readonly DAILY_LOSS_ALERT_2_USD = 45;
+  private readonly HARD_DAILY_LOSS_LIMIT_USD = 30;
+  private readonly DAILY_LOSS_ALERT_1_USD = 20;
+  private readonly DAILY_LOSS_ALERT_2_USD = 25;
   private dailyLossAlert40Triggered = false;
   private dailyLossAlert45Triggered = false;
 
@@ -61,7 +61,7 @@ class AdvancedRiskEngine {
       maxPositionRisk: 0.5,
       maxLeverage: 20,  // CRITICAL FIX: Reduced from 40x to 20x max leverage
       maxCorrelation: 0.8,
-      maxDailyLoss: this.HARD_DAILY_LOSS_LIMIT_USD,  // absolute dollar breaker
+      maxDailyLoss: this.HARD_DAILY_LOSS_LIMIT_USD,  // absolute dollar breaker ($30)
       stopLossThreshold: 0.008,  // 0.8% stop
       takeProfitThreshold: 0.032,  // 3.2% target (1:4 baseline R:R)
       maxPositionSize: 0.18

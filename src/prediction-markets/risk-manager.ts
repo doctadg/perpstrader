@@ -2,7 +2,7 @@
 // Enforces daily loss limits, portfolio heat, correlation checks, and cooldowns
 
 import logger from '../../shared/logger';
-import predictionStore from '../../data/prediction-store';
+import predictionStore from '../data/prediction-store';
 import { 
   PredictionPosition, 
   PredictionTrade, 
@@ -118,7 +118,7 @@ export class RiskManager {
     const today = new Date().toISOString().split('T')[0];
     
     // Try to load from database if available
-    const stored = predictionStore.getDailyRiskState?.(today);
+    const stored = predictionStore.getDailyRiskState?.(today) as DailyRiskState | undefined;
     if (stored) {
       return stored;
     }

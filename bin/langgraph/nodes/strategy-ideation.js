@@ -1,12 +1,13 @@
 "use strict";
 // Strategy Ideation Node
-// Generates trading strategy ideas using the LLM with a fallback
+// Loads active strategies from DB first, falls back to LLM generation
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.strategyIdeationNode = strategyIdeationNode;
 const glm_service_1 = __importDefault(require("../../shared/glm-service"));
+const data_manager_1 = __importDefault(require("../../data-manager/data-manager"));
 const logger_1 = __importDefault(require("../../shared/logger"));
 const DEFAULT_STRATEGY_LIMIT = Number.parseInt(process.env.STRATEGY_IDEATION_LIMIT || '10', 10) || 10;
 async function strategyIdeationNode(state) {
@@ -18,6 +19,33 @@ async function strategyIdeationNode(state) {
             thoughts: [...state.thoughts, 'Skipped strategy ideation: insufficient data'],
         };
     }
+    // ============================================================
+    // P0 FIX: Load active strategies from DB first.
+    // This connects the training loop (research engine) to live trading.
+    // If the training loop has promoted strategies for this symbol, use them.
+    // ============================================================
+    try {
+        const activeStrategies = await data_manager_1.default.getActiveStrategiesForSymbol(state.symbol);
+        if (activeStrategies.length > 0) {
+            const strategyIdeas = activeStrategies
+                .slice(0, DEFAULT_STRATEGY_LIMIT)
+                .map(s => strategyToIdea(s, state));
+            logger_1.default.info(`[StrategyIdeationNode] Loaded ${strategyIdeas.length} active strategies from DB for ${state.symbol}: ${strategyIdeas.map(i => `${i.name}(${i.type})`).join(', ')}`);
+            return {
+                currentStep: 'STRATEGY_IDEATION_FROM_DB',
+                strategyIdeas,
+                thoughts: [
+                    ...state.thoughts,
+                    `Using ${strategyIdeas.length} active strategies from DB (bypassing LLM)`,
+                    ...strategyIdeas.map(idea => `${idea.name} (${idea.type}, conf=${idea.confidence})`),
+                ],
+            };
+        }
+    }
+    catch (error) {
+        logger_1.default.warn('[StrategyIdeationNode] Failed to load strategies from DB, falling back to LLM:', error);
+    }
+    // Fallback: generate ideas via LLM (original behavior)
     const latestCandle = state.candles[state.candles.length - 1];
     const recentRSI = state.indicators.rsi.slice(-5);
     const recentMACD = state.indicators.macd.histogram.slice(-5);
@@ -57,7 +85,7 @@ async function strategyIdeationNode(state) {
             strategyIdeas,
             thoughts: [
                 ...state.thoughts,
-                `Generated ${strategyIdeas.length} strategy ideas`,
+                `Generated ${strategyIdeas.length} strategy ideas via LLM (no active DB strategies)`,
                 ...strategyIdeas.map(idea => `Strategy: ${idea.name} (${idea.type})`),
             ],
         };
@@ -76,6 +104,26 @@ async function strategyIdeationNode(state) {
             errors: [...state.errors, `Strategy ideation error: ${error}`],
         };
     }
+}
+/**
+ * Convert a DB Strategy to a StrategyIdea for the LangGraph pipeline.
+ * Uses the strategy's backtest performance as confidence score.
+ */
+function strategyToIdea(strategy, state) {
+    const confidence = Math.min(0.95, Math.max(0.5, strategy.performance?.winRate || 0.6));
+    return {
+        name: strategy.name,
+        description: strategy.description || `Active DB strategy: ${strategy.name}`,
+        type: strategy.type,
+        symbols: strategy.symbols.includes(state.symbol) ? strategy.symbols : [state.symbol, ...strategy.symbols],
+        timeframe: strategy.timeframe || state.timeframe,
+        entryConditions: strategy.entryConditions || [],
+        exitConditions: strategy.exitConditions || [],
+        parameters: normalizeParameters(strategy.parameters),
+        riskParameters: strategy.riskParameters,
+        confidence,
+        reasoning: `Active strategy from training loop (sharpe=${strategy.performance?.sharpeRatio?.toFixed(2) || 'N/A'}, wr=${((strategy.performance?.winRate || 0) * 100).toFixed(0)}%, trades=${strategy.performance?.totalTrades || 0})`,
+    };
 }
 function derivePatternBias(state) {
     if (!state.similarPatterns || state.similarPatterns.length === 0) {

@@ -67,7 +67,7 @@ export async function riskGateNode(state: PredictionAgentState): Promise<Partial
     position => position.marketId === state.selectedIdea?.marketId && position.outcome !== state.selectedIdea?.outcome
   );
 
-  let action: PredictionRiskAssessment['approved'] extends true ? 'BUY' | 'SELL' : never = 'BUY';
+  let action: 'BUY' | 'SELL' = 'BUY';
   let outcome = state.selectedIdea.outcome;
   let reason = state.selectedIdea.rationale;
 
@@ -104,7 +104,7 @@ export async function riskGateNode(state: PredictionAgentState): Promise<Partial
   };
 
   // Log risk assessment details
-  logger.info({
+  logger.info(JSON.stringify({
     event: 'RISK_ASSESSMENT',
     approved: riskAssessment.approved,
     riskScore: riskAssessment.riskScore.toFixed(2),
@@ -113,7 +113,7 @@ export async function riskGateNode(state: PredictionAgentState): Promise<Partial
     portfolioValue: portfolio.totalValue.toFixed(2),
     availableBalance: portfolio.availableBalance.toFixed(2),
     positionCount: portfolio.positions.length,
-  }, `[PredictionRiskGate] Risk score ${(riskAssessment.riskScore * 100).toFixed(0)}%, size $${riskAssessment.suggestedSizeUsd.toFixed(2)}`);
+  }), `[PredictionRiskGate] Risk score ${(riskAssessment.riskScore * 100).toFixed(0)}%, size $${riskAssessment.suggestedSizeUsd.toFixed(2)}`);
 
   return {
     currentStep: riskAssessment.approved ? 'RISK_GATE_APPROVED' : 'RISK_GATE_REJECTED',

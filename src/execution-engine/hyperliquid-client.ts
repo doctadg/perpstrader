@@ -32,7 +32,8 @@ const ASSET_INDICES: Record<string, number> = {
 };
 
 // CRITICAL FIX: Lowered thresholds to allow more orders through
-const DEFAULT_MIN_CONFIDENCE = 0.65;
+const DEFAULT_MIN_CONFIDENCE = 0.60;
+const DEFAULT_MIN_MARKET_CONFIDENCE = 0.65;
 const DEFAULT_MAX_ALLOWED_SPREAD = 0.01; // 1% - relaxed for crypto markets
 const MIN_PRACTICAL_MAX_SPREAD = 0.005; // 0.5% minimum - anything lower blocks most crypto pairs
 const MAX_PRACTICAL_MIN_CONFIDENCE = 0.80;
@@ -193,18 +194,18 @@ export class HyperliquidClient {
     private pendingOrdersByDirection: Map<string, PendingOrderDirectionInfo> = new Map();
     private orderStats: Map<string, OrderStats> = new Map();
     
-    // CRITICAL FIX: Increased cooldowns to prevent churn and improve fill rates
+    // ANTI-CHURN: Increased cooldowns to prevent churn and improve fill rates
     private lastOrderTime: Map<string, number> = new Map();
-    private readonly ORDER_COOLDOWN_MS = 10000; // 10 seconds standard (was 5s)
-    private readonly MIN_ORDER_COOLDOWN_MS = 5000; // 5 seconds absolute minimum between any orders
+    private readonly ORDER_COOLDOWN_MS = 30000; // 30 seconds standard (anti-churn)
+    private readonly MIN_ORDER_COOLDOWN_MS = 10000; // 10 seconds absolute minimum between any orders
     private readonly EXTENDED_COOLDOWN_MS = 300000; // 5 minutes after multiple failures
     private readonly CANCEL_COOLDOWN_BASE_MS = parsePositiveIntEnv(
         'HYPERLIQUID_CANCEL_COOLDOWN_BASE_MS',
-        15000
+        120000
     );
     private readonly CANCEL_COOLDOWN_MAX_MS = parsePositiveIntEnv(
         'HYPERLIQUID_CANCEL_COOLDOWN_MAX_MS',
-        180000
+        600000
     );
     private cancelCooldownUntil: Map<string, number> = new Map();
     private orderAttemptCount: Map<string, OrderAttempt> = new Map();
@@ -227,7 +228,10 @@ export class HyperliquidClient {
 
     // CRITICAL: Cancelled-order circuit breaker
     private readonly CANCELLED_WINDOW_MS = 600000; // 10 minutes
-    private readonly CANCELLED_THRESHOLD = 100;
+    private readonly CANCELLED_THRESHOLD = parsePositiveIntEnv(
+        'HYPERLIQUID_CANCELLED_THRESHOLD',
+        300
+    );
     private readonly CIRCUIT_BREAKER_DURATION_MS = 1800000; // 30 minutes
     private cancelledOrderWindow: CancelledOrderWindow = { cancelled: 0, windowStart: Date.now() };
     private circuitBreakerUntil: number = 0;
@@ -253,7 +257,10 @@ export class HyperliquidClient {
         return configured;
     })();
     private readonly MIN_MARKET_CONFIDENCE = (() => {
-        const fallback = Math.min(0.99, Math.max(this.MIN_CONFIDENCE, DEFAULT_MIN_CONFIDENCE + 0.1));
+        const fallback = Math.min(
+            0.99,
+            Math.max(DEFAULT_MIN_MARKET_CONFIDENCE, this.MIN_CONFIDENCE + 0.05)
+        );
         const configured = parseRatioEnv('HYPERLIQUID_MIN_MARKET_CONFIDENCE', fallback);
         const maxPractical = Math.min(MAX_PRACTICAL_MIN_MARKET_CONFIDENCE, this.MIN_CONFIDENCE + 0.10);
 
@@ -1072,6 +1079,14 @@ export class HyperliquidClient {
         return true;
     }
 
+    private createBlockedOrderResult(blockReason: string, details?: string): HyperliquidOrderResult {
+        return {
+            success: false,
+            status: 'BLOCKED',
+            error: details ? `${blockReason}: ${details}` : blockReason
+        };
+    }
+
     async placeOrder(params: {
         symbol: string;
         side: 'BUY' | 'SELL';
@@ -1107,11 +1122,7 @@ export class HyperliquidClient {
                 `[CRITICAL][CircuitBreaker] Blocking order ${params.side} ${symbol}: ` +
                 `${remainingMinutes} minute(s) remaining`
             );
-            return {
-                success: false,
-                status: 'CIRCUIT_BREAKER',
-                error: 'CIRCUIT_BREAKER_ACTIVE'
-            };
+            return this.createBlockedOrderResult('CIRCUIT_BREAKER', 'CIRCUIT_BREAKER_ACTIVE');
         }
 
         await this.initialize();
@@ -1143,7 +1154,10 @@ export class HyperliquidClient {
             });
             if (!orderCheck.allowed) {
                 logger.warn(`[ChurnPrevention] Blocking order for ${symbol}: ${orderCheck.reason}`);
-                return { success: false, status: 'CHURN_PREVENTION', error: orderCheck.reason };
+                return this.createBlockedOrderResult(
+                    'CHURN_PREVENTION',
+                    orderCheck.reason || 'Order blocked by churn prevention'
+                );
             }
 
             if (!isReduceOnly) {
@@ -1151,18 +1165,24 @@ export class HyperliquidClient {
                 const depthCheck = this.validateOrderBookDepth(symbol, orderBook);
                 if (!depthCheck.valid) {
                     logger.warn(`[ChurnPrevention] Blocking order for ${symbol}: ${depthCheck.reason}`);
-                    return { success: false, status: 'CHURN_PREVENTION', error: depthCheck.reason };
+                    return this.createBlockedOrderResult(
+                        'CHURN_PREVENTION',
+                        depthCheck.reason || 'Order book depth check failed'
+                    );
                 }
 
                 if (depthCheck.bestBid === undefined || depthCheck.bestAsk === undefined) {
                     logger.warn(`[ChurnPrevention] Blocking order for ${symbol}: Missing top-of-book prices`);
-                    return { success: false, status: 'CHURN_PREVENTION', error: 'Missing top-of-book prices' };
+                    return this.createBlockedOrderResult('CHURN_PREVENTION', 'Missing top-of-book prices');
                 }
 
                 const spreadCheck = this.checkSpread(depthCheck.bestBid, depthCheck.bestAsk);
                 if (!spreadCheck.allowed) {
                     logger.warn(`[ChurnPrevention] Blocking order for ${symbol}: ${spreadCheck.reason}`);
-                    return { success: false, status: 'CHURN_PREVENTION', error: spreadCheck.reason };
+                    return this.createBlockedOrderResult(
+                        'CHURN_PREVENTION',
+                        spreadCheck.reason || 'Spread check failed'
+                    );
                 }
             }
         } else {
@@ -1182,11 +1202,7 @@ export class HyperliquidClient {
                 `[DuplicateOrder] Rejecting ${params.side} ${symbol}. ` +
                 `Pending order ${duplicatePending.orderId} is ${(duplicatePending.ageMs / 1000).toFixed(2)}s old`
             );
-            return {
-                success: false,
-                status: 'DUPLICATE_ORDER',
-                error: 'DUPLICATE_ORDER'
-            };
+            return this.createBlockedOrderResult('DUPLICATE_ORDER', 'DUPLICATE_ORDER');
         }
 
         const pendingByDirection = this.findAnyPendingOrderByDirection(symbol, params.side, now);
@@ -1195,11 +1211,10 @@ export class HyperliquidClient {
                 `[OrderLifecycle] Blocking ${params.side} ${symbol}: pending order ${pendingByDirection.orderId} ` +
                 `already tracked for ${(pendingByDirection.ageMs / 1000).toFixed(1)}s`
             );
-            return {
-                success: false,
-                status: 'PENDING_ORDER',
-                error: `Pending ${params.side} order exists: ${pendingByDirection.orderId}`
-            };
+            return this.createBlockedOrderResult(
+                'PENDING_ORDER',
+                `Pending ${params.side} order exists: ${pendingByDirection.orderId}`
+            );
         }
 
         if (!bypassChurnGuards) {
@@ -1207,14 +1222,17 @@ export class HyperliquidClient {
             if (now - lastTime < this.MIN_ORDER_COOLDOWN_MS) {
                 const remainingSec = Math.ceil((this.MIN_ORDER_COOLDOWN_MS - (now - lastTime)) / 1000);
                 logger.warn(`[ChurnPrevention] Minimum cooldown active for ${symbol}, ${remainingSec}s remaining`);
-                return { success: false, status: 'CHURN_PREVENTION', error: `Minimum cooldown active: ${remainingSec}s remaining` };
+                return this.createBlockedOrderResult(
+                    'CHURN_PREVENTION',
+                    `Minimum cooldown active: ${remainingSec}s remaining`
+                );
             }
 
             const dynamicCooldown = this.calculateDynamicCooldown(symbol);
             if (now - lastTime < dynamicCooldown) {
                 const remainingSec = Math.ceil((dynamicCooldown - (now - lastTime)) / 1000);
                 logger.warn(`[ChurnPrevention] Order cooldown active for ${symbol}, ${remainingSec}s remaining`);
-                return { success: false, status: 'COOLDOWN', error: `Cooldown active: ${remainingSec}s remaining` };
+                return this.createBlockedOrderResult('COOLDOWN', `Cooldown active: ${remainingSec}s remaining`);
             }
         }
         

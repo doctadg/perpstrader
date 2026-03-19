@@ -156,6 +156,18 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
     logger.info(`[RiskGateNode] Evaluating risk for ${state.selectedStrategy?.name}`);
 
     const openPosition = state.portfolio?.positions.find(p => p.symbol === state.symbol) || null;
+    // Count all positions on this symbol to prevent duplicate opens
+    const positionsOnSymbol = state.portfolio?.positions.filter(p => p.symbol === state.symbol).length || 0;
+    if (positionsOnSymbol > 1) {
+        logger.warn(`[RiskGateNode] Skipping ${state.symbol} — ${positionsOnSymbol} positions already open (possible duplicate guard)`);
+        return {
+            currentStep: 'RISK_GATE_DUPLICATE_BLOCKED',
+            signal: null,
+            riskAssessment: null,
+            shouldExecute: false,
+            thoughts: [...state.thoughts, `Blocked: ${positionsOnSymbol} positions already open on ${state.symbol}`],
+        };
+    }
     if ((!state.selectedStrategy || !state.shouldExecute) && !openPosition) {
         return {
             currentStep: 'RISK_GATE_SKIPPED',
@@ -194,7 +206,23 @@ export async function riskGateNode(state: AgentState): Promise<Partial<AgentStat
         const recentTrades = await dataManager.getTrades(undefined, state.symbol, 1);
         const lastTrade = recentTrades[0] || null;
         const positionStrategy = lastTrade?.strategyId ? await dataManager.getStrategy(lastTrade.strategyId) : null;
-        const activeStrategy = positionStrategy || state.selectedStrategy;
+
+        // P0 FIX: Prefer active strategies from DB (training loop output).
+        // Fallback chain: position's strategy > best active DB strategy > state.selectedStrategy
+        let activeStrategy: Strategy | null = positionStrategy;
+        if (!activeStrategy) {
+            try {
+                activeStrategy = await dataManager.getBestActiveStrategyForSymbol(state.symbol);
+                if (activeStrategy) {
+                    logger.info(`[RiskGateNode] Using active DB strategy: ${activeStrategy.name} (${activeStrategy.type}) for ${state.symbol}`);
+                }
+            } catch (dbError) {
+                logger.warn('[RiskGateNode] Failed to load active strategies from DB:', dbError);
+            }
+        }
+        if (!activeStrategy) {
+            activeStrategy = state.selectedStrategy;
+        }
 
         let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
         let baseConfidence = 0.5;

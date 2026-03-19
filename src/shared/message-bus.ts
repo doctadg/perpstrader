@@ -260,14 +260,10 @@ class MessageBus extends EventEmitter {
    * Publish a message to a channel
    */
   async publish<T>(channel: string | Channel, data: T, correlationId?: string): Promise<boolean> {
-    if (!this.publisher) {
-      logger.warn('[MessageBus] Cannot publish: not connected');
-      return false;
-    }
-
     try {
+      const channelStr = channel as string;
       const message: Message<T> = {
-        type: channel as string,
+        type: channelStr,
         timestamp: new Date(),
         source: this.serviceId,
         data,
@@ -275,11 +271,39 @@ class MessageBus extends EventEmitter {
         correlationId,
       };
 
-      await this.publisher.publish(channel, JSON.stringify(message));
+      // Always deliver locally first (handles same-process subscribers that
+      // would otherwise be dropped by the source === serviceId filter in
+      // handleMessage, which only runs for Redis-delivered messages).
+      this.deliverLocal(channelStr, message);
+
+      // Also publish to Redis for other processes
+      if (this.publisher && this.isConnected) {
+        await this.publisher.publish(channel, JSON.stringify(message));
+      }
+
       return true;
     } catch (error) {
       logger.error(`[MessageBus] Failed to publish to ${channel}:`, error);
       return false;
+    }
+  }
+
+  /**
+   * Deliver a message directly to local subscribers (bypasses Redis).
+   * Used internally by publish() so same-process subscribers receive messages
+   * immediately without the source self-filter.
+   */
+  private deliverLocal<T>(channel: string, message: Message<T>): void {
+    const callbacks = this.subscriptions.get(channel);
+    if (callbacks) {
+      for (const callback of callbacks) {
+        const result = callback(message as any);
+        if (result instanceof Promise) {
+          result.catch((error) => {
+            logger.error(`[MessageBus] Local callback error for ${channel}:`, error);
+          });
+        }
+      }
     }
   }
 

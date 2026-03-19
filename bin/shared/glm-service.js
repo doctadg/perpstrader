@@ -10,6 +10,7 @@ const axios_1 = __importDefault(require("axios"));
 const crypto_1 = __importDefault(require("crypto"));
 const config_1 = __importDefault(require("../shared/config"));
 const logger_1 = __importDefault(require("../shared/logger"));
+const shared_rate_limiter_1 = require("./shared-rate-limiter");
 const config = config_1.default.get();
 /**
  * GLM AI Service for strategy generation
@@ -23,8 +24,9 @@ class GLMAIService {
     constructor() {
         this.baseUrl = config.openrouter.baseUrl;
         this.apiKey = config.openrouter.apiKey;
-        this.model = 'anthropic/claude-3.5-sonnet';
-        this.labelingModel = 'anthropic/claude-3.5-sonnet';
+        // Use config values (cheap fast models) instead of expensive Claude
+        this.model = config.openrouter.labelingModel || 'z-ai/glm-4.7-flash';
+        this.labelingModel = config.openrouter.labelingModel || 'z-ai/glm-4.7-flash';
         this.timeout = config.glm.timeout;
     }
     /**
@@ -50,7 +52,7 @@ class GLMAIService {
      */
     async generateTradingStrategies(researchData) {
         if (!this.canUseService()) {
-            logger_1.default.warn('[OpenRouter] API key not configured, using fallback strategies');
+            logger_1.default.warn('[GLM] API key not configured, using fallback strategies');
             return this.generateFallbackStrategies(researchData);
         }
         try {
@@ -58,11 +60,11 @@ class GLMAIService {
             const response = await this.callAPI(prompt);
             // Parse strategies from response
             const strategies = this.parseStrategies(response);
-            logger_1.default.info(`[OpenRouter] Generated ${strategies.length} strategies`);
+            logger_1.default.info(`[GLM] Generated ${strategies.length} strategies`);
             return strategies;
         }
         catch (error) {
-            logger_1.default.error(`[OpenRouter] Strategy generation failed: ${this.safeErrorMessage(error)}`);
+            logger_1.default.error(`[GLM] Strategy generation failed: ${this.safeErrorMessage(error)}`);
             return this.generateFallbackStrategies(researchData);
         }
     }
@@ -71,7 +73,7 @@ class GLMAIService {
      */
     async generatePredictionIdeas(context) {
         if (!this.canUseService()) {
-            logger_1.default.warn('[OpenRouter] API key not configured, skipping prediction ideas');
+            logger_1.default.warn('[GLM] API key not configured, skipping prediction ideas');
             return [];
         }
         try {
@@ -80,7 +82,7 @@ class GLMAIService {
             return this.parsePredictionIdeas(response);
         }
         catch (error) {
-            logger_1.default.error(`[OpenRouter] Prediction idea generation failed: ${this.safeErrorMessage(error)}`);
+            logger_1.default.error(`[GLM] Prediction idea generation failed: ${this.safeErrorMessage(error)}`);
             return [];
         }
     }
@@ -95,6 +97,8 @@ class GLMAIService {
         const modelToUse = modelOverride || this.model;
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
+                // Shared rate limit: enforce minimum interval across all z.ai services
+                await (0, shared_rate_limiter_1.acquireRateLimitSlot)('GLM');
                 const response = await axios_1.default.post(`${this.baseUrl}/chat/completions`, {
                     model: modelToUse,
                     messages: [
@@ -115,10 +119,31 @@ class GLMAIService {
                 return response.data.choices[0]?.message?.content || '';
             }
             catch (error) {
+                const status = error?.response?.status;
+                // Handle 429 specifically: report to rate limiter for adaptive backoff
+                if (status === 429) {
+                    const retryAfterHeader = error?.response?.headers?.['retry-after'];
+                    let retryAfterMs;
+                    if (retryAfterHeader) {
+                        const parsed = parseInt(retryAfterHeader, 10);
+                        if (!isNaN(parsed)) {
+                            // Could be seconds or milliseconds — if < 100, treat as seconds
+                            retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+                        }
+                    }
+                    (0, shared_rate_limiter_1.reportRateLimitHit)('GLM', retryAfterMs);
+                    if (attempt < retries) {
+                        const backoff = retryAfterMs || Math.min(1000 * Math.pow(3, attempt), 30000);
+                        logger_1.default.warn(`[GLM] 429 rate limited on attempt ${attempt}, retrying in ${backoff}ms...`);
+                        await new Promise(r => setTimeout(r, backoff));
+                        continue;
+                    }
+                }
                 if (attempt === retries)
                     throw error;
-                logger_1.default.warn(`[OpenRouter] Attempt ${attempt} failed, retrying...`);
-                await new Promise(r => setTimeout(r, 1000 * attempt));
+                const backoff = Math.min(1000 * Math.pow(3, attempt), 30000); // 3s, 9s, 27s exponential backoff
+                logger_1.default.warn(`[GLM] Attempt ${attempt} failed (${status || 'error'}), retrying in ${backoff}ms...`);
+                await new Promise(r => setTimeout(r, backoff));
             }
         }
         throw new Error('GLM API call failed after retries');
@@ -127,7 +152,7 @@ class GLMAIService {
      * Build the strategy generation prompt
      */
     buildStrategyPrompt(data) {
-        return `Based on the following market research data, generate 10 highly profitable trading strategies for Hyperliquid DEX.
+        return `Based on the following market research data, generate 5 highly profitable trading strategies for Hyperliquid DEX.
 
 Research Data:
 - Topic: ${data.topic}
@@ -213,22 +238,47 @@ Markets:\n${markets}`;
                 .filter((idea) => !!idea.marketId && !!idea.marketTitle);
         }
         catch (error) {
-            logger_1.default.warn('[OpenRouter] Failed to parse prediction ideas JSON');
+            logger_1.default.warn('[GLM] Failed to parse prediction ideas JSON');
             return [];
         }
     }
     /**
      * Parse strategies from LLM response
      */
+    robustJSONParse(text) {
+        // Strip markdown code fences
+        let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+        // Extract JSON object
+        const jsonMatch = cleaned.match(/\{[\s\S]*"strategies"[\s\S]*\}/);
+        if (!jsonMatch)
+            return null;
+        let raw = jsonMatch[0];
+        // Fix trailing commas before } or ]
+        raw = raw.replace(/,\s*([}\]])/g, '$1');
+        try {
+            return JSON.parse(raw);
+        }
+        catch {
+            // Try to find the last complete strategy object if truncated
+            const lastComplete = raw.lastIndexOf('},');
+            if (lastComplete > 0) {
+                const truncated = raw.substring(0, lastComplete + 1) + ']}';
+                try {
+                    return JSON.parse(truncated);
+                }
+                catch { /* give up */ }
+            }
+            return null;
+        }
+    }
     parseStrategies(response) {
         try {
-            // Extract JSON from response
-            const jsonMatch = response.match(/\{[\s\S]*"strategies"[\s\S]*\}/);
-            if (!jsonMatch) {
-                logger_1.default.warn('[OpenRouter] Could not find JSON in response');
+            const parsed = this.robustJSONParse(response);
+            if (!parsed || !Array.isArray(parsed.strategies)) {
+                logger_1.default.warn('[GLM] Could not find valid strategies JSON in response');
                 return [];
             }
-            const parsed = JSON.parse(jsonMatch[0]);
+            logger_1.default.info(`[GLM] Parsed ${parsed.strategies.length} strategies from response`);
             const strategies = [];
             for (const s of parsed.strategies || []) {
                 strategies.push({
@@ -267,7 +317,7 @@ Markets:\n${markets}`;
             return strategies;
         }
         catch (error) {
-            logger_1.default.error(`[OpenRouter] Failed to parse strategies: ${this.safeErrorMessage(error)}`);
+            logger_1.default.error(`[GLM] Failed to parse strategies: ${this.safeErrorMessage(error)}`);
             return [];
         }
     }
@@ -377,7 +427,7 @@ Markets:\n${markets}`;
      * Optimize a strategy based on its performance (stub for compatibility)
      */
     async optimizeStrategy(strategy, performance) {
-        logger_1.default.info(`[OpenRouter] Optimizing strategy: ${strategy.name}`);
+        logger_1.default.info(`[GLM] Optimizing strategy: ${strategy.name}`);
         // CRITICAL FIX: REVERSED revenge trading logic
         // When losing: TIGHTEN stops (be more selective), when winning: can afford slightly wider stops
         // Also enforce max 1:3 risk/reward ratio
@@ -397,7 +447,7 @@ Markets:\n${markets}`;
         const minTakeProfit = stopLoss * 3.0;
         if (takeProfit < minTakeProfit) {
             takeProfit = minTakeProfit;
-            logger_1.default.warn(`[OpenRouter] Adjusted take profit to maintain 1:3 R:R ratio: ${(takeProfit * 100).toFixed(2)}%`);
+            logger_1.default.warn(`[GLM] Adjusted take profit to maintain 1:3 R:R ratio: ${(takeProfit * 100).toFixed(2)}%`);
         }
         return {
             ...strategy,
@@ -413,7 +463,7 @@ Markets:\n${markets}`;
      * Generate a trading signal (stub for compatibility)
      */
     async generateTradingSignal(indicators, patterns) {
-        logger_1.default.info('[OpenRouter] generateTradingSignal called (stub)');
+        logger_1.default.info('[GLM] generateTradingSignal called (stub)');
         return null;
     }
     /**
@@ -421,7 +471,7 @@ Markets:\n${markets}`;
      */
     async summarizeArticle(content) {
         if (!this.canUseService()) {
-            logger_1.default.warn('[OpenRouter] API key not configured, returning fallback summary');
+            logger_1.default.warn('[GLM] API key not configured, returning fallback summary');
             return this.generateFallbackSummary(content);
         }
         try {
@@ -430,7 +480,7 @@ Markets:\n${markets}`;
             return summary.trim();
         }
         catch (error) {
-            logger_1.default.error(`[OpenRouter] Summarization failed: ${this.safeErrorMessage(error)}`);
+            logger_1.default.error(`[GLM] Summarization failed: ${this.safeErrorMessage(error)}`);
             return this.generateFallbackSummary(content);
         }
     }
@@ -479,7 +529,7 @@ Summary:`;
             return null;
         }
         catch (error) {
-            logger_1.default.warn(`[OpenRouter] Embedding generation failed: ${this.safeErrorMessage(error)}`);
+            logger_1.default.warn(`[GLM] Embedding generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
     }
@@ -569,7 +619,7 @@ Return JSON ONLY:
             };
         }
         catch (error) {
-            logger_1.default.warn(`[OpenRouter] Event label generation failed: ${this.safeErrorMessage(error)}`);
+            logger_1.default.warn(`[GLM] Event label generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
     }
@@ -629,7 +679,7 @@ Return JSON ONLY:
             };
         }
         catch (error) {
-            logger_1.default.warn(`[OpenRouter] Trend label generation failed: ${this.safeErrorMessage(error)}`);
+            logger_1.default.warn(`[GLM] Trend label generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
     }

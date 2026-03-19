@@ -350,6 +350,7 @@ function calculateMetrics(
         winRate,
         totalTrades: exitTrades.length,
         trades,
+        profitFactor,
         metrics: {
             calmarRatio: maxDrawdown > 0 ? totalReturn / maxDrawdown : 0,
             sortinoRatio: sharpeRatio * 1.2, // Simplified

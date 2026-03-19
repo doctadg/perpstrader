@@ -9,6 +9,7 @@ import util from 'util';
 import { embedText } from '../shared/local-embeddings';
 import { deriveTrend } from '../shared/news-trend';
 import openrouterService from '../shared/openrouter-service';
+import { ensureEmbeddingFunctionsRegistered, ManualNewsEmbeddingFunction } from '../shared/chroma-embedding-function';
 
 const execAsync = util.promisify(exec);
 
@@ -30,6 +31,7 @@ export class NewsVectorStore {
     private readonly EMBEDDING_DIM = Number.parseInt(process.env.NEWS_EMBEDDING_DIM || '64', 10) || 64;
     private readonly COLLECTION_NAME =
         process.env.CHROMA_NEWS_COLLECTION || `global_news_local_${this.EMBEDDING_DIM}`;
+    private readonly newsEmbeddingFn = new ManualNewsEmbeddingFunction(this.EMBEDDING_DIM);
 
     // Configuration
     private readonly MAX_FAILURES = 3;
@@ -133,14 +135,29 @@ export class NewsVectorStore {
 
         try {
             logger.info('[NewsVectorStore] Connecting to ChromaDB...');
+            ensureEmbeddingFunctionsRegistered();
             await this.client.heartbeat(); // Test connection
 
             // Get or create collection
             this.newsCollection = await this.client.getOrCreateCollection({
                 name: this.COLLECTION_NAME,
                 metadata: { description: 'Global news articles for semantic clustering' },
-                embeddingFunction: null,
+                embeddingFunction: this.newsEmbeddingFn as any,
             });
+
+            // Fix existing collection that was created with embeddingFunction: null
+            try {
+                const config = (this.newsCollection as any).configuration;
+                if (config && !config.embedding_function) {
+                    await (this.newsCollection as any).modify({
+                        configuration: { embeddingFunction: this.newsEmbeddingFn },
+                    });
+                    logger.info(`[NewsVectorStore] Updated embedding function config for collection: ${this.COLLECTION_NAME}`);
+                }
+            } catch (modifyErr: any) {
+                // Non-critical: collection still works, just shows warning on next startup
+                logger.debug(`[NewsVectorStore] Could not update collection config (non-critical): ${modifyErr?.message}`);
+            }
 
             this.initialized = true;
             this.consecutiveFailures = 0; // Reset failure count on success

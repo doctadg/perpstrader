@@ -2,9 +2,9 @@
 // Integrates all 10 enhancements into clustering pipeline
 // Replaces original story-cluster-node.ts
 
-import logger from '../../shared/logger';
-import newsVectorStore from '../../data/news-vector-store';
-import storyClusterStoreEnhanced from '../../data/story-cluster-store-enhanced';
+import logger from '../shared/logger';
+import newsVectorStore from '../data/news-vector-store';
+import storyClusterStoreEnhanced from '../data/story-cluster-store-enhanced';
 import crypto from 'crypto';
 import glmService from '../../shared/glm-service';
 import openrouterService from '../../shared/openrouter-service';
@@ -30,6 +30,9 @@ export interface EnhancedClusteringState {
     categorizedNews: NewsItem[];
     clusters: any[];
     currentStep?: string;
+    anomalies?: any[];
+    predictions?: any[];
+    trendingEntities?: any[];
     stats: {
         totalProcessed: number;
         newClusters: number;
@@ -46,7 +49,7 @@ export interface EnhancedClusteringState {
 export interface ClusteringResult {
     clusters: any[];
     stats: EnhancedClusteringState['stats'];
-    anomalies: HeatAnomaly[];
+    anomalies: any[];
     predictions: HeatPrediction[];
     trendingEntities: EntityHeat[];
 }
@@ -86,7 +89,7 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
         predictionsGenerated: 0
     };
 
-    const anomalies: HeatAnomaly[] = [];
+    const anomalies: any[] = [];
     const predictions: HeatPrediction[] = [];
 
     const vectorStats = await newsVectorStore.getStats();
@@ -441,7 +444,7 @@ async function processArticleEnhanced(
         );
 
         if (useVectorMode) {
-            await newsVectorStore.storeArticle(article, assignedClusterId);
+            await newsVectorStore.storeArticle(article as any, assignedClusterId);
         }
 
         // Link entities to cluster
@@ -486,7 +489,7 @@ async function processArticleEnhanced(
         );
 
         if (useVectorMode) {
-            await newsVectorStore.storeArticle(article, newClusterId);
+            await newsVectorStore.storeArticle(article as any, newClusterId);
         }
 
         // Link entities to cluster
@@ -700,7 +703,7 @@ function validateTopicQuality(topic: string, articleTitle: string): { valid: boo
         return { valid: false, reason: 'No proper nouns found' };
     }
 
-    return { valid: true };
+    return { valid: true, reason: 'Valid' };
 }
 
 /**

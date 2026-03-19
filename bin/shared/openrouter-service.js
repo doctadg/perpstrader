@@ -13,6 +13,7 @@ const http_1 = __importDefault(require("http"));
 const config_1 = __importDefault(require("./config"));
 const logger_1 = __importDefault(require("./logger"));
 const redis_cache_1 = __importDefault(require("./redis-cache"));
+const shared_rate_limiter_1 = require("./shared-rate-limiter");
 const title_cleaner_1 = require("./title-cleaner");
 const config = config_1.default.get();
 // Create shared axios instance with connection pooling for better performance
@@ -79,6 +80,8 @@ class OpenRouterService {
         }
         this.cacheMisses++;
         try {
+            // Shared rate limit: enforce 1 call per 10s across all z.ai services
+            await (0, shared_rate_limiter_1.acquireRateLimitSlot)('OpenRouter-embedding');
             const safeText = text.substring(0, 8000);
             const response = await axiosInstance.post(`${this.baseUrl}/chat/completions`, {
                 model: this.embeddingModel,
@@ -109,6 +112,17 @@ class OpenRouterService {
             return null;
         }
         catch (error) {
+            // Report 429 to shared rate limiter for adaptive backoff
+            if (error?.response?.status === 429) {
+                const retryAfter = error?.response?.headers?.['retry-after'];
+                let retryAfterMs;
+                if (retryAfter) {
+                    const parsed = parseInt(retryAfter, 10);
+                    if (!isNaN(parsed))
+                        retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+                }
+                (0, shared_rate_limiter_1.reportRateLimitHit)('OpenRouter-embedding', retryAfterMs);
+            }
             logger_1.default.debug(`[OpenRouter] Embedding generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
@@ -210,6 +224,8 @@ Return JSON ONLY:
   "keywords": ["...", "..."]
 }`;
         try {
+            // Shared rate limit: enforce 1 call per 10s across all z.ai services
+            await (0, shared_rate_limiter_1.acquireRateLimitSlot)('OpenRouter-eventLabel');
             const response = await axiosInstance.post(`${this.baseUrl}/chat/completions`, {
                 model: this.labelingModel,
                 messages: [
@@ -279,6 +295,17 @@ Return JSON ONLY:
             return result;
         }
         catch (error) {
+            // Report 429 to shared rate limiter for adaptive backoff
+            if (error?.response?.status === 429) {
+                const retryAfter = error?.response?.headers?.['retry-after'];
+                let retryAfterMs;
+                if (retryAfter) {
+                    const parsed = parseInt(retryAfter, 10);
+                    if (!isNaN(parsed))
+                        retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+                }
+                (0, shared_rate_limiter_1.reportRateLimitHit)('OpenRouter-eventLabel', retryAfterMs);
+            }
             logger_1.default.debug(`[OpenRouter] Event label generation failed: ${this.safeErrorMessage(error)}`);
             return null;
         }
@@ -381,6 +408,8 @@ Return JSON ONLY in this format:
   ]
 }`;
         try {
+            // Shared rate limit: enforce 1 call per 10s across all z.ai services
+            await (0, shared_rate_limiter_1.acquireRateLimitSlot)('OpenRouter-batchEventLabel');
             const response = await axiosInstance.post(`${this.baseUrl}/chat/completions`, {
                 model: this.labelingModel,
                 messages: [
@@ -480,6 +509,17 @@ Return JSON ONLY in this format:
             logger_1.default.info(`[OpenRouter] Batch ${batchIndex}: ${results.size} labeled from ${batch.length} articles`);
         }
         catch (error) {
+            // Report 429 to shared rate limiter for adaptive backoff
+            if (error?.response?.status === 429) {
+                const retryAfter = error?.response?.headers?.['retry-after'];
+                let retryAfterMs;
+                if (retryAfter) {
+                    const parsed = parseInt(retryAfter, 10);
+                    if (!isNaN(parsed))
+                        retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+                }
+                (0, shared_rate_limiter_1.reportRateLimitHit)('OpenRouter-batchEventLabel', retryAfterMs);
+            }
             logger_1.default.warn(`[OpenRouter] Batch ${batchIndex} failed: ${this.safeErrorMessage(error)}`);
         }
         return results;
@@ -577,6 +617,8 @@ Return JSON in this format:
   ]
 }`;
         try {
+            // Shared rate limit: enforce 1 call per 10s across all z.ai services
+            await (0, shared_rate_limiter_1.acquireRateLimitSlot)('OpenRouter-batchCategorization');
             const response = await axiosInstance.post(`${this.baseUrl}/chat/completions`, {
                 model: this.labelingModel,
                 messages: [

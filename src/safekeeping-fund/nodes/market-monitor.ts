@@ -3,8 +3,9 @@
 
 import logger from '../../shared/logger';
 import { MultiChainWalletManager } from '../dex/multi-chain-wallet-manager';
+import defiLlamaYields from '../defillama-yields';
 import type { SafekeepingFundState } from '../state';
-import type { ChainStatus, Chain } from '../types';
+import type { ChainStatus, Chain, PoolOpportunity } from '../types';
 
 /**
  * Market Monitor Node
@@ -30,11 +31,23 @@ export async function marketMonitorNode(
       );
     }
 
-    // Fetch pool opportunities from all chains
-    const opportunities = await walletManager.fetchAllPoolOpportunities();
+    // Fetch pool opportunities from all chains (on-chain)
+    const onChainOpportunities = await walletManager.fetchAllPoolOpportunities();
+
+    // Fetch DefiLlama pool yields (PancakeSwap V3, Meteora, Uniswap V3)
+    let defiLlamaOpportunities: PoolOpportunity[] = [];
+    try {
+      defiLlamaOpportunities = await defiLlamaYields.fetchPools();
+      logger.info(`[MarketMonitor] DefiLlama provided ${defiLlamaOpportunities.length} pool opportunities`);
+    } catch (error) {
+      logger.warn(`[MarketMonitor] DefiLlama fetch failed (continuing with on-chain data): ${error}`);
+    }
+
+    // Merge: DefiLlama data takes priority (more accurate APR), on-chain fills gaps
+    const opportunities = mergePoolOpportunities(defiLlamaOpportunities, onChainOpportunities);
 
     logger.info(
-      `[MarketMonitor] Found ${opportunities.length} opportunities across ` +
+      `[MarketMonitor] Found ${opportunities.length} opportunities (DL: ${defiLlamaOpportunities.length}, on-chain: ${onChainOpportunities.length}) across ` +
       `${chainStatusMap.size} chain(s) in ${Date.now() - startTime}ms`
     );
 
@@ -100,4 +113,55 @@ export async function quickHealthCheck(
       chainStatuses: new Map(),
     };
   }
+}
+
+/**
+ * Merge DefiLlama pool data with on-chain data.
+ * DefiLlama takes priority for APR/TVL accuracy.
+ * On-chain data provides real-time pool state (reserves, sqrtPrice, etc.)
+ */
+function mergePoolOpportunities(
+  defiLlama: PoolOpportunity[],
+  onChain: PoolOpportunity[]
+): PoolOpportunity[] {
+  if (defiLlama.length === 0) return onChain;
+  if (onChain.length === 0) return defiLlama;
+
+  // Index on-chain pools by (chain, dex, symbol pair)
+  const onChainMap = new Map<string, PoolOpportunity>();
+  for (const pool of onChain) {
+    const key = `${pool.chain}:${pool.dex}:${pool.token0.symbol}-${pool.token1.symbol}`;
+    onChainMap.set(key, pool);
+  }
+
+  // Start with DefiLlama data (more accurate APR)
+  const merged: PoolOpportunity[] = [];
+
+  for (const dlPool of defiLlama) {
+    const key = `${dlPool.chain}:${dlPool.dex}:${dlPool.token0.symbol}-${dlPool.token1.symbol}`;
+    const onChainPool = onChainMap.get(key);
+
+    if (onChainPool) {
+      // Merge: keep DL APR/TVL, enrich with on-chain address/fees if available
+      merged.push({
+        ...dlPool,
+        // Prefer on-chain address if we have one (more precise)
+        address: onChainPool.address !== '0x0000000000000000000000000000000000000000'
+          ? onChainPool.address
+          : dlPool.address,
+        feeTier: onChainPool.feeTier || dlPool.feeTier,
+        // Keep DefiLlama APR (most accurate)
+      });
+      onChainMap.delete(key); // Don't duplicate
+    } else {
+      merged.push(dlPool);
+    }
+  }
+
+  // Add remaining on-chain pools not covered by DefiLlama
+  for (const pool of onChainMap.values()) {
+    merged.push(pool);
+  }
+
+  return merged;
 }

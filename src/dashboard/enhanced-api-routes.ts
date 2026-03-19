@@ -625,7 +625,7 @@ router.get('/news/circuit-breakers-health', async (req, res) => {
             totalCount: breakers.length
         };
 
-        for (const [name, status] of Object.entries(breakers)) {
+        for (const [name, status] of Object.entries(breakers) as any) {
             if (status.isOpen) {
                 health.openCount++;
             }

@@ -155,6 +155,52 @@ export class SafekeepingFundAgent {
         timestamp: new Date(),
       });
 
+      // Store state in Redis for dashboard consumption
+      try {
+        const Redis = require('ioredis');
+        const cacheRedis = new Redis({
+          host: process.env.REDIS_HOST || '127.0.0.1',
+          port: parseInt(process.env.REDIS_PORT || '6380', 10),
+          password: process.env.REDIS_PASSWORD || undefined,
+          db: parseInt(process.env.REDIS_DB || '0', 10),
+        });
+        const stateData = JSON.stringify({
+          cycleId: result.cycleId,
+          cycleNumber: this.cycleCount + 1,
+          currentStep: result.currentStep,
+          totalValue: result.totalValue,
+          weightedAPR: result.totalEffectiveAPR,
+          positions: result.positions || [],
+          opportunities: result.poolOpportunities || [],
+          topOpportunities: result.topOpportunities || [],
+          chainStatus: Object.fromEntries(result.chainStatus || new Map()),
+          rebalances: result.executionResults || [],
+          safetyChecks: result.safetyChecks || [],
+          aiRiskLevel: result.aiRiskLevel || 'MEDIUM',
+          marketRegime: result.marketRegime || 'SIDEWAYS',
+          aiAnalysis: {
+            summary: result.marketAnalysis || 'No analysis',
+            recommendations: result.aiRecommendations || [],
+            anomalies: (result.detectedAnomalies || []).map((a: any) => ({ severity: a.severity, type: a.type, description: a.description })),
+          },
+          totalRebalances: result.totalRebalances || 0,
+          successfulRebalances: result.successfulRebalances || 0,
+          totalGasSpent: result.totalGasSpent || 0,
+          gasSpent: result.totalGasSpent || 0,
+          activePositions: (result.positions || []).length,
+          tvl: result.totalValue || 0,
+          successRate: result.totalRebalances > 0 ? Math.round((result.successfulRebalances / result.totalRebalances) * 100) : 100,
+          errors: result.errors || [],
+          warnings: result.warnings || [],
+          lastUpdate: new Date().toISOString(),
+        });
+        await cacheRedis.set('safekeeping:state', stateData, 'EX', 600); // 10 min TTL
+        await cacheRedis.set('safekeeping:last-cycle', JSON.stringify({ duration, step: result.currentStep, rebalances: result.executionResults.length, errors: result.errors.length }), 'EX', 3600);
+        cacheRedis.disconnect();
+      } catch (cacheErr) {
+        logger.warn('[SafekeepingAgent] Failed to cache state:', cacheErr);
+      }
+
       // Log summary
       logger.info(
         `[SafekeepingAgent] Cycle ${this.cycleCount + 1} complete in ${duration}ms. ` +

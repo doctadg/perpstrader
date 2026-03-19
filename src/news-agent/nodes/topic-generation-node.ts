@@ -242,7 +242,7 @@ function buildTopicPrompt(article: FilteredArticle): string {
 Title: ${article.title}
 Source: ${article.source}
 Published: ${article.publishedAt}
-Category: ${article.categories?.[0] || 'UNKNOWN'}
+Category: ${(article as any).categories?.[0] || 'UNKNOWN'}
 Content Preview: ${article.content?.slice(0, 300) || article.snippet || ''}
 
 Respond with JSON ONLY:

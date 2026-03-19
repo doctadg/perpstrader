@@ -61,6 +61,7 @@ export interface BacktestResult {
   winRate: number;
   totalTrades: number;
   trades: Trade[];
+  profitFactor: number;
   metrics: {
     calmarRatio: number;
     sortinoRatio: number;

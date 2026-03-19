@@ -133,8 +133,8 @@ export interface UniswapV3ClientConfig {
  * Handles interaction with Uniswap V3 on Ethereum mainnet
  */
 export class UniswapV3Client extends BaseDEXClient {
-  private publicClient: PublicClient<HttpTransport, ViemChain>;
-  private walletClient: WalletClient<HttpTransport, ViemChain, Account>;
+  private publicClient: any;
+  private walletClient: any;
   private account: Account;
   private positions: Map<string, LiquidityPosition> = new Map();
 
