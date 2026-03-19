@@ -94,8 +94,8 @@ class PopulationManager {
             entryThresholds: {
                 rsiOverbought: strategy.parameters?.rsiOverbought || 70,
                 rsiOversold: strategy.parameters?.rsiOversold || 30,
-                emaFast: strategy.parameters?.emaFast || 12,
-                emaSlow: strategy.parameters?.emaSlow || 26,
+                emaFast: strategy.parameters?.emaFast || strategy.parameters?.fastPeriod || 12,
+                emaSlow: strategy.parameters?.emaSlow || strategy.parameters?.slowPeriod || 26,
                 volumeThreshold: strategy.parameters?.volumeThreshold || 1.5,
                 macdSignalThreshold: strategy.parameters?.macdSignalThreshold || 0,
             },

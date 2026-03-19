@@ -13,6 +13,8 @@ export const AGGRESSIVE_STRATEGIES: Strategy[] = [
     parameters: {
       emaFast: 5,
       emaSlow: 20,
+      fastPeriod: 5,
+      slowPeriod: 20,
       rsiOverbought: 70,
       rsiOversold: 30,
       volumeThreshold: 1.5

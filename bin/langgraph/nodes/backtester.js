@@ -115,8 +115,8 @@ async function vectorizedBacktest(idea, candles, closes) {
     let overbought = getParam(['overbought', 'rsiOverbought', 'rsiHigh'], 65, 50, 90, false);
     const bbPeriod = getParam(['bbPeriod', 'bollingerPeriod'], 20, 10, 50);
     const bbStdDev = getParam(['bbStdDev', 'bollingerStdDev'], 2, 1.5, 3.5, false);
-    let fastPeriod = getParam(['fastPeriod', 'smaFast', 'fast'], 10, 5, 30);
-    let slowPeriod = getParam(['slowPeriod', 'smaSlow', 'slow'], 30, 10, 80);
+    let fastPeriod = getParam(['fastPeriod', 'smaFast', 'emaFast', 'fast'], 10, 5, 30);
+    let slowPeriod = getParam(['slowPeriod', 'smaSlow', 'emaSlow', 'slow'], 30, 10, 80);
     if (slowPeriod <= fastPeriod) {
         slowPeriod = Math.min(fastPeriod + 5, 80);
     }

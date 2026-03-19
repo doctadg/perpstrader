@@ -178,8 +178,8 @@ class BacktestEngine {
         };
         switch (strategy.type) {
             case 'TREND_FOLLOWING': {
-                const fastPeriod = params.fastPeriod || params.smaFast || params.fast || 10;
-                const slowPeriod = params.slowPeriod || params.smaSlow || params.slow || 30;
+                const fastPeriod = params.fastPeriod ?? params.smaFast ?? params.emaFast ?? params.fast ?? 10;
+                const slowPeriod = params.slowPeriod ?? params.smaSlow ?? params.emaSlow ?? params.slow ?? 30;
                 const minBars = Math.max(fastPeriod, slowPeriod) + 1;
                 if (closes.length >= minBars) {
                     const fastNow = sma(fastPeriod);

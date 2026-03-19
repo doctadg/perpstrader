@@ -174,6 +174,12 @@ export function genomeToStrategy(genome: StrategyGenome): any {
     timeframe: genome.parameters.timingParameters.timeframe,
     parameters: {
       ...genome.parameters.entryThresholds,
+      // Normalize emaFast/emaSlow to fastPeriod/slowPeriod (canonical names for backtester)
+      fastPeriod: genome.parameters.entryThresholds.emaFast ?? 10,
+      slowPeriod: genome.parameters.entryThresholds.emaSlow ?? 30,
+      // Normalize rsiOverbought/oversold to overbought/oversold
+      overbought: genome.parameters.entryThresholds.rsiOverbought ?? 70,
+      oversold: genome.parameters.entryThresholds.rsiOversold ?? 30,
       ...genome.parameters.filterParameters,
       maxHoldTime: genome.parameters.timingParameters.maxHoldTime,
       minHoldTime: genome.parameters.timingParameters.minHoldTime,
