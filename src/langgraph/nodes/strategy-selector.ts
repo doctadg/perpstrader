@@ -111,7 +111,8 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
                     updatedAt: new Date(),
                 };
 
-                await dataManager.saveStrategy(fallbackStrategy);
+                // NOTE: Do NOT save fallback to DB — same reason as main selector above.
+                // Fallback strategies should not pollute the active strategy pool.
 
                 return {
                     currentStep: 'STRATEGY_SELECTED_FALLBACK',
@@ -215,8 +216,11 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
             updatedAt: new Date(),
         };
 
-        // Save strategy to database
-        await dataManager.saveStrategy(strategy);
+        // NOTE: Do NOT save to DB with isActive=true here.
+        // The LangGraph pipeline runs per-symbol per-cycle (30+ symbols).
+        // Saving isActive=true here caused 2000+ strategy spam.
+        // DB strategy promotion is handled exclusively by research-engine/promoteTopStrategies().
+        // We still return the strategy in state for this cycle's execution.
 
         logger.info(`[StrategySelectorNode] Selected: ${strategy.name} (Score: ${best.score.toFixed(3)}, Trades: ${best.result.totalTrades})`);
 

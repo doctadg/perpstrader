@@ -7,7 +7,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.strategySelectorNode = strategySelectorNode;
 const uuid_1 = require("uuid");
-const data_manager_1 = __importDefault(require("../../data-manager/data-manager"));
 const logger_1 = __importDefault(require("../../shared/logger"));
 // MINIMUM QUALITY THRESHOLDS (previously ultra-aggressive, now with basic sanity checks)
 const MIN_SHARPE_RATIO = -0.3; // Reduced from aggressive -0.5, but still allows some exploration
@@ -101,7 +100,8 @@ async function strategySelectorNode(state) {
                     createdAt: new Date(),
                     updatedAt: new Date(),
                 };
-                await data_manager_1.default.saveStrategy(fallbackStrategy);
+                // NOTE: Do NOT save fallback to DB — same reason as main selector above.
+                // Fallback strategies should not pollute the active strategy pool.
                 return {
                     currentStep: 'STRATEGY_SELECTED_FALLBACK',
                     selectedStrategy: fallbackStrategy,
@@ -189,8 +189,11 @@ async function strategySelectorNode(state) {
             createdAt: new Date(),
             updatedAt: new Date(),
         };
-        // Save strategy to database
-        await data_manager_1.default.saveStrategy(strategy);
+        // NOTE: Do NOT save to DB with isActive=true here.
+        // The LangGraph pipeline runs per-symbol per-cycle (30+ symbols).
+        // Saving isActive=true here caused 2000+ strategy spam.
+        // DB strategy promotion is handled exclusively by research-engine/promoteTopStrategies().
+        // We still return the strategy in state for this cycle's execution.
         logger_1.default.info(`[StrategySelectorNode] Selected: ${strategy.name} (Score: ${best.score.toFixed(3)}, Trades: ${best.result.totalTrades})`);
         return {
             currentStep: 'STRATEGY_SELECTED',
