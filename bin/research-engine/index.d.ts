@@ -39,7 +39,10 @@ export declare class ResearchEngine {
      */
     private backtestStrategy;
     /**
-     * Simulate a backtest (fallback when real backtest is unavailable)
+     * Simulate a backtest (fallback when real backtest is unavailable).
+     * Returns conservative estimates — NOT random garbage.
+     * This should almost never be called; if it is, the result should
+     * never pass promotion gates.
      */
     private simulateBacktest;
     /**

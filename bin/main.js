@@ -1,6 +1,39 @@
 "use strict";
 // Main Entry Point - LangGraph Trading Agent
 // Runs the autonomous trading system with enhanced resilience
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -112,6 +145,47 @@ function spawnChildProcess(config) {
         logger_1.default.info(`[ChildProcess] ${name} message:`, message);
     });
     return child;
+}
+/**
+ * Kill orphan child processes from previous main.js instances.
+ * On restart, old children survive because their parent PID is dead.
+ * This uses pgrep to find and kill them before spawning fresh ones.
+ */
+async function cleanupOrphanChildProcesses() {
+    const { execSync } = await Promise.resolve().then(() => __importStar(require('child_process')));
+    // Always exclude our own PID to prevent self-kill
+    const myPid = process.pid;
+    for (const config of CHILD_PROCESS_CONFIGS) {
+        try {
+            // Use the full script path for pgrep to avoid ambiguous basename matches
+            // (e.g. "main.js" would match the parent process itself for safekeeping-fund)
+            const scriptPath = config.scriptPath;
+            const result = execSync(`pgrep -f "${scriptPath}" | head -20`, { encoding: 'utf8', timeout: 5000 }).trim();
+            if (result) {
+                const pids = result.split('\n').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
+                const myPids = new Set([myPid]);
+                for (const [, child] of CHILD_PROCESSES.entries()) {
+                    if (child.pid)
+                        myPids.add(child.pid);
+                }
+                const orphans = pids.filter(p => !myPids.has(p));
+                if (orphans.length > 0) {
+                    logger_1.default.warn(`[ChildProcess] Found ${orphans.length} orphan ${config.name} process(es): ${orphans.join(', ')}`);
+                    try {
+                        execSync(`kill ${orphans.join(' ')} 2>/dev/null || true`, { timeout: 5000 });
+                        logger_1.default.info(`[ChildProcess] Killed orphan ${config.name} processes`);
+                    }
+                    catch {
+                        // PIDs may already be dead — that's fine
+                        logger_1.default.info(`[ChildProcess] Orphan ${config.name} processes cleaned up`);
+                    }
+                }
+            }
+        }
+        catch {
+            // pgrep returns non-zero when no matches found — that's fine
+        }
+    }
 }
 function startChildProcesses() {
     logger_1.default.info('[ChildProcess] Starting child processes...');
@@ -458,7 +532,13 @@ async function main() {
         catch (error) {
             logger_1.default.warn('[Main] Position recovery monitoring failed to start:', error);
         }
-        // Start child processes (news-agent and prediction-agent)
+        // Kill orphan child processes from previous main.js instances, then start fresh
+        try {
+            await cleanupOrphanChildProcesses();
+        }
+        catch (error) {
+            logger_1.default.warn('[Main] Orphan cleanup failed:', error);
+        }
         try {
             startChildProcesses();
         }

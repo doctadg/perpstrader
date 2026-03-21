@@ -26,16 +26,24 @@ export interface BacktestEngineConfig extends BacktestConfig {
 }
 
 /**
- * Enhanced Backtest Engine with Nautilus-style features
+ * Enhanced Backtest Engine with Nautilus-style features and realistic execution
  */
 export class BacktestEngine {
     private config: BacktestEngineConfig;
     private clock: TestClock;
     private fillModel: FillModel;
     private capital: number;
-    private positions: Map<string, { qty: number; avgPx: number; side: 'LONG' | 'SHORT' }> = new Map();
+    private totalFees: number;
+    private totalSlippageCost: number;
+    private positions: Map<string, { qty: number; avgPx: number; side: 'LONG' | 'SHORT'; entryBar: number }> = new Map();
     private trades: Trade[] = [];
     private orderBooks: Map<string, any> = new Map();
+
+    // Realism settings
+    private minBarsBetweenEntries: number;
+    private nextBarExecution: boolean;
+    private intrabarStopCheck: boolean;
+    private hourlyFundingRate: number;
 
     constructor(config: BacktestEngineConfig = {}) {
         this.config = {
@@ -68,6 +76,14 @@ export class BacktestEngine {
         }
 
         this.capital = this.config.initialCapital ?? 10000;
+        this.totalFees = 0;
+        this.totalSlippageCost = 0;
+
+        // Realism defaults
+        this.minBarsBetweenEntries = 3;
+        this.nextBarExecution = true;
+        this.intrabarStopCheck = true;
+        this.hourlyFundingRate = 0.00001; // 0.001% per hour
 
         logger.info('[BacktestEngine] Initialized with config:', this.config);
     }
@@ -86,6 +102,9 @@ export class BacktestEngine {
 
         const strategyState = this.initializeStrategyState(strategy);
 
+        // Estimate hours per candle
+        const hoursPerCandle = this.estimateHoursPerCandle(candles);
+
         // Main backtesting loop
         for (let i = 0; i < candles.length; i++) {
             const candle = candles[i];
@@ -100,23 +119,43 @@ export class BacktestEngine {
             // Get current clock time
             const currentTime = this.clock.timestampMs();
 
-            // Generate signals from strategy
-            const signals = this.generateSignals(strategy, candle, strategyState);
-
-            // Execute signals
-            for (const signal of signals) {
-                await this.executeSignal(signal, candle, currentTime);
+            // Check intrabar stop/take-profit using candle high/low
+            if (this.intrabarStopCheck) {
+                this.checkIntrabarExits(strategy, candle, currentTime, i);
             }
 
-            // Check stop loss / take profit
+            // Check close-based stop loss / take profit
             this.checkExitConditions(strategy, candle, currentTime);
+
+            // Charge funding while in position
+            this.chargeFunding(candle, hoursPerCandle);
+
+            // Generate signals from strategy
+            const signals = this.generateSignals(strategy, candle, strategyState, i);
+
+            // Execute signals at next bar (or same bar if nextBarExecution is off)
+            if (signals.length > 0 && this.nextBarExecution && i + 1 < candles.length) {
+                const nextCandle = candles[i + 1];
+                const nextTime = nextCandle.timestamp.getTime() * 1_000_000;
+                this.clock.setTime(nextTime);
+                this.updateOrderBook(nextCandle);
+                const nextCurrentTime = this.clock.timestampMs();
+
+                for (const signal of signals) {
+                    await this.executeSignal(signal, nextCandle, nextCurrentTime, i);
+                }
+            } else {
+                for (const signal of signals) {
+                    await this.executeSignal(signal, candle, currentTime, i);
+                }
+            }
         }
 
         // Close any remaining positions
         this.closeAllPositions(candles[candles.length - 1]);
 
         // Calculate results
-        return this.calculateResults(strategy, candles);
+        return this.calculateResults(strategy, candles, hoursPerCandle);
     }
 
     /**
@@ -164,7 +203,75 @@ export class BacktestEngine {
             indicators: {},
             lastSignal: null,
             lastSignalTime: 0,
+            lastEntryBar: -this.minBarsBetweenEntries,
         };
+    }
+
+    /**
+     * Charge funding rate for open positions
+     */
+    private chargeFunding(candle: MarketData, hoursPerCandle: number): void {
+        for (const [symbol, pos] of this.positions) {
+            if (pos.qty === 0) continue;
+
+            const notional = Math.abs(pos.qty) * candle.close;
+            const fundingCost = notional * this.hourlyFundingRate * hoursPerCandle;
+            this.capital -= fundingCost;
+            this.totalFees += fundingCost;
+        }
+    }
+
+    /**
+     * Check intrabar stop/take-profit using candle high/low
+     */
+    private checkIntrabarExits(
+        strategy: Strategy,
+        candle: MarketData,
+        currentTime: number,
+        barIndex: number
+    ): void {
+        const riskParams = strategy.riskParameters;
+        if (!riskParams) return;
+
+        for (const [symbol, pos] of this.positions) {
+            if (pos.qty === 0) continue;
+
+            const slippageBps = this.config.slippageBps ?? 5;
+            const slippageFactor = slippageBps / 10000;
+
+            if (pos.side === 'LONG') {
+                const stopPrice = pos.avgPx * (1 - riskParams.stopLoss);
+                const tpPrice = pos.avgPx * (1 + riskParams.takeProfit);
+
+                // Check stop loss (low hit)
+                if (candle.low <= stopPrice) {
+                    const exitPrice = stopPrice * (1 - slippageFactor); // worse for sell
+                    this.closePositionWithFill(symbol, exitPrice, currentTime, 'STOP_LOSS');
+                    continue;
+                }
+                // Check take profit (high hit)
+                if (candle.high >= tpPrice) {
+                    const exitPrice = tpPrice * (1 - slippageFactor);
+                    this.closePositionWithFill(symbol, exitPrice, currentTime, 'TAKE_PROFIT');
+                }
+            } else {
+                // SHORT
+                const stopPrice = pos.avgPx * (1 + riskParams.stopLoss);
+                const tpPrice = pos.avgPx * (1 - riskParams.takeProfit);
+
+                // Check stop loss (high hit on short)
+                if (candle.high >= stopPrice) {
+                    const exitPrice = stopPrice * (1 + slippageFactor); // worse for buy-to-cover
+                    this.closePositionWithFill(symbol, exitPrice, currentTime, 'STOP_LOSS');
+                    continue;
+                }
+                // Check take profit (low hit on short)
+                if (candle.low <= tpPrice) {
+                    const exitPrice = tpPrice * (1 + slippageFactor);
+                    this.closePositionWithFill(symbol, exitPrice, currentTime, 'TAKE_PROFIT');
+                }
+            }
+        }
     }
 
     /**
@@ -173,9 +280,16 @@ export class BacktestEngine {
     private generateSignals(
         strategy: Strategy,
         candle: MarketData,
-        state: any
+        state: any,
+        barIndex: number
     ): SimulatedOrder[] {
         const signals: SimulatedOrder[] = [];
+
+        // Check cooldown
+        if (barIndex - state.lastEntryBar < this.minBarsBetweenEntries) {
+            return signals;
+        }
+
         const params = strategy.parameters || {};
         const positionSize = (this.capital * (strategy.riskParameters?.maxPositionSize || 0.05)) / candle.close;
 
@@ -233,8 +347,10 @@ export class BacktestEngine {
 
                     if (fastNow > slowNow && fastPrev <= slowPrev) {
                         signals.push(this.createBuySignal(candle, positionSize));
+                        state.lastEntryBar = barIndex;
                     } else if (fastNow < slowNow && fastPrev >= slowPrev) {
                         signals.push(this.createSellSignal(candle, positionSize));
+                        state.lastEntryBar = barIndex;
                     }
                 }
                 break;
@@ -254,8 +370,10 @@ export class BacktestEngine {
 
                     if (price < bb.lower && currentRSI < oversold) {
                         signals.push(this.createBuySignal(candle, positionSize));
+                        state.lastEntryBar = barIndex;
                     } else if (price > bb.upper && currentRSI > overbought) {
                         signals.push(this.createSellSignal(candle, positionSize));
+                        state.lastEntryBar = barIndex;
                     }
                 }
                 break;
@@ -271,8 +389,10 @@ export class BacktestEngine {
                     const currentRSI = rsi(rsiPeriod);
                     if (currentRSI < oversold) {
                         signals.push(this.createBuySignal(candle, positionSize));
+                        state.lastEntryBar = barIndex;
                     } else if (currentRSI > overbought) {
                         signals.push(this.createSellSignal(candle, positionSize));
+                        state.lastEntryBar = barIndex;
                     }
                 }
                 break;
@@ -305,22 +425,23 @@ export class BacktestEngine {
     }
 
     /**
-     * Execute a trading signal
+     * Execute a trading signal — commission is DEDUCTED from capital here
      */
     private async executeSignal(
         signal: SimulatedOrder,
         candle: MarketData,
-        currentTime: number
+        currentTime: number,
+        barIndex: number
     ): Promise<void> {
         const book = this.orderBooks.get(signal.symbol);
         if (!book) return;
 
-        // Simulate fills
+        // Simulate fills through order book
         const fills = this.fillModel.simulateFill(signal, book);
 
         for (const fill of fills) {
             const symbol = signal.symbol;
-            const currentPos = this.positions.get(symbol) || { qty: 0, avgPx: 0, side: 'LONG' };
+            const currentPos = this.positions.get(symbol) || { qty: 0, avgPx: 0, side: 'LONG' as const, entryBar: 0 };
 
             const { qty, avgPx, realizedPnL } = PositionCalculator.applyFills(
                 currentPos.qty,
@@ -328,8 +449,7 @@ export class BacktestEngine {
                 [fill]
             );
 
-            // Determine if this fill is an entry or exit based on position direction.
-            // A fill is an EXIT when it reduces an existing position (opposite direction).
+            // Determine entry vs exit
             const fillSignedQty = fill.side === 'BUY' ? fill.quantity : -fill.quantity;
             const isExit = currentPos.qty !== 0 &&
                 Math.sign(fillSignedQty) !== Math.sign(currentPos.qty);
@@ -338,9 +458,13 @@ export class BacktestEngine {
                 qty,
                 avgPx,
                 side: qty >= 0 ? 'LONG' : 'SHORT',
+                entryBar: isExit ? 0 : barIndex,
             });
 
-            this.capital += realizedPnL;
+            // Deduct commission from capital — THIS IS THE KEY FIX
+            this.capital += realizedPnL - fill.commission;
+            this.totalFees += fill.commission;
+            this.totalSlippageCost += Math.abs(fill.slippage) * fill.quantity;
 
             // Record trade
             this.trades.push({
@@ -360,7 +484,7 @@ export class BacktestEngine {
     }
 
     /**
-     * Check and execute stop loss / take profit
+     * Check and execute stop loss / take profit (close-based fallback)
      */
     private checkExitConditions(strategy: Strategy, candle: MarketData, currentTime: number): void {
         for (const [symbol, pos] of this.positions) {
@@ -388,6 +512,44 @@ export class BacktestEngine {
     }
 
     /**
+     * Close a position with explicit fill price (for intrabar stops)
+     */
+    private closePositionWithFill(symbol: string, fillPrice: number, time: number, reason: string): void {
+        const pos = this.positions.get(symbol);
+        if (!pos || pos.qty === 0) return;
+
+        const closeQty = Math.abs(pos.qty);
+        const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+        const pnl = pos.side === 'LONG'
+            ? (fillPrice - pos.avgPx) * closeQty
+            : (pos.avgPx - fillPrice) * closeQty;
+
+        const fee = fillPrice * closeQty * (this.config.commissionRate ?? 0.0005);
+
+        // Deduct fee from capital
+        this.capital += pnl - fee;
+        this.totalFees += fee;
+
+        this.trades.push({
+            id: uuidv4(),
+            symbol,
+            side: closeSide,
+            size: closeQty,
+            price: fillPrice,
+            fee,
+            pnl,
+            timestamp: new Date(time),
+            type: 'MARKET',
+            status: 'FILLED',
+            entryExit: 'EXIT',
+        });
+
+        this.positions.set(symbol, { qty: 0, avgPx: 0, side: 'LONG', entryBar: 0 });
+
+        logger.debug(`[BacktestEngine] Closed ${symbol} position: ${reason}, PnL: ${pnl.toFixed(2)}`);
+    }
+
+    /**
      * Close a position
      */
     private closePosition(symbol: string, price: number, time: number, reason: string): void {
@@ -400,7 +562,11 @@ export class BacktestEngine {
             ? (price - pos.avgPx) * closeQty
             : (pos.avgPx - price) * closeQty;
 
-        this.capital += pnl;
+        const fee = price * closeQty * (this.config.commissionRate ?? 0.0005);
+
+        // Deduct fee from capital
+        this.capital += pnl - fee;
+        this.totalFees += fee;
 
         this.trades.push({
             id: uuidv4(),
@@ -408,7 +574,7 @@ export class BacktestEngine {
             side: closeSide,
             size: closeQty,
             price,
-            fee: price * closeQty * 0.0005,
+            fee,
             pnl,
             timestamp: new Date(time),
             type: 'MARKET',
@@ -416,7 +582,7 @@ export class BacktestEngine {
             entryExit: 'EXIT',
         });
 
-        this.positions.set(symbol, { qty: 0, avgPx: 0, side: 'LONG' });
+        this.positions.set(symbol, { qty: 0, avgPx: 0, side: 'LONG', entryBar: 0 });
 
         logger.debug(`[BacktestEngine] Closed ${symbol} position: ${reason}, PnL: ${pnl.toFixed(2)}`);
     }
@@ -435,9 +601,9 @@ export class BacktestEngine {
     }
 
     /**
-     * Calculate backtest results
+     * Calculate backtest results with proper metrics
      */
-    private calculateResults(strategy: Strategy, candles: MarketData[]): BacktestResult {
+    private calculateResults(strategy: Strategy, candles: MarketData[], hoursPerCandle: number): BacktestResult {
         const exitTrades = this.trades.filter(t => t.entryExit === 'EXIT');
         const winningTrades = exitTrades.filter(t => (t.pnl || 0) > 0);
         const losingTrades = exitTrades.filter(t => (t.pnl || 0) < 0);
@@ -446,30 +612,84 @@ export class BacktestEngine {
         const totalReturn = ((this.capital - initialCapital) / initialCapital) * 100;
         const winRate = exitTrades.length > 0 ? (winningTrades.length / exitTrades.length) * 100 : 0;
 
-        // Calculate max drawdown
+        // Actual data duration
+        const dataDurationMs = candles[candles.length - 1].timestamp.getTime() - candles[0].timestamp.getTime();
+        const dataDurationYears = Math.max(dataDurationMs / (365.25 * 24 * 3600 * 1000), 1 / 365.25);
+        const annualizedReturn = ((Math.pow(this.capital / initialCapital, 1 / dataDurationYears) - 1) * 100);
+
+        // Max drawdown including fees
         let maxDrawdown = 0;
         let peak = initialCapital;
         let runningCapital = initialCapital;
 
         for (const trade of exitTrades) {
-            runningCapital += trade.pnl || 0;
+            runningCapital += (trade.pnl || 0) - (trade.fee || 0);
             peak = Math.max(peak, runningCapital);
             const drawdown = ((peak - runningCapital) / peak) * 100;
             maxDrawdown = Math.max(maxDrawdown, drawdown);
         }
 
-        // Calculate Sharpe ratio
-        const returns = exitTrades.map(t => (t.pnl || 0) / initialCapital);
+        // Sharpe ratio (proper annualization via trades-per-year)
+        const returns = exitTrades.map(t => ((t.pnl || 0) - (t.fee || 0)) / initialCapital);
         const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
         const stdReturn = returns.length > 1
-            ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length)
+            ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length - 1))
             : 1;
-        const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * Math.sqrt(252) : 0;
+        const tradesPerYear = dataDurationYears > 0 ? exitTrades.length / dataDurationYears : exitTrades.length * 365;
+        const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * Math.sqrt(tradesPerYear) : 0;
 
-        // Calculate profit factor
+        // Real Sortino ratio
+        const downsideReturns = returns.filter(r => r < 0);
+        const downsideDev = downsideReturns.length > 1
+            ? Math.sqrt(downsideReturns.reduce((sum, r) => sum + r * r, 0) / (downsideReturns.length - 1))
+            : downsideReturns.length === 1 ? Math.abs(downsideReturns[0]) : 1;
+        const sortinoRatio = downsideDev > 0 ? (avgReturn / downsideDev) * Math.sqrt(tradesPerYear) : 0;
+
+        // Real VaR95
+        const sortedReturns = [...returns].sort((a, b) => a - b);
+        const varIndex = Math.floor(sortedReturns.length * 0.05);
+        const var95 = sortedReturns.length > 0 ? Math.abs(sortedReturns[varIndex] || 0) * 100 : 0;
+
+        // Profit factor
         const totalWins = winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
         const totalLosses = Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0));
         const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
+
+        // Average win/loss
+        const avgWin = winningTrades.length > 0
+            ? winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0) / winningTrades.length : 0;
+        const avgLoss = losingTrades.length > 0
+            ? Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0)) / losingTrades.length : 0;
+
+        // Max consecutive losses
+        let maxConsecutiveLosses = 0;
+        let consecutiveLosses = 0;
+        for (const trade of exitTrades) {
+            if ((trade.pnl || 0) < 0) {
+                consecutiveLosses++;
+                maxConsecutiveLosses = Math.max(maxConsecutiveLosses, consecutiveLosses);
+            } else {
+                consecutiveLosses = 0;
+            }
+        }
+
+        // Average trade duration
+        const entryTrades = this.trades.filter(t => t.entryExit === 'ENTRY');
+        let avgTradeDuration = 0;
+        if (entryTrades.length > 0 && exitTrades.length > 0) {
+            const durations: number[] = [];
+            for (let i = 0; i < exitTrades.length && i < entryTrades.length; i++) {
+                const duration = exitTrades[i].timestamp.getTime() - entryTrades[i].timestamp.getTime();
+                durations.push(duration / (1000 * 60 * 60)); // hours
+            }
+            avgTradeDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+        }
+
+        // Expectancy
+        const expectancy = exitTrades.length > 0
+            ? exitTrades.reduce((sum, t) => sum + (t.pnl || 0) - (t.fee || 0), 0) / exitTrades.length : 0;
+
+        const calmarRatio = maxDrawdown > 0 ? Math.abs(annualizedReturn) / maxDrawdown : 0;
 
         return {
             strategyId: strategy.id,
@@ -480,7 +700,7 @@ export class BacktestEngine {
             initialCapital: this.config.initialCapital ?? 10000,
             finalCapital: this.capital,
             totalReturn,
-            annualizedReturn: totalReturn * (365 / 30), // Assuming ~1 month of data
+            annualizedReturn,
             sharpeRatio,
             maxDrawdown,
             winRate,
@@ -488,13 +708,34 @@ export class BacktestEngine {
             trades: this.trades,
             profitFactor,
             metrics: {
-                calmarRatio: maxDrawdown > 0 ? totalReturn / maxDrawdown : 0,
-                sortinoRatio: sharpeRatio * 1.2, // Simplified
-                var95: maxDrawdown * 0.8, // Simplified
-                beta: 1,
-                alpha: totalReturn - 5, // Assuming 5% market return
+                calmarRatio,
+                sortinoRatio,
+                var95,
+                beta: 0, // Requires benchmark data
+                alpha: 0, // Requires benchmark data
+                avgWin,
+                avgLoss,
+                maxConsecutiveLosses,
+                avgTradeDuration,
+                totalFees: this.totalFees,
+                avgSlippageCost: exitTrades.length > 0 ? this.totalSlippageCost / exitTrades.length : 0,
+                expectancy,
             },
         };
+    }
+
+    /**
+     * Estimate hours per candle from timestamp gaps
+     */
+    private estimateHoursPerCandle(candles: MarketData[]): number {
+        if (candles.length < 2) return 1;
+        const gaps: number[] = [];
+        const sampleCount = Math.min(20, candles.length - 1);
+        for (let i = 1; i <= sampleCount; i++) {
+            gaps.push(candles[i].timestamp.getTime() - candles[i - 1].timestamp.getTime());
+        }
+        const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+        return Math.max(1 / 60, Math.min(24, avgGap / (1000 * 60 * 60)));
     }
 
     /**
@@ -502,6 +743,8 @@ export class BacktestEngine {
      */
     private reset(): void {
         this.capital = this.config.initialCapital ?? 10000;
+        this.totalFees = 0;
+        this.totalSlippageCost = 0;
         this.positions.clear();
         this.trades = [];
         this.clock.reset();

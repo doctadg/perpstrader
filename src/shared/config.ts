@@ -27,7 +27,7 @@ class ConfigManager {
         mainAddress: process.env.HYPERLIQUID_MAIN_ADDRESS
       },
       searchApi: {
-        baseUrl: process.env.SEARCH_API_URL || 'http://localhost:8888',
+        baseUrl: process.env.SEARCH_API_URL || 'http://localhost:8080/api/v1',
         timeout: parseInt(process.env.SEARCH_API_TIMEOUT || '30000')
       },
       glm: {

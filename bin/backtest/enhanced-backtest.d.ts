@@ -20,16 +20,22 @@ export interface BacktestEngineConfig extends BacktestConfig {
     startTime?: number;
 }
 /**
- * Enhanced Backtest Engine with Nautilus-style features
+ * Enhanced Backtest Engine with Nautilus-style features and realistic execution
  */
 export declare class BacktestEngine {
     private config;
     private clock;
     private fillModel;
     private capital;
+    private totalFees;
+    private totalSlippageCost;
     private positions;
     private trades;
     private orderBooks;
+    private minBarsBetweenEntries;
+    private nextBarExecution;
+    private intrabarStopCheck;
+    private hourlyFundingRate;
     constructor(config?: BacktestEngineConfig);
     /**
      * Run a complete backtest
@@ -48,19 +54,31 @@ export declare class BacktestEngine {
      */
     private initializeStrategyState;
     /**
+     * Charge funding rate for open positions
+     */
+    private chargeFunding;
+    /**
+     * Check intrabar stop/take-profit using candle high/low
+     */
+    private checkIntrabarExits;
+    /**
      * Generate trading signals from strategy using indicator-based logic
      */
     private generateSignals;
     private createBuySignal;
     private createSellSignal;
     /**
-     * Execute a trading signal
+     * Execute a trading signal — commission is DEDUCTED from capital here
      */
     private executeSignal;
     /**
-     * Check and execute stop loss / take profit
+     * Check and execute stop loss / take profit (close-based fallback)
      */
     private checkExitConditions;
+    /**
+     * Close a position with explicit fill price (for intrabar stops)
+     */
+    private closePositionWithFill;
     /**
      * Close a position
      */
@@ -70,9 +88,13 @@ export declare class BacktestEngine {
      */
     private closeAllPositions;
     /**
-     * Calculate backtest results
+     * Calculate backtest results with proper metrics
      */
     private calculateResults;
+    /**
+     * Estimate hours per candle from timestamp gaps
+     */
+    private estimateHoursPerCandle;
     /**
      * Reset engine state
      */

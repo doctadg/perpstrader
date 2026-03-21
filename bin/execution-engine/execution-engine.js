@@ -537,12 +537,27 @@ class ExecutionEngine {
                     const entryPrice = plan.entryPrice;
                     if (!Number.isFinite(entryPrice) || entryPrice <= 0)
                         continue;
-                    const currentPrice = currentPrices.get(position.symbol) || position.entryPrice || 0;
-                    if (currentPrice <= 0)
+                    const currentPrice = currentPrices.get(position.symbol) || currentPrices.get(symbolKey) || 0;
+                    // If no price from message bus, fetch from Hyperliquid API as fallback
+                    if (currentPrice <= 0 && hyperliquid_client_1.default.isConfigured()) {
+                        try {
+                            const mids = await hyperliquid_client_1.default.getAllMids();
+                            const hlPrice = mids[position.symbol] || mids[symbolKey] || 0;
+                            if (hlPrice > 0) {
+                                currentPrices.set(position.symbol, hlPrice);
+                                currentPrices.set(symbolKey, hlPrice);
+                            }
+                        }
+                        catch (_e) {
+                            // API fetch failed, skip this check cycle
+                        }
+                    }
+                    const resolvedPrice = currentPrices.get(position.symbol) || currentPrices.get(symbolKey) || 0;
+                    if (resolvedPrice <= 0)
                         continue;
                     const pnlPct = plan.side === 'LONG'
-                        ? (currentPrice - entryPrice) / entryPrice
-                        : (entryPrice - currentPrice) / entryPrice;
+                        ? (resolvedPrice - entryPrice) / entryPrice
+                        : (entryPrice - resolvedPrice) / entryPrice;
                     const stopLossTriggerPct = Math.max(0.001, plan.stopLossPct);
                     const takeProfitTriggerPct = plan.takeProfitPct;
                     let exitReason = null;
@@ -562,7 +577,7 @@ class ExecutionEngine {
                             symbol: position.symbol,
                             action: plan.side === 'LONG' ? 'SELL' : 'BUY',
                             size: Math.abs(position.size),
-                            price: currentPrice,
+                            price: resolvedPrice,
                             type: 'MARKET',
                             timestamp: new Date(),
                             confidence: 1.0,

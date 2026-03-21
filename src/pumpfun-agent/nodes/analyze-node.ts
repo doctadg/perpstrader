@@ -1,11 +1,13 @@
-// Analyze Node - OpenRouter-powered website-first analysis
-// Uses OpenRouter to analyze token website quality and generate recommendations
+// Analyze Node - Optional AI analysis + mandatory on-chain data collection
+// AI analysis is rate-limited and only runs for tokens passing a pre-filter
+// On-chain bonding curve data is collected for ALL tokens
 
 import logger from '../../shared/logger';
 import configManager from '../../shared/config';
 import openrouterService from '../../shared/openrouter-service';
 import { PumpFunAgentState, TokenAnalysis, TokenRecommendation } from '../../shared/types';
 import { addThought, updateStep } from '../state';
+import { bondingCurveService } from '../services/bonding-curve';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 
@@ -31,8 +33,56 @@ const NON_WEBSITE_HOSTS = new Set([
   'www.reddit.com',
 ]);
 
+// Rate limiter: max AI calls per cycle
+const MAX_AI_CALLS_PER_CYCLE = 5;
+let aiCallCount = 0;
+
 /**
- * Run OpenRouter analysis on all tokens and generate final recommendations
+ * Check if a token passes the pre-filter for AI analysis.
+ * Requires at least 2 social links OR a real website.
+ */
+function passesAIPrefilter(metadata: any, websiteUrl: string): boolean {
+  let socialCount = 0;
+  if (metadata.twitter) socialCount++;
+  if (metadata.telegram) socialCount++;
+  if (metadata.discord) socialCount++;
+  if (socialCount >= 2) return true;
+  if (websiteUrl) return true;
+  return false;
+}
+
+/**
+ * Collect on-chain bonding curve data for a token.
+ */
+async function collectOnChainData(
+  mintAddress: string
+): Promise<{
+  marketCapSol: number;
+  bondingCurveProgress: number;
+  solInCurve: number;
+  complete: boolean;
+} | null> {
+  try {
+    const curveState = await bondingCurveService.readBondingCurveState(mintAddress);
+    if (!curveState) return null;
+
+    const quote = bondingCurveService.getBuyQuote(curveState, 0.01);
+    const solInCurve = Number(curveState.realSolReserves) / 1e9;
+
+    return {
+      marketCapSol: quote?.marketCapSol ?? 0,
+      bondingCurveProgress: quote?.bondingCurveProgress ?? 0,
+      solInCurve,
+      complete: curveState.complete,
+    };
+  } catch (err) {
+    logger.debug(`[AnalyzeNode] On-chain data collection failed for ${mintAddress}: ${err}`);
+    return null;
+  }
+}
+
+/**
+ * Run analysis on all tokens: on-chain data for ALL, AI only for pre-filtered tokens.
  */
 export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<PumpFunAgentState>> {
   if (state.queuedTokens.length === 0) {
@@ -44,11 +94,14 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
     };
   }
 
-  logger.info(`[AnalyzeNode] Running OpenRouter analysis on ${state.queuedTokens.length} tokens`);
+  // Reset per-cycle AI call counter
+  aiCallCount = 0;
 
-  // Import services
+  const totalTokens = state.queuedTokens.length;
+  logger.info(`[AnalyzeNode] Processing ${totalTokens} tokens (on-chain + optional AI)`);
+
+  // Import web scraper
   let webScraper: any;
-
   try {
     const webModule = await import('../services/web-scraper');
     webScraper = webModule.default;
@@ -62,8 +115,8 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
 
   const analyzedTokens: TokenAnalysis[] = [];
 
-  // Process tokens with limited concurrency for OpenRouter calls
-  const concurrency = 3;
+  // Process tokens with concurrency
+  const concurrency = 5;
   for (let i = 0; i < state.queuedTokens.length; i += concurrency) {
     const batch = state.queuedTokens.slice(i, i + concurrency);
 
@@ -73,19 +126,39 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
         const metadata = item.metadata || token;
 
         try {
+          // --- STEP 1: On-chain data collection (always) ---
+          const onChainData = await collectOnChainData(token.mintAddress);
+          if (onChainData) {
+            (token as any).onChainData = onChainData;
+          }
+
+          // --- STEP 2: Website scraping ---
           const websiteUrl = normalizeWebsiteUrl(metadata.website);
           const website = websiteUrl
             ? await webScraper.analyzeWebsite(websiteUrl, metadata)
             : emptyWebsiteResult(metadata.website);
 
-          // Run OpenRouter website-first analysis
-          const aiAnalysis = await runOpenRouterAnalysis({
-            token,
-            metadata,
-            website,
-          });
+          // --- STEP 3: Optional AI analysis (pre-filtered + rate-limited) ---
+          let aiAnalysis;
+          const shouldRunAI = passesAIPrefilter(metadata, websiteUrl) && aiCallCount < MAX_AI_CALLS_PER_CYCLE;
 
-          // Create token analysis
+          if (shouldRunAI) {
+            aiAnalysis = await runOpenRouterAnalysis({
+              token,
+              metadata,
+              website,
+            });
+            aiCallCount++;
+          } else {
+            if (!passesAIPrefilter(metadata, websiteUrl)) {
+              logger.debug(`[AnalyzeNode] Skipping AI for ${token.symbol}: failed pre-filter`);
+            } else {
+              logger.debug(`[AnalyzeNode] Skipping AI for ${token.symbol}: rate limit reached (${aiCallCount}/${MAX_AI_CALLS_PER_CYCLE})`);
+            }
+            aiAnalysis = getWebsiteFallback(website, metadata);
+          }
+
+          // --- STEP 4: Build TokenAnalysis ---
           return {
             id: uuidv4(),
             token,
@@ -136,6 +209,7 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
             analyzedAt: new Date(),
             cycleId: state.cycleId,
             errors: [],
+            onChainData: onChainData,
           } as TokenAnalysis;
         } catch (error) {
           logger.debug(`[AnalyzeNode] Failed to analyze ${token.symbol}: ${error}`);
@@ -151,10 +225,10 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
     }
   }
 
-  logger.info(`[AnalyzeNode] Completed analysis for ${analyzedTokens.length} tokens`);
+  logger.info(`[AnalyzeNode] Completed analysis for ${analyzedTokens.length} tokens (AI calls: ${aiCallCount}/${MAX_AI_CALLS_PER_CYCLE})`);
 
   return {
-    ...addThought(state, `OpenRouter analysis complete for ${analyzedTokens.length} tokens`),
+    ...addThought(state, `Analysis complete for ${analyzedTokens.length} tokens (${aiCallCount} AI calls)`),
     ...updateStep(state, 'ANALYSIS_COMPLETE'),
     analyzedTokens,
   };
@@ -211,7 +285,9 @@ function normalizeWebsiteUrl(raw?: string): string {
 }
 
 /**
- * Run OpenRouter analysis for a token
+ * Run OpenRouter analysis for a token (rate-limited by caller).
+ * On 429 or other failures, returns null so caller can use heuristic fallback
+ * instead of spamming retries.
  */
 async function runOpenRouterAnalysis(data: {
   token: any;
@@ -222,12 +298,12 @@ async function runOpenRouterAnalysis(data: {
   redFlags: string[];
   greenFlags: string[];
   recommendation: TokenRecommendation;
-}> {
+} | null> {
   const prompt = buildAnalysisPrompt(data);
 
   if (!openrouterService.canUseService()) {
-    logger.warn('[AnalyzeNode] OpenRouter API key missing, using fallback website-only analysis');
-    return getWebsiteFallback(data.website);
+    logger.warn('[AnalyzeNode] OpenRouter API key missing, using heuristic fallback');
+    return null;
   }
 
   const config = configManager.get();
@@ -274,14 +350,21 @@ async function runOpenRouterAnalysis(data: {
     const parsed = parseAIResponse(content);
     if (!parsed) {
       logger.warn('[AnalyzeNode] OpenRouter response was not parseable JSON, using fallback');
-      return getWebsiteFallback(data.website);
+      return null;
     }
     return parsed;
-  } catch (error) {
-    const affordMatch = String((error as any)?.response?.data?.error?.message || '').match(/afford\s+(\d+)/i);
+  } catch (error: any) {
+    const status = error?.response?.status;
+    if (status === 429) {
+      logger.warn(`[AnalyzeNode] OpenRouter 429 rate limited, skipping AI for this token`);
+      return null; // Don't retry on 429
+    }
+
+    // Handle 402 with reduced token budget
+    const affordMatch = String(error?.response?.data?.error?.message || '').match(/afford\s+(\d+)/i);
     const affordableBudget = affordMatch ? Number.parseInt(affordMatch[1], 10) : NaN;
 
-    if ((error as any)?.response?.status === 402 && Number.isFinite(affordableBudget) && affordableBudget > 12) {
+    if (status === 402 && Number.isFinite(affordableBudget) && affordableBudget > 12) {
       try {
         const retryBudget = Math.max(12, affordableBudget - 2);
         logger.warn(`[AnalyzeNode] Retrying OpenRouter analysis with lower token budget: ${retryBudget}`);
@@ -300,10 +383,10 @@ async function runOpenRouterAnalysis(data: {
       } catch (retryError) {
         logger.warn(`[AnalyzeNode] OpenRouter retry failed: ${retryError}`);
       }
+    } else {
+      logger.warn(`[AnalyzeNode] OpenRouter analysis failed: ${error}`);
     }
-
-    logger.warn(`[AnalyzeNode] OpenRouter analysis failed: ${error}`);
-    return getWebsiteFallback(data.website);
+    return null;
   }
 }
 
@@ -320,7 +403,7 @@ function buildAnalysisPrompt(data: {
   return `You are an expert crypto analyst evaluating a new pump.fun token launch.
 
 TOKEN: ${metadata.name} ($${metadata.symbol})
-Mint Address: ${token.mintAddress}
+|Mint Address: ${token.mintAddress}
 Description: ${metadata.description || 'None provided'}
 
 WEBSITE ANALYSIS:
@@ -387,23 +470,44 @@ function validateRecommendation(rec: string): TokenRecommendation {
 }
 
 /**
- * Deterministic fallback when OpenRouter is unavailable.
+ * Deterministic fallback when AI is unavailable or skipped.
+ * Returns HOLD (neutral) for missing data -- only STRONG_AVOID for actual red flags.
  */
-function getWebsiteFallback(website: any): {
+function getWebsiteFallback(
+  website: any,
+  metadata?: any
+): {
   rationale: string;
   redFlags: string[];
   greenFlags: string[];
   recommendation: TokenRecommendation;
 } {
+  // Count social links
+  const socialCount = [
+    metadata?.twitter,
+    metadata?.telegram,
+    metadata?.discord,
+  ].filter(Boolean).length;
+
+  // No website + no social links: HOLD (neutral), not STRONG_AVOID
   if (!website?.url || !website?.exists) {
+    if (socialCount > 0) {
+      return {
+        rationale: `AI unavailable. No website but has ${socialCount} social link(s). Neutral pending more data.`,
+        redFlags: ['No reachable website'],
+        greenFlags: [`Has ${socialCount} social link(s)`],
+        recommendation: 'HOLD',
+      };
+    }
     return {
-      rationale: 'No reachable project website was found. Without a verifiable web presence, this token is not investable.',
-      redFlags: ['No reachable website', 'Low transparency'],
+      rationale: 'AI unavailable. No website and no social links found. Neutral -- insufficient data for judgment.',
+      redFlags: ['No website'],
       greenFlags: [],
-      recommendation: 'STRONG_AVOID',
+      recommendation: 'HOLD',
     };
   }
 
+  // Has website -- check quality
   const redFlags: string[] = [];
   const greenFlags: string[] = [];
 
@@ -417,6 +521,7 @@ function getWebsiteFallback(website: any): {
   if (website.hasRoadmap) greenFlags.push('Roadmap available');
   if (website.hasTeamInfo) greenFlags.push('Team information provided');
 
+  // High quality website with few red flags: BUY
   if (website.contentQuality >= 0.75 && redFlags.length <= 1) {
     return {
       rationale: 'Website quality is strong with multiple credibility signals. Still speculative, but documentation is better than typical launch tokens.',
@@ -426,20 +531,22 @@ function getWebsiteFallback(website: any): {
     };
   }
 
+  // Medium quality: HOLD
   if (website.contentQuality >= 0.45) {
     return {
-      rationale: 'Website exists with partial documentation, but several credibility gaps remain. Risk is high and conviction is limited.',
+      rationale: 'Website exists with partial documentation. AI analysis was unavailable -- rating is neutral.',
       redFlags,
       greenFlags,
       recommendation: 'HOLD',
     };
   }
 
+  // Low quality website: HOLD (not AVOID -- missing data isn't a red flag itself)
   return {
-    rationale: 'Website exists but is low quality or incomplete, which is a significant trust risk for early-stage tokens.',
+    rationale: 'Website exists but is low quality. AI analysis unavailable -- insufficient data for strong judgment.',
     redFlags,
     greenFlags,
-    recommendation: 'AVOID',
+    recommendation: 'HOLD',
   };
 }
 

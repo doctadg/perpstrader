@@ -144,6 +144,48 @@ function spawnChildProcess(config: ChildProcessConfig): ChildProcess {
     return child;
 }
 
+/**
+ * Kill orphan child processes from previous main.js instances.
+ * On restart, old children survive because their parent PID is dead.
+ * This uses pgrep to find and kill them before spawning fresh ones.
+ */
+async function cleanupOrphanChildProcesses(): Promise<void> {
+    const { execSync } = await import('child_process');
+    // Always exclude our own PID to prevent self-kill
+    const myPid = process.pid;
+    for (const config of CHILD_PROCESS_CONFIGS) {
+        try {
+            // Use the full script path for pgrep to avoid ambiguous basename matches
+            // (e.g. "main.js" would match the parent process itself for safekeeping-fund)
+            const scriptPath = config.scriptPath;
+            const result = execSync(
+                `pgrep -f "${scriptPath}" | head -20`,
+                { encoding: 'utf8', timeout: 5000 }
+            ).trim();
+            if (result) {
+                const pids = result.split('\n').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
+                const myPids = new Set<number>([myPid]);
+                for (const [, child] of CHILD_PROCESSES.entries()) {
+                    if (child.pid) myPids.add(child.pid);
+                }
+                const orphans = pids.filter(p => !myPids.has(p));
+                if (orphans.length > 0) {
+                    logger.warn(`[ChildProcess] Found ${orphans.length} orphan ${config.name} process(es): ${orphans.join(', ')}`);
+                    try {
+                        execSync(`kill ${orphans.join(' ')} 2>/dev/null || true`, { timeout: 5000 });
+                        logger.info(`[ChildProcess] Killed orphan ${config.name} processes`);
+                    } catch {
+                        // PIDs may already be dead — that's fine
+                        logger.info(`[ChildProcess] Orphan ${config.name} processes cleaned up`);
+                    }
+                }
+            }
+        } catch {
+            // pgrep returns non-zero when no matches found — that's fine
+        }
+    }
+}
+
 function startChildProcesses(): void {
     logger.info('[ChildProcess] Starting child processes...');
     for (const config of CHILD_PROCESS_CONFIGS) {
@@ -554,7 +596,12 @@ async function main() {
             logger.warn('[Main] Position recovery monitoring failed to start:', error);
         }
 
-        // Start child processes (news-agent and prediction-agent)
+        // Kill orphan child processes from previous main.js instances, then start fresh
+        try {
+            await cleanupOrphanChildProcesses();
+        } catch (error) {
+            logger.warn('[Main] Orphan cleanup failed:', error);
+        }
         try {
             startChildProcesses();
         } catch (error) {

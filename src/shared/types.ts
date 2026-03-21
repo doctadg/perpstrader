@@ -68,6 +68,13 @@ export interface BacktestResult {
     var95: number;
     beta: number;
     alpha: number;
+    avgWin: number;
+    avgLoss: number;
+    maxConsecutiveLosses: number;
+    avgTradeDuration: number;
+    totalFees: number;
+    avgSlippageCost: number;
+    expectancy: number;
   };
 }
 

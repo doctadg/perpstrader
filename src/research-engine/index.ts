@@ -268,15 +268,20 @@ export class ResearchEngine {
   }
 
   /**
-   * Simulate a backtest (fallback when real backtest is unavailable)
+   * Simulate a backtest (fallback when real backtest is unavailable).
+   * Returns conservative estimates — NOT random garbage.
+   * This should almost never be called; if it is, the result should
+   * never pass promotion gates.
    */
   private simulateBacktest(strategyId: string): Promise<any> {
+    logger.warn(`[ResearchEngine] simulateBacktest called for ${strategyId} — no real market data available`);
     return Promise.resolve({
-      sharpeRatio: 1.0 + Math.random(),
-      winRate: 0.5 + Math.random() * 0.3,
-      pnl: Math.random() * 10000,
-      maxDrawdown: Math.random() * 0.2,
-      totalTrades: Math.floor(Math.random() * 100) + 20,
+      sharpeRatio: 0,      // Neutral — won't pass promotion gate
+      winRate: 0,           // Unknown — fail-safe
+      pnl: 0,               // No simulated PnL
+      maxDrawdown: 1.0,     // Worst case assumed
+      totalTrades: 0,       // No real trades happened
+      profitFactor: 0,      // Unprofitable by default
       completedAt: new Date().toISOString(),
     });
   }
@@ -457,8 +462,14 @@ export class ResearchEngine {
             FROM strategy_ideas i
             JOIN strategy_performance p ON p.strategy_id = i.id
             WHERE i.type = 'TREND_FOLLOWING'
-              AND p.sharpe > 0
-              AND p.max_drawdown <= 0.03
+              AND p.sharpe > 0.5
+              AND p.sharpe <= 5.0
+              AND p.win_rate >= 0.45
+              AND p.max_drawdown >= 0.005
+              AND p.max_drawdown <= 0.20
+              AND p.total_trades >= 10
+              AND p.pnl > 0
+              AND p.pnl <= 100000
             ORDER BY p.sharpe DESC
             LIMIT 1
           `).get() as any;

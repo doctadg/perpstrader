@@ -443,7 +443,14 @@ export class IdeaQueue {
   }
 
   /**
-   * Get top performing strategies
+   * Get top performing strategies with sanity filters.
+   * Filters out absurd backtest results that indicate engine bugs:
+   * - Sharpe > 5 is unrealistic for any strategy
+   * - Profit factor > 10 means the engine is broken
+   * - Max drawdown < 0.005 (0.5%) with > 20 trades is impossible
+   * - PnL > 10x initial capital ($100k on $10k) is broken
+   * - Win rate > 0.80 with > 50 trades is suspicious
+   * - Fewer than 10 trades means insufficient statistical significance
    */
   async getTopStrategies(limit: number = 10): Promise<StrategyPerformance[]> {
     if (!this.db) await this.initialize();
@@ -453,7 +460,16 @@ export class IdeaQueue {
       SELECT p.*, i.name as strategy_name, i.type, i.symbols
       FROM strategy_performance p
       JOIN strategy_ideas i ON p.strategy_id = i.id
-      WHERE p.sharpe > 0
+      WHERE p.sharpe > 0.5
+        AND p.sharpe <= 5.0
+        AND p.win_rate >= 0.45
+        AND p.win_rate <= 0.80
+        AND p.max_drawdown >= 0.005
+        AND p.max_drawdown <= 0.25
+        AND p.pnl >= 0
+        AND p.pnl <= 100000
+        AND p.total_trades >= 10
+        AND (p.profit_factor = 0 OR p.profit_factor <= 10.0)
       ORDER BY p.sharpe DESC, p.win_rate DESC
       LIMIT ?
     `).all(limit) as any[];

@@ -1,6 +1,6 @@
 "use strict";
 // Backtester Node
-// Performs vectorized backtesting of strategy ideas
+// Performs vectorized backtesting of strategy ideas with realistic execution
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -10,6 +10,15 @@ exports.vectorizedBacktest = vectorizedBacktest;
 const uuid_1 = require("uuid");
 const logger_1 = __importDefault(require("../../shared/logger"));
 const analysis_worker_pool_1 = require("../../shared/analysis-worker-pool");
+const DEFAULT_REALISM = {
+    commissionRate: 0.0005,
+    slippageBps: 3,
+    minBarsBetweenEntries: 3,
+    nextBarExecution: true,
+    intrabarStopCheck: true,
+    hourlyFundingRate: 0.00001,
+    minVolumePercentile: 0,
+};
 /**
  * Backtester Node
  * Tests strategy ideas against historical data using vectorized operations
@@ -70,9 +79,9 @@ async function backtesterNode(state) {
         results.sort((a, b) => b.sharpeRatio - a.sharpeRatio);
         const thoughts = [
             ...state.thoughts,
-            `Backtested ${results.length} strategies`,
+            `Backtested ${results.length} strategies (realistic mode: fees ${DEFAULT_REALISM.commissionRate * 100}%, slippage ${DEFAULT_REALISM.slippageBps}bps, next-bar exec)`,
             ...(lowData ? [`Limited backtest window (${state.candles.length} candles); treat results as low confidence`] : []),
-            ...results.slice(0, 3).map(r => `${r.strategyId}: Return ${r.totalReturn.toFixed(2)}%, Sharpe ${r.sharpeRatio.toFixed(2)}, WinRate ${r.winRate.toFixed(0)}%`),
+            ...results.slice(0, 3).map(r => `${r.strategyId}: Return ${r.totalReturn.toFixed(2)}%, Sharpe ${r.sharpeRatio.toFixed(2)}, WinRate ${r.winRate.toFixed(0)}%, Fees $${r.metrics.totalFees.toFixed(2)}`),
         ];
         logger_1.default.info(`[BacktesterNode] Completed ${results.length} backtests`);
         return {
@@ -91,12 +100,25 @@ async function backtesterNode(state) {
     }
 }
 /**
- * Vectorized backtest using typed arrays for performance
+ * Vectorized backtest with realistic execution simulation.
+ *
+ * Realism features:
+ * - Commission deducted from capital on every trade
+ * - Slippage applied on entry and exit (average bps, always against trader)
+ * - Next-bar execution (signal on candle N, fill at candle N+1 open)
+ * - Intrabar stop/take-profit using candle high/low
+ * - Position cooldown (min bars between entries)
+ * - Funding rate charged while in position
+ * - Volume filter to skip low-liquidity entries
+ * - Proper Sortino (downside deviation), VaR95 (5th percentile), expectancy
  */
 async function vectorizedBacktest(idea, candles, closes) {
+    const cfg = DEFAULT_REALISM;
     const strategyId = (0, uuid_1.v4)();
     const initialCapital = 10000;
     let capital = initialCapital;
+    let totalFees = 0;
+    let totalSlippageCost = 0;
     const params = idea.parameters || {};
     const getParam = (keys, fallback, min, max, integer = true) => {
         for (const key of keys) {
@@ -123,22 +145,28 @@ async function vectorizedBacktest(idea, candles, closes) {
     if (oversold >= overbought) {
         oversold = Math.max(10, overbought - 20);
     }
-    // Convert to typed arrays for performance
+    // Build typed arrays
     const closeSeries = closes && closes.length === candles.length
         ? closes
         : buildCloseSeries(candles);
-    // Pre-compute indicators as arrays
+    const openSeries = buildPriceSeries(candles, 'open');
+    const highSeries = buildPriceSeries(candles, 'high');
+    const lowSeries = buildPriceSeries(candles, 'low');
+    const volumeSeries = buildPriceSeries(candles, 'volume');
+    // Pre-compute indicators
     const rsi = computeRSI(closeSeries, rsiPeriod);
     const [smaFast, smaSlow] = [computeSMA(closeSeries, fastPeriod), computeSMA(closeSeries, slowPeriod)];
     const [bbUpper, bbMiddle, bbLower] = computeBollingerBands(closeSeries, bbPeriod, bbStdDev);
+    // Pre-compute volume percentile for filtering
+    const volumeThreshold = cfg.minVolumePercentile > 0
+        ? computeVolumePercentile(volumeSeries, closeSeries.length, cfg.minVolumePercentile)
+        : 0;
     // Generate signals as boolean arrays
     const buySignals = new Uint8Array(closeSeries.length);
     const sellSignals = new Uint8Array(closeSeries.length);
-    // Apply strategy-specific signal logic
     switch (idea.type) {
         case 'TREND_FOLLOWING':
             for (let i = Math.max(50, slowPeriod); i < closeSeries.length; i++) {
-                // MA crossover
                 if (smaFast[i] > smaSlow[i] && smaFast[i - 1] <= smaSlow[i - 1]) {
                     buySignals[i] = 1;
                 }
@@ -149,7 +177,6 @@ async function vectorizedBacktest(idea, candles, closes) {
             break;
         case 'MEAN_REVERSION':
             for (let i = Math.max(50, bbPeriod, rsiPeriod); i < closeSeries.length; i++) {
-                // Bollinger band reversion
                 if (closeSeries[i] < bbLower[i] && rsi[i] < oversold) {
                     buySignals[i] = 1;
                 }
@@ -159,7 +186,6 @@ async function vectorizedBacktest(idea, candles, closes) {
             }
             break;
         default:
-            // Generic momentum
             for (let i = Math.max(50, rsiPeriod); i < closeSeries.length; i++) {
                 if (rsi[i] < oversold)
                     buySignals[i] = 1;
@@ -167,74 +193,228 @@ async function vectorizedBacktest(idea, candles, closes) {
                     sellSignals[i] = 1;
             }
     }
-    // Simulate trades
+    // Simulate trades with realistic execution
     const trades = [];
-    let position = 0;
+    let position = 0; // positive = long, negative = short
     let entryPrice = 0;
     let entryIndex = 0;
+    let lastEntryBar = -cfg.minBarsBetweenEntries; // cooldown tracker
+    let barsInPosition = 0;
+    // Estimate hours per candle from data
+    const hoursPerCandle = estimateHoursPerCandle(candles);
     const warmup = Math.max(50, slowPeriod, bbPeriod, rsiPeriod);
     for (let i = warmup; i < closeSeries.length; i++) {
         const price = closeSeries[i];
-        if (buySignals[i] && position <= 0) {
-            // Close short if exists
-            if (position < 0) {
-                const pnl = (entryPrice - price) * Math.abs(position);
-                capital += pnl;
-                trades.push(createTrade(strategyId, idea.symbols[0], 'BUY', Math.abs(position), price, pnl, candles[i].timestamp, 'EXIT'));
-            }
-            // Open long
-            const size = (capital * idea.riskParameters.maxPositionSize) / price;
-            position = size;
-            entryPrice = price;
-            entryIndex = i;
-            trades.push(createTrade(strategyId, idea.symbols[0], 'BUY', size, price, 0, candles[i].timestamp, 'ENTRY'));
+        const open = openSeries[i];
+        const high = highSeries[i];
+        const low = lowSeries[i];
+        const volume = volumeSeries[i];
+        // Apply slippage function: always moves against trader
+        const applySlippage = (px, side) => {
+            const slip = px * (cfg.slippageBps / 10000);
+            return side === 'BUY' ? px + slip : px - slip;
+        };
+        // Apply commission
+        const calcFee = (px, size) => px * size * cfg.commissionRate;
+        // Charge funding rate while in position
+        if (position !== 0 && barsInPosition > 0) {
+            const hoursSinceEntry = barsInPosition * hoursPerCandle;
+            const fundingCost = Math.abs(position) * entryPrice * cfg.hourlyFundingRate * hoursSinceEntry;
+            // Funding is charged periodically, approximate per-bar
+            const barFunding = Math.abs(position) * price * cfg.hourlyFundingRate * hoursPerCandle;
+            capital -= barFunding;
+            totalFees += barFunding;
         }
-        else if (sellSignals[i] && position >= 0) {
-            // Close long if exists
+        // Check intrabar stop/take-profit using high/low (before signal logic)
+        if (position !== 0 && cfg.intrabarStopCheck) {
             if (position > 0) {
-                const pnl = (price - entryPrice) * position;
-                capital += pnl;
-                trades.push(createTrade(strategyId, idea.symbols[0], 'SELL', position, price, pnl, candles[i].timestamp, 'EXIT'));
+                // Long position: check if low hit stop loss first, then high for take profit
+                const stopPrice = entryPrice * (1 - idea.riskParameters.stopLoss);
+                const tpPrice = entryPrice * (1 + idea.riskParameters.takeProfit);
+                // Determine which was hit first based on open relative to entry
+                let exitPrice = 0;
+                let exitReason = '';
+                let exitSide = 'SELL';
+                if (low <= stopPrice) {
+                    // Stop loss hit at stopPrice + slippage
+                    exitPrice = applySlippage(stopPrice, 'SELL');
+                    exitReason = 'STOP_LOSS';
+                    const pnl = (exitPrice - entryPrice) * position;
+                    const fee = calcFee(exitPrice, position);
+                    capital += pnl - fee;
+                    totalFees += fee;
+                    totalSlippageCost += Math.abs(exitPrice - stopPrice) * position;
+                    trades.push(createTrade(strategyId, idea.symbols[0], exitSide, position, exitPrice, pnl, candles[i].timestamp, 'EXIT', fee));
+                    position = 0;
+                    lastEntryBar = i;
+                    barsInPosition = 0;
+                    continue; // Skip signal check this bar
+                }
+                else if (high >= tpPrice) {
+                    // Take profit hit
+                    exitPrice = applySlippage(tpPrice, 'SELL');
+                    exitReason = 'TAKE_PROFIT';
+                    const pnl = (exitPrice - entryPrice) * position;
+                    const fee = calcFee(exitPrice, position);
+                    capital += pnl - fee;
+                    totalFees += fee;
+                    totalSlippageCost += Math.abs(exitPrice - tpPrice) * position;
+                    trades.push(createTrade(strategyId, idea.symbols[0], exitSide, position, exitPrice, pnl, candles[i].timestamp, 'EXIT', fee));
+                    position = 0;
+                    lastEntryBar = i;
+                    barsInPosition = 0;
+                    continue;
+                }
             }
-            // Open short
-            const size = (capital * idea.riskParameters.maxPositionSize) / price;
-            position = -size;
-            entryPrice = price;
-            entryIndex = i;
-            trades.push(createTrade(strategyId, idea.symbols[0], 'SELL', size, price, 0, candles[i].timestamp, 'ENTRY'));
+            else if (position < 0) {
+                // Short position
+                const stopPrice = entryPrice * (1 + idea.riskParameters.stopLoss);
+                const tpPrice = entryPrice * (1 - idea.riskParameters.takeProfit);
+                if (high >= stopPrice) {
+                    // Stop loss hit on short
+                    const exitPrice = applySlippage(stopPrice, 'BUY');
+                    const pnl = (entryPrice - exitPrice) * Math.abs(position);
+                    const fee = calcFee(exitPrice, Math.abs(position));
+                    capital += pnl - fee;
+                    totalFees += fee;
+                    totalSlippageCost += Math.abs(exitPrice - stopPrice) * Math.abs(position);
+                    trades.push(createTrade(strategyId, idea.symbols[0], 'BUY', Math.abs(position), exitPrice, pnl, candles[i].timestamp, 'EXIT', fee));
+                    position = 0;
+                    lastEntryBar = i;
+                    barsInPosition = 0;
+                    continue;
+                }
+                else if (low <= tpPrice) {
+                    // Take profit hit on short
+                    const exitPrice = applySlippage(tpPrice, 'BUY');
+                    const pnl = (entryPrice - exitPrice) * Math.abs(position);
+                    const fee = calcFee(exitPrice, Math.abs(position));
+                    capital += pnl - fee;
+                    totalFees += fee;
+                    totalSlippageCost += Math.abs(exitPrice - tpPrice) * Math.abs(position);
+                    trades.push(createTrade(strategyId, idea.symbols[0], 'BUY', Math.abs(position), exitPrice, pnl, candles[i].timestamp, 'EXIT', fee));
+                    position = 0;
+                    lastEntryBar = i;
+                    barsInPosition = 0;
+                    continue;
+                }
+            }
         }
-        // Check stop loss / take profit
+        // Check close-based stop/take-profit as fallback
         if (position !== 0) {
             const unrealizedPnL = position > 0
                 ? (price - entryPrice) / entryPrice
                 : (entryPrice - price) / entryPrice;
             if (unrealizedPnL <= -idea.riskParameters.stopLoss) {
-                // Stop loss hit
-                const pnl = position > 0 ? (price - entryPrice) * position : (entryPrice - price) * Math.abs(position);
-                capital += pnl;
-                trades.push(createTrade(strategyId, idea.symbols[0], position > 0 ? 'SELL' : 'BUY', Math.abs(position), price, pnl, candles[i].timestamp, 'EXIT'));
+                const exitSide = position > 0 ? 'SELL' : 'BUY';
+                const exitPrice = applySlippage(price, exitSide);
+                const pnl = position > 0
+                    ? (exitPrice - entryPrice) * position
+                    : (entryPrice - exitPrice) * Math.abs(position);
+                const fee = calcFee(exitPrice, Math.abs(position));
+                capital += pnl - fee;
+                totalFees += fee;
+                totalSlippageCost += Math.abs(exitPrice - price) * Math.abs(position);
+                trades.push(createTrade(strategyId, idea.symbols[0], exitSide, Math.abs(position), exitPrice, pnl, candles[i].timestamp, 'EXIT', fee));
                 position = 0;
+                lastEntryBar = i;
+                barsInPosition = 0;
+                continue;
             }
             else if (unrealizedPnL >= idea.riskParameters.takeProfit) {
-                // Take profit hit
-                const pnl = position > 0 ? (price - entryPrice) * position : (entryPrice - price) * Math.abs(position);
-                capital += pnl;
-                trades.push(createTrade(strategyId, idea.symbols[0], position > 0 ? 'SELL' : 'BUY', Math.abs(position), price, pnl, candles[i].timestamp, 'EXIT'));
+                const exitSide = position > 0 ? 'SELL' : 'BUY';
+                const exitPrice = applySlippage(price, exitSide);
+                const pnl = position > 0
+                    ? (exitPrice - entryPrice) * position
+                    : (entryPrice - exitPrice) * Math.abs(position);
+                const fee = calcFee(exitPrice, Math.abs(position));
+                capital += pnl - fee;
+                totalFees += fee;
+                totalSlippageCost += Math.abs(exitPrice - price) * Math.abs(position);
+                trades.push(createTrade(strategyId, idea.symbols[0], exitSide, Math.abs(position), exitPrice, pnl, candles[i].timestamp, 'EXIT', fee));
                 position = 0;
+                lastEntryBar = i;
+                barsInPosition = 0;
+                continue;
             }
         }
+        // Signal detection with cooldown and volume filter
+        const cooldownActive = (i - lastEntryBar) < cfg.minBarsBetweenEntries;
+        const volumeOk = volumeThreshold <= 0 || volume >= volumeThreshold;
+        // Determine execution price (next-bar open or current close)
+        const execIndex = cfg.nextBarExecution ? i + 1 : i;
+        const execPrice = execIndex < closeSeries.length ? openSeries[execIndex] : price;
+        if (buySignals[i] && position <= 0 && !cooldownActive && volumeOk && execIndex < closeSeries.length) {
+            // Close short if exists
+            if (position < 0) {
+                const exitPrice = applySlippage(execPrice, 'BUY');
+                const pnl = (entryPrice - exitPrice) * Math.abs(position);
+                const fee = calcFee(exitPrice, Math.abs(position));
+                capital += pnl - fee;
+                totalFees += fee;
+                totalSlippageCost += Math.abs(exitPrice - execPrice) * Math.abs(position);
+                trades.push(createTrade(strategyId, idea.symbols[0], 'BUY', Math.abs(position), exitPrice, pnl, candles[execIndex].timestamp, 'EXIT', fee));
+            }
+            // Open long
+            const fillPrice = applySlippage(execPrice, 'BUY');
+            const size = (capital * idea.riskParameters.maxPositionSize) / fillPrice;
+            const fee = calcFee(fillPrice, size);
+            capital -= fee;
+            totalFees += fee;
+            totalSlippageCost += Math.abs(fillPrice - execPrice) * size;
+            position = size;
+            entryPrice = fillPrice;
+            entryIndex = execIndex;
+            lastEntryBar = i;
+            barsInPosition = 0;
+            trades.push(createTrade(strategyId, idea.symbols[0], 'BUY', size, fillPrice, 0, candles[execIndex].timestamp, 'ENTRY', fee));
+        }
+        else if (sellSignals[i] && position >= 0 && !cooldownActive && volumeOk && execIndex < closeSeries.length) {
+            // Close long if exists
+            if (position > 0) {
+                const exitPrice = applySlippage(execPrice, 'SELL');
+                const pnl = (exitPrice - entryPrice) * position;
+                const fee = calcFee(exitPrice, position);
+                capital += pnl - fee;
+                totalFees += fee;
+                totalSlippageCost += Math.abs(exitPrice - execPrice) * position;
+                trades.push(createTrade(strategyId, idea.symbols[0], 'SELL', position, exitPrice, pnl, candles[execIndex].timestamp, 'EXIT', fee));
+            }
+            // Open short
+            const fillPrice = applySlippage(execPrice, 'SELL');
+            const size = (capital * idea.riskParameters.maxPositionSize) / fillPrice;
+            const fee = calcFee(fillPrice, size);
+            capital -= fee;
+            totalFees += fee;
+            totalSlippageCost += Math.abs(fillPrice - execPrice) * size;
+            position = -size;
+            entryPrice = fillPrice;
+            entryIndex = execIndex;
+            lastEntryBar = i;
+            barsInPosition = 0;
+            trades.push(createTrade(strategyId, idea.symbols[0], 'SELL', size, fillPrice, 0, candles[execIndex].timestamp, 'ENTRY', fee));
+        }
+        if (position !== 0)
+            barsInPosition++;
     }
-    // Close any remaining position
+    // Close any remaining position at last bar
     if (position !== 0) {
-        const price = closeSeries[closeSeries.length - 1];
-        const pnl = position > 0 ? (price - entryPrice) * position : (entryPrice - price) * Math.abs(position);
-        capital += pnl;
-        trades.push(createTrade(strategyId, idea.symbols[0], position > 0 ? 'SELL' : 'BUY', Math.abs(position), price, pnl, candles[candles.length - 1].timestamp, 'EXIT'));
+        const lastPrice = closeSeries[closeSeries.length - 1];
+        const exitSide = position > 0 ? 'SELL' : 'BUY';
+        const slip = lastPrice * (cfg.slippageBps / 10000);
+        const exitPrice = exitSide === 'BUY' ? lastPrice + slip : lastPrice - slip;
+        const pnl = position > 0
+            ? (exitPrice - entryPrice) * position
+            : (entryPrice - exitPrice) * Math.abs(position);
+        const fee = exitPrice * Math.abs(position) * cfg.commissionRate;
+        capital += pnl - fee;
+        totalFees += fee;
+        trades.push(createTrade(strategyId, idea.symbols[0], exitSide, Math.abs(position), exitPrice, pnl, candles[candles.length - 1].timestamp, 'EXIT', fee));
     }
     // Calculate metrics
-    return calculateMetrics(strategyId, trades, initialCapital, capital, candles);
+    return calculateMetrics(strategyId, trades, initialCapital, capital, candles, totalFees, totalSlippageCost, hoursPerCandle);
 }
-function createTrade(strategyId, symbol, side, size, price, pnl, timestamp, entryExit) {
+function createTrade(strategyId, symbol, side, size, price, pnl, timestamp, entryExit, fee) {
     return {
         id: (0, uuid_1.v4)(),
         strategyId,
@@ -242,7 +422,7 @@ function createTrade(strategyId, symbol, side, size, price, pnl, timestamp, entr
         side,
         size,
         price,
-        fee: price * size * 0.0005,
+        fee,
         pnl,
         timestamp,
         type: 'MARKET',
@@ -250,33 +430,90 @@ function createTrade(strategyId, symbol, side, size, price, pnl, timestamp, entr
         entryExit,
     };
 }
-function calculateMetrics(strategyId, trades, initialCapital, finalCapital, candles) {
+/**
+ * Calculate realistic backtest metrics.
+ */
+function calculateMetrics(strategyId, trades, initialCapital, finalCapital, candles, totalFees, totalSlippageCost, hoursPerCandle) {
     const exitTrades = trades.filter(t => t.entryExit === 'EXIT');
     const winningTrades = exitTrades.filter(t => (t.pnl || 0) > 0);
     const losingTrades = exitTrades.filter(t => (t.pnl || 0) < 0);
     const totalReturn = ((finalCapital - initialCapital) / initialCapital) * 100;
     const winRate = exitTrades.length > 0 ? (winningTrades.length / exitTrades.length) * 100 : 0;
-    // Calculate max drawdown
+    // Actual data duration in years
+    const dataDurationMs = candles[candles.length - 1].timestamp.getTime() - candles[0].timestamp.getTime();
+    const dataDurationYears = Math.max(dataDurationMs / (365.25 * 24 * 3600 * 1000), 1 / 365.25); // floor at 1 day
+    const annualizedReturn = ((Math.pow(finalCapital / initialCapital, 1 / dataDurationYears) - 1) * 100);
+    // Calculate max drawdown at trade resolution
     let maxDrawdown = 0;
     let peak = initialCapital;
     let runningCapital = initialCapital;
     for (const trade of exitTrades) {
-        runningCapital += trade.pnl || 0;
+        runningCapital += (trade.pnl || 0) - (trade.fee || 0);
         peak = Math.max(peak, runningCapital);
         const drawdown = ((peak - runningCapital) / peak) * 100;
         maxDrawdown = Math.max(maxDrawdown, drawdown);
     }
-    // Calculate Sharpe ratio
-    const returns = exitTrades.map(t => (t.pnl || 0) / initialCapital);
+    // Calculate Sharpe ratio (per-trade returns, annualized)
+    const returns = exitTrades.map(t => ((t.pnl || 0) - (t.fee || 0)) / initialCapital);
     const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
     const stdReturn = returns.length > 1
-        ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length)
+        ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length - 1))
         : 1;
-    const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * Math.sqrt(252) : 0;
-    // Calculate profit factor
+    // Estimate trades per year for annualization
+    const tradesPerYear = dataDurationYears > 0 ? exitTrades.length / dataDurationYears : exitTrades.length * 365;
+    const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * Math.sqrt(tradesPerYear) : 0;
+    // Real Sortino ratio (downside deviation only)
+    const downsideReturns = returns.filter(r => r < 0);
+    const downsideDev = downsideReturns.length > 1
+        ? Math.sqrt(downsideReturns.reduce((sum, r) => sum + r * r, 0) / (downsideReturns.length - 1))
+        : downsideReturns.length === 1
+            ? Math.abs(downsideReturns[0])
+            : 1;
+    const sortinoRatio = downsideDev > 0 ? (avgReturn / downsideDev) * Math.sqrt(tradesPerYear) : 0;
+    // Real VaR95 (5th percentile of returns, as loss)
+    const sortedReturns = [...returns].sort((a, b) => a - b);
+    const varIndex = Math.floor(sortedReturns.length * 0.05);
+    const var95 = sortedReturns.length > 0 ? Math.abs(sortedReturns[varIndex] || 0) * 100 : 0;
+    // Profit factor
     const totalWins = winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
     const totalLosses = Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0));
     const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
+    // Average win/loss
+    const avgWin = winningTrades.length > 0
+        ? winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0) / winningTrades.length
+        : 0;
+    const avgLoss = losingTrades.length > 0
+        ? Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0)) / losingTrades.length
+        : 0;
+    // Max consecutive losses
+    let maxConsecutiveLosses = 0;
+    let consecutiveLosses = 0;
+    for (const trade of exitTrades) {
+        if ((trade.pnl || 0) < 0) {
+            consecutiveLosses++;
+            maxConsecutiveLosses = Math.max(maxConsecutiveLosses, consecutiveLosses);
+        }
+        else {
+            consecutiveLosses = 0;
+        }
+    }
+    // Average trade duration (in bars)
+    const entryTrades = trades.filter(t => t.entryExit === 'ENTRY');
+    let avgTradeDuration = 0;
+    if (entryTrades.length > 0 && exitTrades.length > 0) {
+        const durations = [];
+        for (let i = 0; i < exitTrades.length && i < entryTrades.length; i++) {
+            const duration = exitTrades[i].timestamp.getTime() - entryTrades[i].timestamp.getTime();
+            durations.push(duration / (1000 * 60 * 60)); // in hours
+        }
+        avgTradeDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+    }
+    // Expectancy (average $ per trade)
+    const expectancy = exitTrades.length > 0
+        ? exitTrades.reduce((sum, t) => sum + (t.pnl || 0) - (t.fee || 0), 0) / exitTrades.length
+        : 0;
+    // Calmar ratio (annualized return / max drawdown)
+    const calmarRatio = maxDrawdown > 0 ? Math.abs(annualizedReturn) / maxDrawdown : 0;
     return {
         strategyId,
         period: {
@@ -286,7 +523,7 @@ function calculateMetrics(strategyId, trades, initialCapital, finalCapital, cand
         initialCapital,
         finalCapital,
         totalReturn,
-        annualizedReturn: totalReturn * (365 / 30), // Assuming ~1 month of data
+        annualizedReturn,
         sharpeRatio,
         maxDrawdown,
         winRate,
@@ -294,11 +531,18 @@ function calculateMetrics(strategyId, trades, initialCapital, finalCapital, cand
         trades,
         profitFactor,
         metrics: {
-            calmarRatio: maxDrawdown > 0 ? totalReturn / maxDrawdown : 0,
-            sortinoRatio: sharpeRatio * 1.2, // Simplified
-            var95: maxDrawdown * 0.8, // Simplified
-            beta: 1,
-            alpha: totalReturn - 5, // Assuming 5% market return
+            calmarRatio,
+            sortinoRatio,
+            var95,
+            beta: 0, // Cannot compute without benchmark; 0 = not calculated
+            alpha: 0, // Cannot compute without benchmark; 0 = not calculated
+            avgWin,
+            avgLoss,
+            maxConsecutiveLosses,
+            avgTradeDuration,
+            totalFees,
+            avgSlippageCost: exitTrades.length > 0 ? totalSlippageCost / exitTrades.length : 0,
+            expectancy,
         },
     };
 }
@@ -308,6 +552,44 @@ function buildCloseSeries(candles) {
         closes[i] = candles[i].close;
     }
     return closes;
+}
+function buildPriceSeries(candles, field) {
+    const arr = new Float64Array(candles.length);
+    for (let i = 0; i < candles.length; i++) {
+        arr[i] = candles[i][field] || 0;
+    }
+    return arr;
+}
+/**
+ * Estimate hours per candle from timestamp gaps.
+ */
+function estimateHoursPerCandle(candles) {
+    if (candles.length < 2)
+        return 1;
+    const gaps = [];
+    const sampleCount = Math.min(20, candles.length - 1);
+    for (let i = 1; i <= sampleCount; i++) {
+        const gap = candles[i].timestamp.getTime() - candles[i - 1].timestamp.getTime();
+        gaps.push(gap);
+    }
+    const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    // Floor at 1 minute, cap at 24 hours
+    return Math.max(1 / 60, Math.min(24, avgGap / (1000 * 60 * 60)));
+}
+/**
+ * Compute volume threshold at given percentile.
+ */
+function computeVolumePercentile(volumes, length, percentile) {
+    const validVolumes = [];
+    for (let i = 0; i < length; i++) {
+        if (volumes[i] > 0)
+            validVolumes.push(volumes[i]);
+    }
+    if (validVolumes.length === 0)
+        return 0;
+    validVolumes.sort((a, b) => a - b);
+    const idx = Math.floor(validVolumes.length * percentile);
+    return validVolumes[Math.min(idx, validVolumes.length - 1)];
 }
 function splitIntoBatches(items, batchCount) {
     const count = Math.max(1, Math.min(batchCount, items.length));
