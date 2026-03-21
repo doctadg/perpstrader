@@ -104,6 +104,8 @@ class BondingCurveService {
   private paperPositions: Map<string, PaperPosition> = new Map();
   private paperSolBalance: number = 10; // Start with 10 SOL in paper mode
   private initialized = false;
+  private entryScores: Map<string, number> = new Map();
+  private maxMultipliers: Map<string, number> = new Map(); // track max multiplier per position
 
   constructor() {
     this.paperMode = process.env.PUMPFUN_PAPER_MODE !== 'false'; // default paper
@@ -165,6 +167,18 @@ class BondingCurveService {
 
   isInitialized(): boolean {
     return this.initialized;
+  }
+
+  /**
+   * Lazy-import pumpfunStore (may not be available if module loaded standalone)
+   */
+  private async getStore(): Promise<any> {
+    try {
+      const { default: store } = await import('../../data/pumpfun-store');
+      return store;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -292,17 +306,18 @@ class BondingCurveService {
     tokenSymbol: string,
     solAmount: number,
     tpLevels: TpLevel[] = DEFAULT_TP_LEVELS,
+    entryScore?: number,
   ): Promise<SnipeResult> {
     const timestamp = new Date();
 
     if (this.paperMode) {
-      return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp);
+      return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
     }
 
     // Live buy not implemented yet (requires transaction building)
     // Will be added when going live
     logger.warn('[BondingCurve] Live buy not yet implemented, using paper fallback');
-    return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp);
+    return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
   }
 
   /**
@@ -314,6 +329,7 @@ class BondingCurveService {
     solAmount: number,
     tpLevels: TpLevel[],
     timestamp: Date,
+    entryScore?: number,
   ): SnipeResult {
     if (this.paperSolBalance < solAmount) {
       return {
@@ -365,6 +381,15 @@ class BondingCurveService {
       partialSells: [],
     });
 
+    // Track entry score
+    if (entryScore !== undefined) {
+      this.entryScores.set(tokenMint, entryScore);
+    }
+    this.maxMultipliers.set(tokenMint, 1.0);
+
+    // Persist to DB (additive, non-blocking)
+    this.persistBuyToDb(tokenMint, tokenSymbol, solAmount, quote, tpLevels, timestamp, entryScore).catch(() => {});
+
     logger.info(
       `[PAPER BUY] ${tokenSymbol} | ${solAmount.toFixed(3)} SOL -> ${quote.tokenAmount.toFixed(0)} tokens @ ${quote.pricePerToken.toFixed(12)} SOL/token | MC: ${quote.marketCapSol.toFixed(2)} SOL`
     );
@@ -388,6 +413,8 @@ class BondingCurveService {
     if (!position) return [];
 
     const results: SellResult[] = [];
+    const entryScore = this.entryScores.get(tokenMint);
+    const positionMaxMultiplier = this.maxMultipliers.get(tokenMint) || 1.0;
 
     for (const tp of position.tpLevels) {
       if (tp.triggered) continue;
@@ -409,6 +436,10 @@ class BondingCurveService {
         this.paperSolBalance += solToReceive;
       }
 
+      // Persist sell trade to DB (additive, non-blocking)
+      const pnl = solToReceive - (position.solSpent * tp.pctToSell);
+      this.persistSellToDb(tokenMint, position.tokenSymbol, tokensToSell, solToReceive, tp.name, pnl, entryScore, currentPriceMultiplier).catch(() => {});
+
       logger.info(
         `[PAPER SELL] ${position.tokenSymbol} TP ${tp.name} | ${tokensToSell.toFixed(0)} tokens -> ${solToReceive.toFixed(4)} SOL (${(tp.multiplier * 100).toFixed(0)}x)`
       );
@@ -428,6 +459,19 @@ class BondingCurveService {
       this.paperPositions.delete(tokenMint);
       const totalPnl = position.partialSells.reduce((s, p) => s + p.solReceived, 0) - position.solSpent;
       logger.info(`[POSITION CLOSED] ${position.tokenSymbol} | PnL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)} SOL | ${position.partialSells.length} partial sells`);
+
+      // Persist position update and outcome to DB (additive, non-blocking)
+      const holdTimeMinutes = (Date.now() - position.buyTimestamp.getTime()) / 60000;
+      const exitSol = position.partialSells.reduce((s, p) => s + p.solReceived, 0);
+      const tpLevelsHit = position.partialSells.map(p => p.tpLevel);
+      const pnlPct = position.solSpent > 0 ? ((exitSol - position.solSpent) / position.solSpent) * 100 : 0;
+
+      this.persistPositionUpdate(tokenMint, position, 'CLOSED', positionMaxMultiplier, 0, entryScore).catch(() => {});
+      this.persistOutcomeToDb(tokenMint, position.tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, 'PROFIT_TP', holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => {});
+
+      // Clean up tracking maps
+      this.entryScores.delete(tokenMint);
+      this.maxMultipliers.delete(tokenMint);
     }
 
     return results;
@@ -451,6 +495,23 @@ class BondingCurveService {
     logger.info(
       `[EMERGENCY SELL] ${position.tokenSymbol} | ${position.tokensOwned.toFixed(0)} tokens -> ${solToReceive.toFixed(4)} SOL`
     );
+
+    // Persist emergency sell to DB (additive, non-blocking)
+    const entryScore = this.entryScores.get(tokenMint);
+    const positionMaxMultiplier = this.maxMultipliers.get(tokenMint) || 1.0;
+    const totalPnl = solToReceive + position.partialSells.reduce((s, p) => s + p.solReceived, 0) - position.solSpent;
+    const exitSol = solToReceive + position.partialSells.reduce((s, p) => s + p.solReceived, 0);
+    const holdTimeMinutes = (Date.now() - position.buyTimestamp.getTime()) / 60000;
+    const pnlPct = position.solSpent > 0 ? ((exitSol - position.solSpent) / position.solSpent) * 100 : 0;
+    const tpLevelsHit = position.partialSells.map(p => p.tpLevel);
+
+    this.persistSellToDb(tokenMint, position.tokenSymbol, position.tokensOwned, solToReceive, 'STOP_LOSS', totalPnl, entryScore, currentPriceMultiplier).catch(() => {});
+    this.persistPositionUpdate(tokenMint, position, 'CLOSED', positionMaxMultiplier, currentPriceMultiplier, entryScore).catch(() => {});
+    this.persistOutcomeToDb(tokenMint, position.tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, 'LOSS_STOP', holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => {});
+
+    // Clean up tracking maps
+    this.entryScores.delete(tokenMint);
+    this.maxMultipliers.delete(tokenMint);
 
     return {
       success: true,
@@ -490,8 +551,241 @@ class BondingCurveService {
       openPositions: positions.length,
       totalInvested,
       totalRealized,
-      unrealizedPnl: 0, // Would need current prices to calculate
+      unrealizedPnl: 0,
     };
+  }
+
+  // ==========================================
+  // Real On-Chain Price Sampling
+  // ==========================================
+
+  /**
+   * Sample real on-chain bonding curve prices for all open positions.
+   * Updates maxMultipliers, persists price samples to DB, and returns
+   * a map of tokenMint -> currentMultiplier for use by TP/SL logic.
+   */
+  async sampleAndUpdatePositions(): Promise<Map<string, number>> {
+    const multipliers = new Map<string, number>();
+    const store = await this.getStore();
+
+    for (const [tokenMint, position] of this.paperPositions) {
+      try {
+        const state = await this.readBondingCurveState(tokenMint);
+        if (!state) {
+          // Bonding curve not readable (may have graduated or been rugs)
+          // Use last known multiplier or 1.0
+          const lastKnown = this.maxMultipliers.get(tokenMint) || 1.0;
+          multipliers.set(tokenMint, lastKnown);
+          logger.debug(`[BondingCurve] No bonding curve state for ${position.tokenSymbol}, using last known: ${lastKnown.toFixed(2)}x`);
+          continue;
+        }
+
+        // Calculate current price from bonding curve state
+        const k = Number(state.virtualTokenReserves) * Number(state.virtualSolReserves);
+        const virtualSol = Number(state.virtualSolReserves) / LAMPORTS_PER_SOL;
+        const totalTokens = Number(state.tokenTotalSupply) / 1e6;
+        // price per token = virtualSolReserves / virtualTokenReserves (in SOL, tokens are 6 decimals)
+        const currentPricePerToken = virtualSol / (Number(state.virtualTokenReserves) / 1e6);
+        const currentMultiplier = position.entryPrice > 0 ? currentPricePerToken / position.entryPrice : 1.0;
+
+        // Track max multiplier
+        const prevMax = this.maxMultipliers.get(tokenMint) || 1.0;
+        const newMax = Math.max(prevMax, currentMultiplier);
+        this.maxMultipliers.set(tokenMint, newMax);
+
+        multipliers.set(tokenMint, currentMultiplier);
+
+        // Calculate market cap
+        const marketCapSol = currentPricePerToken * totalTokens;
+
+        // Persist price sample to DB
+        if (store) {
+          store.recordPriceSample(tokenMint, currentMultiplier, marketCapSol, state.complete).catch(() => {});
+        }
+
+        // Update position in DB with current multiplier
+        if (store) {
+          store.upsertPosition({
+            mintAddress: tokenMint,
+            tokenSymbol: position.tokenSymbol,
+            tokensOwned: position.tokensOwned,
+            solSpent: position.solSpent,
+            entryPrice: position.entryPrice,
+            entryScore: this.entryScores.get(tokenMint),
+            buyTimestamp: position.buyTimestamp,
+            tpLevels: position.tpLevels,
+            partialSells: position.partialSells,
+            status: 'OPEN',
+            maxMultiplier: newMax,
+            currentMultiplier: currentMultiplier,
+          }).catch(() => {});
+        }
+
+        logger.debug(
+          `[BondingCurve] Sampled ${position.tokenSymbol}: ${currentMultiplier.toFixed(3)}x (max: ${newMax.toFixed(3)}x, MC: ${marketCapSol.toFixed(2)} SOL${state.complete ? ', GRADUATED' : ''})`
+        );
+      } catch (err) {
+        logger.debug(`[BondingCurve] Failed to sample ${position.tokenSymbol}: ${err}`);
+        // Use last known multiplier as fallback
+        const lastKnown = this.maxMultipliers.get(tokenMint) || 1.0;
+        multipliers.set(tokenMint, lastKnown);
+      }
+    }
+
+    return multipliers;
+  }
+
+  // ==========================================
+  // DB Persistence Helpers (non-blocking)
+  // ==========================================
+
+  private async persistBuyToDb(
+    tokenMint: string,
+    tokenSymbol: string,
+    solAmount: number,
+    quote: BuyQuote,
+    tpLevels: TpLevel[],
+    timestamp: Date,
+    entryScore?: number,
+  ): Promise<void> {
+    const store = await this.getStore();
+    if (!store) return;
+
+    try {
+      // Record the BUY trade
+      store.recordTrade({
+        mintAddress: tokenMint,
+        tokenSymbol,
+        side: 'BUY',
+        solAmount,
+        tokenAmount: quote.tokenAmount,
+        pricePerToken: quote.pricePerToken,
+        entryScore,
+        tradeReason: 'SNIPER',
+        paperMode: this.paperMode,
+        timestamp,
+      });
+
+      // Upsert position
+      store.upsertPosition({
+        mintAddress: tokenMint,
+        tokenSymbol,
+        tokensOwned: quote.tokenAmount,
+        solSpent: solAmount,
+        entryPrice: quote.pricePerToken,
+        entryScore,
+        buyTimestamp: timestamp,
+        tpLevels: tpLevels.map(tp => ({ ...tp, triggered: false })),
+        partialSells: [],
+        status: 'OPEN',
+        maxMultiplier: 1.0,
+        currentMultiplier: 1.0,
+      });
+    } catch (err) {
+      logger.debug(`[BondingCurve] Failed to persist buy to DB: ${err}`);
+    }
+  }
+
+  private async persistSellToDb(
+    tokenMint: string,
+    tokenSymbol: string,
+    tokensSold: number,
+    solReceived: number,
+    tpLevel: string,
+    pnl: number,
+    entryScore: number | undefined,
+    currentMultiplier: number,
+  ): Promise<void> {
+    const store = await this.getStore();
+    if (!store) return;
+
+    try {
+      store.recordTrade({
+        mintAddress: tokenMint,
+        tokenSymbol,
+        side: 'SELL',
+        solAmount: solReceived,
+        tokenAmount: tokensSold,
+        pricePerToken: tokensSold > 0 ? solReceived / tokensSold : 0,
+        entryScore,
+        tpLevel,
+        tradeReason: `TP_${tpLevel}`,
+        pnl,
+        paperMode: this.paperMode,
+        timestamp: new Date(),
+      });
+    } catch (err) {
+      logger.debug(`[BondingCurve] Failed to persist sell to DB: ${err}`);
+    }
+  }
+
+  private async persistPositionUpdate(
+    tokenMint: string,
+    position: PaperPosition,
+    status: string,
+    maxMultiplier: number,
+    currentMultiplier: number,
+    entryScore: number | undefined,
+  ): Promise<void> {
+    const store = await this.getStore();
+    if (!store) return;
+
+    try {
+      store.upsertPosition({
+        mintAddress: tokenMint,
+        tokenSymbol: position.tokenSymbol,
+        tokensOwned: position.tokensOwned,
+        solSpent: position.solSpent,
+        entryPrice: position.entryPrice,
+        entryScore,
+        buyTimestamp: position.buyTimestamp,
+        tpLevels: position.tpLevels,
+        partialSells: position.partialSells,
+        status,
+        maxMultiplier,
+        currentMultiplier,
+      });
+    } catch (err) {
+      logger.debug(`[BondingCurve] Failed to update position in DB: ${err}`);
+    }
+  }
+
+  private async persistOutcomeToDb(
+    tokenMint: string,
+    tokenSymbol: string,
+    entryScore: number | undefined,
+    entrySol: number,
+    exitSol: number,
+    pnlSol: number,
+    pnlPct: number,
+    maxMultiplier: number,
+    outcome: string,
+    holdTimeMinutes: number,
+    partialSellsCount: number,
+    tpLevelsHit: string[],
+  ): Promise<void> {
+    const store = await this.getStore();
+    if (!store) return;
+
+    try {
+      store.recordOutcome({
+        mintAddress: tokenMint,
+        tokenSymbol,
+        entryScore,
+        entrySol,
+        exitSol,
+        pnlSol,
+        pnlPct,
+        maxMultiplier,
+        outcome,
+        holdTimeMinutes,
+        partialSellsCount,
+        tpLevelsHit,
+        closedAt: new Date(),
+      });
+    } catch (err) {
+      logger.debug(`[BondingCurve] Failed to persist outcome to DB: ${err}`);
+    }
   }
 }
 

@@ -1199,6 +1199,139 @@ class StoryClusterStoreEnhanced {
             return [];
         }
     }
+
+    /**
+     * Get entities associated with a cluster (for Jaccard overlap calculation)
+     */
+    async getClusterEntities(clusterId: string): Promise<string[]> {
+        await this.initialize();
+        if (!this.db) return [];
+
+        try {
+            const rows = this.db.prepare(`
+                SELECT DISTINCT ne.normalized_name
+                FROM named_entities ne
+                JOIN entity_cluster_links ecl ON ne.id = ecl.entity_id
+                WHERE ecl.cluster_id = ?
+            `).all(clusterId) as Array<{ normalized_name: string }>;
+
+            return rows.map(r => r.normalized_name.toLowerCase());
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to get cluster entities:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Find clusters that share entities with a given entity list
+     * Returns map of clusterId -> set of matching entity normalized names
+     */
+    async findClustersByEntities(entityNames: string[]): Promise<Map<string, Set<string>>> {
+        await this.initialize();
+        if (!this.db || entityNames.length === 0) return new Map();
+
+        try {
+            const normalized = entityNames.map(e => e.toLowerCase());
+            const placeholders = normalized.map(() => '?').join(',');
+
+            const rows = this.db.prepare(`
+                SELECT DISTINCT ecl.cluster_id, ne.normalized_name
+                FROM entity_cluster_links ecl
+                JOIN named_entities ne ON ecl.entity_id = ne.id
+                WHERE ne.normalized_name IN (${placeholders})
+            `).all(...normalized) as Array<{ cluster_id: string; normalized_name: string }>;
+
+            const result = new Map<string, Set<string>>();
+            for (const row of rows) {
+                if (!result.has(row.cluster_id)) {
+                    result.set(row.cluster_id, new Set());
+                }
+                result.get(row.cluster_id)!.add(row.normalized_name.toLowerCase());
+            }
+
+            return result;
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to find clusters by entities:', error);
+            return new Map();
+        }
+    }
+
+    /**
+     * Find recent clusters (within last N hours) that have a specific primary entity
+     * Used for anti-spam dedup to avoid creating duplicate clusters
+     */
+    async findRecentClustersByPrimaryEntity(
+        entityName: string,
+        hours: number = 2,
+        category?: string
+    ): Promise<any[]> {
+        await this.initialize();
+        if (!this.db) return [];
+
+        try {
+            const cutoff = new Date(Date.now() - (hours * 3600000)).toISOString();
+            const normalizedName = entityName.toLowerCase();
+
+            let query = `
+                SELECT DISTINCT sc.*
+                FROM story_clusters sc
+                JOIN entity_cluster_links ecl ON sc.id = ecl.cluster_id
+                JOIN named_entities ne ON ecl.entity_id = ne.id
+                WHERE ne.normalized_name = ?
+                AND sc.updated_at > ?
+            `;
+            const params: any[] = [normalizedName, cutoff];
+
+            if (category) {
+                query += ` AND sc.category = ?`;
+                params.push(category);
+            }
+
+            query += ` ORDER BY sc.heat_score DESC LIMIT 5`;
+
+            const rows = this.db.prepare(query).all(...params) as any[];
+
+            return rows.map(row => ({
+                id: row.id,
+                topic: row.topic,
+                topicKey: row.topic_key || undefined,
+                summary: row.summary,
+                category: row.category,
+                keywords: JSON.parse(row.keywords || '[]'),
+                heatScore: row.heat_score,
+                articleCount: row.article_count,
+                uniqueTitleCount: row.unique_title_count || row.article_count,
+                trendDirection: (row.trend_direction as 'UP' | 'DOWN' | 'NEUTRAL') || 'NEUTRAL',
+                urgency: (row.urgency as 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW') || 'MEDIUM',
+                subEventType: row.sub_event_type || undefined,
+                firstSeen: row.first_seen ? new Date(row.first_seen) : undefined,
+                createdAt: new Date(row.created_at),
+                updatedAt: new Date(row.updated_at)
+            }));
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to find recent clusters by entity:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get cluster ID by article ID
+     */
+    async getClusterIdByArticleId(articleId: string): Promise<string | null> {
+        await this.initialize();
+        if (!this.db) return null;
+
+        try {
+            const row = this.db.prepare(`
+                SELECT cluster_id FROM cluster_articles WHERE article_id = ? LIMIT 1
+            `).get(articleId) as { cluster_id: string } | undefined;
+
+            return row?.cluster_id || null;
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to get cluster by article ID:', error);
+            return null;
+        }
+    }
 }
 
 const storyClusterStoreEnhanced = new StoryClusterStoreEnhanced();

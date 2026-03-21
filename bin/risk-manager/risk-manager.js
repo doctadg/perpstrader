@@ -10,7 +10,7 @@ const hyperliquid_client_1 = __importDefault(require("../execution-engine/hyperl
 class RiskManager {
     maxPositionSize;
     maxDailyLoss;
-    maxLeverage = 20; // CRITICAL FIX: Set to 20x max (was 10x, previously 40x)
+    maxLeverage = 100;
     HARD_CAP_MAX_LOSS_PERCENT = 0.015; // 1.5% account loss cap per trade
     MIN_STOP_LOSS_PCT = 0.006; // 0.6% minimum stop distance
     DEFAULT_STOP_LOSS_PCT = 0.008; // 0.8% baseline hard stop
@@ -137,7 +137,7 @@ class RiskManager {
                 warnings,
                 stopLoss,
                 takeProfit,
-                leverage: 20 // CRITICAL FIX: Max 20x leverage
+                leverage: this.maxLeverage
             };
             logger_1.default.info(`Risk assessment completed: ${JSON.stringify(assessment)}`);
             return assessment;
@@ -154,7 +154,7 @@ class RiskManager {
             return 0;
         }
         // Leverage is only a margin constraint. PnL risk is still based on notional * stop distance.
-        const LEVERAGE = Math.min(20, Math.max(1, this.maxLeverage)); // CRITICAL FIX: 20x max leverage
+        const LEVERAGE = Math.min(this.maxLeverage, Math.max(1, this.maxLeverage));
         const price = Math.max(signal.price || 0, Number.EPSILON);
         // Risk 0.5% to 1.0% of available balance per trade based on confidence.
         const normalizedConfidence = Math.max(0, Math.min(1, (signal.confidence - 0.5) * 2));

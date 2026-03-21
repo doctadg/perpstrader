@@ -36,7 +36,12 @@ export async function storyClusterNode(state: NewsAgentState): Promise<Partial<N
     let articles = state.categorizedNews;
 
     if (articles.length === 0) {
-        return { currentStep: 'CLUSTERING_SKIPPED_NO_ARTICLES' };
+        logger.info('[StoryClusterNode] No new articles from pipeline, fetching unclustered articles from DB...');
+        articles = await storyClusterStore.getUnclusteredArticles(CLUSTER_BATCH_SIZE) as any;
+        if (articles.length === 0) {
+            return { currentStep: 'CLUSTERING_SKIPPED_NO_ARTICLES' };
+        }
+        logger.info(`[StoryClusterNode] Found ${articles.length} unclustered articles from DB`);
     }
 
     // Filter out non-market-moving content (e.g., "Fact Check Team: Exploring...")

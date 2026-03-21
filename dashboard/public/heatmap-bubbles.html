@@ -3,58 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PERPS_TRADER // MARKET_HEATMAP_BUBBLES</title>
+    <title>PerpsTrader // Market Heatmap Bubbles</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/css/mobile-responsive.css">
     <link rel="stylesheet" href="/css/mobile-native.css">
     <script src="/js/mobile-enhancements.js"></script>
     <script src="/js/mobile-native.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
+        @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap");
+
         :root {
-            --bg-obsidian: #050507;
-            --bg-panel: rgba(12, 12, 18, 0.95);
-            --terminal-green: #00ff9d;
-            --terminal-cyan: #00f2ff;
-            --terminal-amber: #ffb300;
-            --terminal-red: #ff3e3e;
-            --border-low: rgba(0, 242, 255, 0.1);
-            --border-med: rgba(0, 242, 255, 0.3);
-            --font-mono: 'JetBrains Mono', monospace;
-            --font-sans: 'Inter', sans-serif;
+            --bg-body: #000000;
+            --bg-panel: rgba(255,255,255,0.02);
+            --bg-panel-hover: rgba(255,255,255,0.04);
+            --border-subtle: rgba(255,255,255,0.06);
+            --border-medium: rgba(255,255,255,0.1);
+            --border-strong: rgba(255,255,255,0.15);
+            --text-primary: rgba(255,255,255,0.9);
+            --text-body: rgba(255,255,255,0.5);
+            --text-label: rgba(255,255,255,0.3);
+            --text-meta: #666666;
+            --good: #4ade80;
+            --bad: #f87171;
+            --warn: #f59e0b;
+            --accent: #3b82f6;
+            --mono: "JetBrains Mono", monospace;
+            --sans: "Inter", sans-serif;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: var(--font-sans);
-            background: var(--bg-obsidian);
-            color: #e0e0e0;
+            font-family: var(--sans);
+            background: var(--bg-body);
+            color: var(--text-body);
             height: 100vh;
             overflow: hidden;
             display: flex;
             flex-direction: column;
-        }
-
-        /* Scanline */
-        body::before {
-            content: " ";
-            display: block;
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
-            background-size: 100% 4px;
-            pointer-events: none;
-            z-index: 999;
-            opacity: 0.15;
         }
 
         .top-bar {
@@ -63,16 +50,16 @@
             align-items: center;
             padding: 0 24px;
             height: 50px;
-            background: #0a0a0f;
-            border-bottom: 1px solid var(--border-low);
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border-subtle);
             z-index: 100;
         }
 
         .system-id {
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.75em;
             letter-spacing: 2px;
-            color: var(--terminal-cyan);
+            color: var(--text-meta);
             display: flex;
             align-items: center;
             gap: 10px;
@@ -82,35 +69,29 @@
             content: "";
             width: 8px;
             height: 8px;
-            background: var(--terminal-amber);
+            background: var(--warn);
             border-radius: 50%;
-            box-shadow: 0 0 8px var(--terminal-amber);
         }
 
-        .nav-links {
-            display: flex;
-            gap: 20px;
-        }
+        .nav-links { display: flex; gap: 20px; }
 
         .nav-link {
-            color: #666;
+            color: var(--text-meta);
             text-decoration: none;
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.8em;
             transition: color 0.2s;
         }
 
         .nav-link:hover,
-        .nav-link.active {
-            color: var(--terminal-cyan);
-        }
+        .nav-link.active { color: var(--text-primary); }
 
         .controls {
             padding: 15px 24px;
             display: flex;
             gap: 15px;
-            border-bottom: 1px solid var(--border-low);
-            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
             flex-wrap: wrap;
             align-items: center;
         }
@@ -122,31 +103,32 @@
         }
 
         .control-label {
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.7em;
-            color: #666;
+            color: var(--text-meta);
         }
 
         .filter-btn {
             background: transparent;
-            border: 1px solid var(--border-low);
-            color: #666;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-meta);
             padding: 5px 12px;
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.7em;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.15s ease;
+            border-radius: 6px;
         }
 
         .filter-btn:hover {
-            border-color: var(--terminal-cyan);
-            color: #fff;
+            border-color: var(--border-medium);
+            color: var(--text-primary);
         }
 
         .filter-btn.active {
-            background: rgba(0, 242, 255, 0.1);
-            border-color: var(--terminal-cyan);
-            color: var(--terminal-cyan);
+            background: rgba(59,130,246,0.08);
+            border-color: var(--accent);
+            color: var(--accent);
         }
 
         .category-filter {
@@ -156,57 +138,53 @@
         }
 
         .category-btn {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #888;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-meta);
             padding: 3px 10px;
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.65em;
             cursor: pointer;
-            transition: all 0.2s;
-            border-radius: 3px;
+            transition: all 0.15s ease;
+            border-radius: 6px;
         }
 
         .category-btn:hover {
-            border-color: var(--terminal-cyan);
-            color: #fff;
+            border-color: var(--border-medium);
+            color: var(--text-primary);
         }
 
         .category-btn.active {
-            background: rgba(0, 242, 255, 0.2);
-            border-color: var(--terminal-cyan);
-            color: var(--terminal-cyan);
+            background: rgba(59,130,246,0.08);
+            border-color: var(--accent);
+            color: var(--accent);
         }
 
-        /* Bubble Map Container */
         .bubble-container {
             flex: 1;
             position: relative;
             overflow: hidden;
-            background: radial-gradient(ellipse at center, rgba(0, 242, 255, 0.02) 0%, transparent 70%);
         }
 
-        #bubbleCanvas {
-            width: 100%;
-            height: 100%;
-        }
+        #bubbleCanvas { width: 100%; height: 100%; }
 
-        /* Legend */
         .legend {
             position: absolute;
             bottom: 20px;
             right: 20px;
-            background: rgba(10, 10, 15, 0.95);
-            border: 1px solid var(--border-low);
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
             padding: 15px;
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.7em;
+            border-radius: 8px;
         }
 
         .legend-title {
-            color: var(--terminal-cyan);
+            color: var(--text-primary);
             margin-bottom: 10px;
             text-transform: uppercase;
+            font-size: 0.65em;
         }
 
         .legend-item {
@@ -214,7 +192,7 @@
             align-items: center;
             gap: 8px;
             margin-bottom: 6px;
-            color: #888;
+            color: var(--text-meta);
         }
 
         .legend-color {
@@ -224,32 +202,30 @@
         }
 
         .legend-size {
-            border: 1px solid #666;
+            border: 1px solid var(--border-medium);
             border-radius: 50%;
         }
 
-        /* Tooltip */
         .tooltip {
             position: absolute;
-            background: rgba(10, 10, 15, 0.98);
-            border: 1px solid var(--terminal-cyan);
+            background: rgba(0,0,0,0.95);
+            border: 1px solid var(--border-subtle);
             padding: 15px;
             pointer-events: none;
             opacity: 0;
-            transition: opacity 0.2s;
+            transition: opacity 0.15s ease;
             z-index: 1000;
             min-width: 250px;
             max-width: 350px;
+            border-radius: 8px;
         }
 
-        .tooltip.visible {
-            opacity: 1;
-        }
+        .tooltip.visible { opacity: 1; }
 
         .tooltip-header {
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.65em;
-            color: #666;
+            color: var(--text-meta);
             margin-bottom: 5px;
             text-transform: uppercase;
         }
@@ -257,7 +233,7 @@
         .tooltip-name {
             font-size: 1.1em;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-primary);
             margin-bottom: 8px;
         }
 
@@ -269,72 +245,67 @@
         }
 
         .tooltip-metric {
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.7em;
         }
 
-        .tooltip-metric-label {
-            color: #666;
-        }
-
-        .tooltip-metric-value {
-            color: var(--terminal-cyan);
-        }
+        .tooltip-metric-label { color: var(--text-meta); }
+        .tooltip-metric-value { color: var(--accent); }
 
         .tooltip-sentiment {
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.7em;
             padding: 4px 8px;
-            border-radius: 3px;
+            border-radius: 4px;
             display: inline-block;
             margin-top: 5px;
         }
 
         .sentiment-positive {
-            background: rgba(0, 255, 157, 0.1);
-            color: var(--terminal-green);
-            border: 1px solid var(--terminal-green);
+            background: rgba(74,222,128,0.1);
+            color: var(--good);
+            border: 1px solid rgba(74,222,128,0.3);
         }
 
         .sentiment-negative {
-            background: rgba(255, 62, 62, 0.1);
-            color: var(--terminal-red);
-            border: 1px solid var(--terminal-red);
+            background: rgba(248,113,113,0.1);
+            color: var(--bad);
+            border: 1px solid rgba(248,113,113,0.3);
         }
 
         .sentiment-neutral {
-            background: rgba(255, 179, 0, 0.1);
-            color: var(--terminal-amber);
-            border: 1px solid var(--terminal-amber);
+            background: rgba(245,158,11,0.1);
+            color: var(--warn);
+            border: 1px solid rgba(245,158,11,0.3);
         }
 
-        /* Loading */
         .loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            font-family: var(--font-mono);
-            color: #666;
+            font-family: var(--mono);
+            color: var(--text-meta);
             text-align: center;
         }
 
-        /* Stats overlay */
         .stats-overlay {
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(10, 10, 15, 0.95);
-            border: 1px solid var(--border-low);
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
             padding: 15px;
-            font-family: var(--font-mono);
+            font-family: var(--mono);
             font-size: 0.7em;
+            border-radius: 8px;
         }
 
         .stats-title {
-            color: var(--terminal-cyan);
+            color: var(--text-primary);
             margin-bottom: 10px;
             text-transform: uppercase;
+            font-size: 0.65em;
         }
 
         .stat-row {
@@ -344,13 +315,8 @@
             margin-bottom: 5px;
         }
 
-        .stat-label {
-            color: #666;
-        }
-
-        .stat-value {
-            color: #fff;
-        }
+        .stat-label { color: var(--text-meta); }
+        .stat-value { color: var(--text-primary); }
     </style>
     <script>window.location.replace('/heatmap');</script>
     <link rel="stylesheet" href="/css/terminal-unified.css">
@@ -359,12 +325,12 @@
     <!-- Swipe Navigation Hint -->
     <div class="swipe-hint show-mobile">
         <span class="swipe-hint-icon left">‹</span>
-        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
+        <span style="font-size: 0.7em; color: #666;">SWIPE</span>
         <span class="swipe-hint-icon right">›</span>
     </div>
 
     <div class="top-bar">
-        <div class="system-id">MARKET_HEATMAP // BUBBLE_VIEW // V.1.0</div>
+        <div class="system-id">MARKET HEATMAP // BUBBLES // V.1.0</div>
         <div class="nav-links hide-mobile">
             <a href="/news" class="nav-link">FEED</a>
             <a href="/heatmap" class="nav-link">LEGACY</a>
@@ -398,7 +364,7 @@
         <canvas id="bubbleCanvas"></canvas>
         
         <div class="stats-overlay">
-            <div class="stats-title">MARKET STATS</div>
+            <div class="stats-title">Market Stats</div>
             <div class="stat-row">
                 <span class="stat-label">Total Markets:</span>
                 <span class="stat-value" id="totalMarkets">-</span>
@@ -418,20 +384,20 @@
         </div>
 
         <div class="legend">
-            <div class="legend-title">LEGEND</div>
+            <div class="legend-title">Legend</div>
             <div class="legend-item">
-                <div class="legend-color" style="background: var(--terminal-green);"></div>
+                <div class="legend-color" style="background: var(--good);"></div>
                 <span>Positive Sentiment</span>
             </div>
             <div class="legend-item">
-                <div class="legend-color" style="background: var(--terminal-amber);"></div>
+                <div class="legend-color" style="background: var(--warn);"></div>
                 <span>Neutral Sentiment</span>
             </div>
             <div class="legend-item">
-                <div class="legend-color" style="background: var(--terminal-red);"></div>
+                <div class="legend-color" style="background: var(--bad);"></div>
                 <span>Negative Sentiment</span>
             </div>
-            <div style="margin-top: 10px; border-top: 1px solid var(--border-low); padding-top: 10px;">
+            <div style="margin-top: 10px; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
                 <div class="legend-item">
                     <div class="legend-size" style="width: 8px; height: 8px;"></div>
                     <span>Few articles</span>

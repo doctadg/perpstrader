@@ -202,9 +202,12 @@ export declare class CircuitBreakerSystem {
     private checkAPIConnectivity;
     /**
      * Check database health
+     * NOTE: We do NOT feed trades to the safety monitor here. Trades are already
+     * recorded by the execution engine at fill time (execution-engine.ts L959 and L1289).
+     * Re-recording them here causes double-counting on service restarts because
+     * processedTradeKeys is in-memory only while dailyPnL persists to disk.
      */
     private checkDatabase;
-    private recordRecentTradesForSafety;
     /**
      * Check vector store health
      */

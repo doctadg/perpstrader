@@ -10,634 +10,495 @@
     <link rel="stylesheet" href="/css/mobile-native.css">
     <script src="/js/mobile-enhancements.js"></script>
     <script src="/js/mobile-native.js"></script>
+    <link rel="stylesheet" href="/css/terminal-unified.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
-
+        /* === Legacy var aliases for JS/inline compat === */
         :root {
-            --bg-obsidian: #050507;
-            --bg-panel: rgba(12, 12, 18, 0.85);
-            --terminal-green: #00ff9d;
-            --terminal-cyan: #00f2ff;
-            --terminal-amber: #ffb300;
-            --terminal-red: #ff3e3e;
-            --terminal-purple: #b829dd;
-            --border-low: rgba(0, 242, 255, 0.15);
-            --border-med: rgba(0, 242, 255, 0.4);
-            --font-mono: 'JetBrains Mono', monospace;
-            --font-sans: 'Inter', sans-serif;
-            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
-            --glow-green: 0 0 15px rgba(0, 255, 157, 0.3);
-            --glow-red: 0 0 15px rgba(255, 62, 62, 0.3);
+            --terminal-green: #4ade80;
+            --terminal-cyan: #3b82f6;
+            --terminal-amber: #f59e0b;
+            --terminal-red: #f87171;
+            --terminal-purple: #a78bfa;
+            --border-low: rgba(255,255,255,0.06);
+            --border-med: rgba(255,255,255,0.1);
+            --bg-panel: rgba(255,255,255,0.02);
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            scrollbar-width: thin;
-            scrollbar-color: var(--terminal-cyan) transparent;
-        }
+        /* Remove CRT scanlines */
+        body::before { display: none !important; }
+
+        /* === RESET & BASE === */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: var(--font-sans);
-            background: var(--bg-obsidian);
+            background: #000;
             color: #e0e0e0;
-            min-height: 100vh;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.4;
             overflow-x: hidden;
-            position: relative;
-        }
-
-        /* CRT Scanline Effect */
-        body::before {
-            content: " ";
-            display: block;
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            z-index: 1000;
-            background-size: 100% 4px, 3px 100%;
-            pointer-events: none;
-            opacity: 0.15;
         }
 
         .container {
-            max-width: 1800px;
-            margin: 0 auto;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
+            max-width: 100%;
+            padding: 0 16px 24px;
         }
 
-        /* Top Bar */
+        /* === FONTS === */
+        .font-heading { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* === HEADER BAR === */
         .top-bar {
             display: flex;
+            align-items: center;
             justify-content: space-between;
-            align-items: center;
-            padding: 12px 24px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            border-left: 4px solid var(--terminal-cyan);
-            backdrop-filter: blur(8px);
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-low);
+            margin-bottom: 12px;
         }
-
         .system-id {
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            letter-spacing: 2px;
-            color: var(--terminal-cyan);
-            text-transform: uppercase;
+            font-size: 10px;
+            color: #555;
+            letter-spacing: 0.5px;
         }
-
         .system-title {
-            font-weight: 800;
-            font-size: 1.4em;
-            letter-spacing: -0.5px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
+            font-family: 'Inter', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            letter-spacing: 1px;
         }
-
-        .system-title span {
-            color: var(--terminal-cyan);
-            text-shadow: var(--glow-cyan);
-        }
-
+        .system-title span { color: var(--terminal-cyan); }
         .status-module {
             display: flex;
             align-items: center;
-            gap: 20px;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-        }
-
-        .connection-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 4px 12px;
-            background: rgba(0, 255, 157, 0.1);
-            border: 1px solid var(--terminal-green);
-            color: var(--terminal-green);
-        }
-
-        .live-dot {
-            width: 6px;
-            height: 6px;
-            background: var(--terminal-green);
-            border-radius: 50%;
-            box-shadow: 0 0 8px var(--terminal-green);
-            animation: flicker 1.5s infinite;
-        }
-
-        @keyframes flicker {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 16px;
+            font-size: 11px;
         }
-
-        .stat-card {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            padding: 20px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, var(--terminal-cyan), transparent);
-            opacity: 0.5;
-        }
-
-        .stat-card.positive::before {
-            background: linear-gradient(90deg, var(--terminal-green), transparent);
-        }
-
-        .stat-card.negative::before {
-            background: linear-gradient(90deg, var(--terminal-red), transparent);
-        }
-
-        .stat-label {
-            font-family: var(--font-mono);
-            font-size: 0.65em;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 8px;
-        }
-
-        .stat-value {
-            font-family: var(--font-mono);
-            font-size: 1.6em;
-            font-weight: 700;
-            display: flex;
-            align-items: baseline;
-            gap: 8px;
-        }
-
-        .stat-value.positive { color: var(--terminal-green); text-shadow: var(--glow-green); }
-        .stat-value.negative { color: var(--terminal-red); text-shadow: var(--glow-red); }
-        .stat-value.neutral { color: var(--terminal-cyan); text-shadow: var(--glow-cyan); }
-
-        .stat-sublabel {
-            font-size: 0.5em;
-            color: #666;
-            font-weight: 400;
-        }
-
-        /* Filter Bar */
-        .filter-bar {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            padding: 16px 20px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            align-items: center;
-        }
-
-        .filter-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .filter-label {
-            font-family: var(--font-mono);
-            font-size: 0.7em;
-            color: #888;
-            text-transform: uppercase;
-        }
-
-        .filter-input {
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--border-low);
-            padding: 8px 12px;
-            color: #e0e0e0;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            min-width: 120px;
-        }
-
-        .filter-input:focus {
-            outline: none;
-            border-color: var(--terminal-cyan);
-            box-shadow: var(--glow-cyan);
-        }
-
-        .filter-btn {
-            background: transparent;
-            border: 1px solid var(--border-low);
-            padding: 8px 16px;
-            color: #888;
-            font-family: var(--font-mono);
-            font-size: 0.75em;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-transform: uppercase;
-        }
-
-        .filter-btn:hover,
-        .filter-btn.active {
-            border-color: var(--terminal-cyan);
-            color: var(--terminal-cyan);
-            background: rgba(0, 242, 255, 0.05);
-        }
-
-        /* Main Content Grid */
-        .content-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-
-        @media (max-width: 1200px) {
-            .content-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Panel Styles */
-        .panel {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .panel-header {
-            background: rgba(0, 242, 255, 0.05);
-            border-bottom: 1px solid var(--border-low);
-            padding: 12px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .panel-title {
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: #aaa;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .panel-title.positive { color: var(--terminal-green); }
-        .panel-title.negative { color: var(--terminal-red); }
-
-        .panel-badge {
-            font-size: 0.7em;
-            padding: 2px 8px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
-        }
-
-        .panel-body {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
-        /* Table Styles */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: var(--font-mono);
-        }
-
-        .data-table th {
-            text-align: left;
-            padding: 12px 16px;
-            font-size: 0.65em;
-            color: #666;
-            text-transform: uppercase;
-            border-bottom: 1px solid var(--border-low);
-            background: rgba(0, 0, 0, 0.2);
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-
-        .data-table td {
-            padding: 12px 16px;
-            font-size: 0.85em;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-        }
-
-        .data-table tr:hover {
-            background: rgba(0, 242, 255, 0.03);
-        }
-
-        .coin-cell {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .coin-icon {
-            width: 28px;
-            height: 28px;
-            background: linear-gradient(135deg, var(--terminal-cyan), var(--terminal-purple));
+        .connection-indicator { display: flex; align-items: center; gap: 6px; }
+        .live-dot {
+            width: 6px; height: 6px;
             border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.7em;
-            font-weight: 700;
-            color: #000;
+            background: var(--terminal-green);
+            animation: pulse 2s infinite;
         }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        #connection-status { color: var(--terminal-green); font-weight: 600; font-size: 11px; }
+        #last-update-time { color: #555; }
 
-        .coin-name {
+        /* === SUMMARY METRICS BAR === */
+        .metrics-bar {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 1px;
+            background: var(--border-low);
+            border: 1px solid var(--border-low);
+            margin-bottom: 12px;
+        }
+        .metric-cell {
+            background: rgba(255,255,255,0.015);
+            padding: 10px 14px;
             display: flex;
             flex-direction: column;
+            gap: 4px;
         }
-
-        .coin-symbol {
+        .metric-label {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: #555;
+            font-weight: 500;
+        }
+        .metric-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
             font-weight: 600;
             color: #fff;
         }
-
-        .coin-category {
-            font-size: 0.75em;
-            color: #666;
+        .metric-value.green { color: #4ade80; }
+        .metric-value.red { color: #f87171; }
+        .metric-value.amber { color: #f59e0b; }
+        .metric-value.blue { color: #3b82f6; }
+        .metric-sub {
+            font-size: 9px;
+            color: #444;
+            font-weight: 400;
         }
 
-        /* Rate Display */
-        .rate-display {
+        /* === FILTER BAR === */
+        .filter-bar {
             display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .rate-value {
-            font-weight: 600;
-            font-size: 0.95em;
-        }
-
-        .rate-value.positive { color: var(--terminal-green); }
-        .rate-value.negative { color: var(--terminal-red); }
-        .rate-value.neutral { color: #888; }
-
-        .rate-apr {
-            font-size: 0.8em;
-            color: #666;
-        }
-
-        /* Trend Indicator */
-        .trend-indicator {
-            display: inline-flex;
             align-items: center;
-            gap: 4px;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8em;
+            gap: 16px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-low);
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .filter-label {
+            font-size: 10px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .filter-input {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border-low);
+            color: #e0e0e0;
+            padding: 5px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            border-radius: 2px;
+            width: 100px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .filter-input:focus { border-color: var(--terminal-cyan); }
+        .filter-input::placeholder { color: #333; }
+        .filter-btn {
+            background: transparent;
+            border: 1px solid var(--border-low);
+            color: #666;
+            padding: 4px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.15s;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .filter-btn:hover { border-color: #333; color: #aaa; }
+        .filter-btn.active {
+            border-color: var(--terminal-cyan);
+            color: var(--terminal-cyan);
+            background: rgba(59,130,246,0.06);
         }
 
-        .trend-up {
-            background: rgba(0, 255, 157, 0.1);
-            color: var(--terminal-green);
+        /* === CONTENT GRID === */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1px;
+            background: var(--border-low);
         }
 
-        .trend-down {
-            background: rgba(255, 62, 62, 0.1);
-            color: var(--terminal-red);
+        /* === PANELS === */
+        .panel {
+            background: rgba(255,255,255,0.015);
+            border: 1px solid var(--border-low);
         }
-
-        .trend-stable {
-            background: rgba(136, 136, 136, 0.1);
+        .panel.full-width {
+            grid-column: 1 / -1;
+            margin-top: 12px;
+        }
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 14px;
+            border-bottom: 1px solid var(--border-low);
+            background: rgba(255,255,255,0.01);
+        }
+        .panel-title {
+            font-family: 'Inter', sans-serif;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
             color: #888;
         }
-
-        .trend-arrow {
-            animation: pulse 1s infinite;
+        .panel-title.positive { color: #4ade80; }
+        .panel-title.negative { color: #f87171; }
+        .panel-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 18px;
+            padding: 0 6px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 2px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 10px;
+            color: #999;
+        }
+        .panel-body {
+            overflow-x: auto;
+        }
+        .last-updated {
+            padding: 6px 14px;
+            font-size: 9px;
+            color: #333;
+            border-top: 1px solid rgba(255,255,255,0.03);
         }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: translateY(0); }
-            50% { opacity: 0.6; transform: translateY(-1px); }
+        /* === DATA TABLES === */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .data-table thead th {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #444;
+            font-weight: 500;
+            padding: 7px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-low);
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            background: rgba(0,0,0,0.8);
+        }
+        .data-table tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.025);
+            transition: background 0.1s;
+        }
+        .data-table tbody tr:hover {
+            background: rgba(255,255,255,0.025);
+        }
+        .data-table tbody td {
+            padding: 6px 14px;
+            white-space: nowrap;
+            vertical-align: middle;
         }
 
-        /* Opportunity Score */
+        /* === COIN CELL === */
+        .coin-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .coin-icon {
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: 600;
+            border-radius: 3px;
+            border: 1px solid var(--border-med);
+            background: rgba(255,255,255,0.04);
+            color: #888;
+            flex-shrink: 0;
+        }
+        .coin-symbol {
+            font-weight: 600;
+            color: #ddd;
+            font-size: 11px;
+            display: block;
+        }
+        .coin-category {
+            font-size: 9px;
+            color: #444;
+        }
+
+        /* === RATE DISPLAY === */
+        .rate-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+            font-size: 11px;
+        }
+        .rate-value.positive { color: #f87171; }
+        .rate-value.negative { color: #4ade80; }
+
+        /* === OPPORTUNITY SCORE === */
         .opportunity-score {
             display: flex;
             align-items: center;
             gap: 8px;
         }
-
         .score-bar {
-            width: 60px;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
+            width: 50px;
+            height: 3px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 1px;
             overflow: hidden;
         }
-
         .score-fill {
             height: 100%;
-            border-radius: 3px;
-            transition: width 0.3s ease;
+            border-radius: 1px;
+            transition: width 0.3s;
         }
-
-        .score-fill.high { background: var(--terminal-red); }
-        .score-fill.medium { background: var(--terminal-amber); }
-        .score-fill.low { background: var(--terminal-green); }
-
+        .score-fill.high { background: #f87171; }
+        .score-fill.medium { background: #f59e0b; }
+        .score-fill.low { background: #4ade80; }
         .score-value {
-            font-size: 0.85em;
-            font-weight: 600;
-            min-width: 32px;
+            font-size: 10px;
+            color: #777;
+            min-width: 20px;
+            text-align: right;
         }
 
-        /* Action Buttons */
+        /* === TREND INDICATOR === */
+        .trend-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 2px;
+            font-size: 10px;
+        }
+        .trend-arrow { font-size: 10px; }
+        .trend-up { background: rgba(248,113,113,0.08); color: #f87171; }
+        .trend-down { background: rgba(74,222,128,0.08); color: #4ade80; }
+        .trend-stable { background: rgba(255,255,255,0.03); color: #555; }
+
+        /* === ACTION BUTTONS === */
         .action-btns {
             display: flex;
-            gap: 6px;
+            gap: 4px;
         }
-
         .action-btn {
             width: 28px;
             height: 28px;
-            border: 1px solid var(--border-low);
+            display: flex;
+            align-items: center;
+            justify-content: center;
             background: transparent;
-            color: #888;
+            border: 1px solid var(--border-low);
+            border-radius: 2px;
             cursor: pointer;
+            font-size: 12px;
+            transition: all 0.15s;
+            color: #666;
+        }
+        .action-btn:hover { border-color: var(--terminal-cyan); color: var(--terminal-cyan); background: rgba(255,255,255,0.03); }
+        .action-btn.trade:hover { border-color: #4ade80; color: #4ade80; }
+        .action-btn.alert:hover { border-color: #f59e0b; color: #f59e0b; }
+
+        /* === PROFIT COLOR BANDS (for cross-exchange) === */
+        .profit-high { color: #4ade80 !important; }
+        .profit-medium { color: #f59e0b !important; }
+        .profit-low { color: #555 !important; }
+
+        /* === EXCHANGE STATUS === */
+        .exchange-status {
             display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.8em;
-            transition: all 0.2s;
+            gap: 10px;
+            font-size: 10px;
         }
+        .status-dot { font-size: 10px; transition: color 0.3s; }
 
-        .action-btn:hover {
-            border-color: var(--terminal-cyan);
-            color: var(--terminal-cyan);
-            background: rgba(0, 242, 255, 0.05);
-        }
-
-        .action-btn.trade:hover {
-            border-color: var(--terminal-green);
-            color: var(--terminal-green);
-        }
-
-        .action-btn.alert:hover {
-            border-color: var(--terminal-amber);
-            color: var(--terminal-amber);
-        }
-
-        /* Sparkline */
-        .sparkline {
-            width: 80px;
-            height: 24px;
-        }
-
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #555;
-        }
-
-        .empty-state-icon {
-            font-size: 3em;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
-
-        /* Loading State */
+        /* === LOADING & EMPTY STATES === */
         .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 40px;
-            gap: 12px;
-            color: var(--terminal-cyan);
+            text-align: center;
+            padding: 32px !important;
+            color: #333;
         }
-
         .loading-spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--border-low);
+            width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.06);
             border-top-color: var(--terminal-cyan);
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 8px;
         }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        .empty-state {
+            text-align: center;
+            padding: 24px !important;
+            color: #333;
         }
+        .empty-state-icon { font-size: 20px; margin-bottom: 4px; }
 
-        /* Last Updated */
-        .last-updated {
-            font-family: var(--font-mono);
-            font-size: 0.7em;
-            color: #666;
-            text-align: right;
-            padding: 8px 16px;
-            background: rgba(0, 0, 0, 0.2);
-            border-top: 1px solid var(--border-low);
-        }
-
-        /* Scrollbar */
-        ::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--border-low);
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--terminal-cyan);
-        }
-
-        /* Modal */
+        /* === MODAL === */
         .modal-overlay {
-            display: none;
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
-            z-index: 10000;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
             align-items: center;
             justify-content: center;
+            z-index: 10000;
+            backdrop-filter: blur(4px);
         }
-
-        .modal-overlay.active {
-            display: flex;
-        }
-
+        .modal-overlay.active { display: flex; }
         .modal {
-            background: var(--bg-panel);
+            background: #0a0a0a;
             border: 1px solid var(--border-med);
-            max-width: 500px;
-            width: 90%;
+            border-radius: 4px;
             padding: 24px;
+            min-width: 380px;
+            max-width: 90vw;
         }
-
         .modal-title {
-            font-family: var(--font-mono);
-            font-size: 0.9em;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: var(--terminal-cyan);
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
             margin-bottom: 16px;
         }
-
-        .modal-content {
-            margin-bottom: 20px;
-        }
-
+        .modal-content { margin-bottom: 20px; }
+        .modal-content .filter-input { width: 100%; }
         .modal-actions {
             display: flex;
-            gap: 12px;
+            gap: 8px;
             justify-content: flex-end;
         }
-
         .modal-btn {
-            padding: 10px 20px;
-            border: 1px solid var(--border-low);
             background: transparent;
+            border: 1px solid var(--border-med);
             color: #888;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
+            padding: 6px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
             cursor: pointer;
-            transition: all 0.2s;
+            border-radius: 2px;
+            transition: all 0.15s;
+        }
+        .modal-btn:hover { background: rgba(255,255,255,0.03); }
+        .modal-btn.primary { border-color: var(--terminal-cyan); color: var(--terminal-cyan); }
+        .modal-btn.primary:hover { background: rgba(59,130,246,0.1); }
+
+        /* === LEGACY COMPAT (JS sets these classes) === */
+        .stat-card::before { display: none; }
+        .stat-value.positive { color: #4ade80; text-shadow: none; }
+        .stat-value.negative { color: #f87171; text-shadow: none; }
+        .stat-value.neutral { color: #3b82f6; text-shadow: none; }
+
+        /* === STATS GRID (hidden - replaced by metrics-bar) === */
+        .stats-grid { display: none; }
+
+        /* === NOTIFICATIONS === */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
         }
 
-        .modal-btn.primary {
-            border-color: var(--terminal-cyan);
-            color: var(--terminal-cyan);
-        }
+        /* === SCROLLBAR === */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
 
-        .modal-btn:hover {
-            background: rgba(0, 242, 255, 0.05);
+        /* === CROSS-EXCHANGE ROW PROFIT HIGHLIGHT === */
+        .data-table tbody tr[data-avg-spread="high"] td:nth-child(6),
+        .data-table tbody tr[data-avg-spread="high"] td:nth-child(7),
+        .data-table tbody tr[data-avg-spread="high"] td:nth-child(9) {
+            background: rgba(74,222,128,0.03);
         }
     </style>
-    <link rel="stylesheet" href="/css/terminal-unified.css">
 </head>
 <body class="unified-theme page-funding-arbitrage">
     <div class="container">
@@ -656,35 +517,37 @@
             </div>
         </header>
 
-        <!-- Stats Grid -->
-        <div class="stats-grid" id="stats-grid">
-            <div class="stat-card positive">
-                <div class="stat-label">Best Long Funding</div>
-                <div class="stat-value positive" id="best-long">
-                    --
-                    <span class="stat-sublabel">APR</span>
-                </div>
+        <!-- Summary Metrics Bar -->
+        <div class="metrics-bar" id="metrics-bar">
+            <div class="metric-cell">
+                <span class="metric-label">Total Opportunities</span>
+                <span class="metric-value blue" id="metric-total">--</span>
+                <span class="metric-sub">tracked markets</span>
             </div>
-            <div class="stat-card negative">
-                <div class="stat-label">Best Short Funding</div>
-                <div class="stat-value negative" id="best-short">
-                    --
-                    <span class="stat-sublabel">APR</span>
-                </div>
+            <div class="metric-cell">
+                <span class="metric-label">Best Short APR</span>
+                <span class="metric-value red" id="metric-best-short">--</span>
+                <span class="metric-sub" id="metric-best-short-sub">highest yield short</span>
             </div>
-            <div class="stat-card">
-                <div class="stat-label">Average Funding</div>
-                <div class="stat-value neutral" id="avg-funding">
-                    --
-                    <span class="stat-sublabel">APR</span>
-                </div>
+            <div class="metric-cell">
+                <span class="metric-label">Best Long APR</span>
+                <span class="metric-value green" id="metric-best-long">--</span>
+                <span class="metric-sub" id="metric-best-long-sub">highest yield long</span>
             </div>
-            <div class="stat-card negative">
-                <div class="stat-label">Extreme Markets</div>
-                <div class="stat-value" id="extreme-count">
-                    --
-                    <span class="stat-sublabel">>30% APR</span>
-                </div>
+            <div class="metric-cell">
+                <span class="metric-label">Avg Spread</span>
+                <span class="metric-value" id="metric-avg-spread">--</span>
+                <span class="metric-sub">mean absolute APR</span>
+            </div>
+            <div class="metric-cell">
+                <span class="metric-label">Extreme Markets</span>
+                <span class="metric-value amber" id="metric-extreme">--</span>
+                <span class="metric-sub">&gt;30% APR</span>
+            </div>
+            <div class="metric-cell">
+                <span class="metric-label">Cross-EX Routes</span>
+                <span class="metric-value blue" id="metric-cross-ex">--</span>
+                <span class="metric-sub">arbitrage paths</span>
             </div>
         </div>
 
@@ -696,26 +559,26 @@
             </div>
             <div class="filter-group">
                 <span class="filter-label">Min APR:</span>
-                <input type="number" class="filter-input" id="min-apr" placeholder="-100" value="-100">
+                <input type="number" class="filter-input" id="min-apr" placeholder="-100" value="-100" style="width: 80px;">
             </div>
             <div class="filter-group">
                 <span class="filter-label">Max APR:</span>
-                <input type="number" class="filter-input" id="max-apr" placeholder="100" value="100">
+                <input type="number" class="filter-input" id="max-apr" placeholder="100" value="100" style="width: 80px;">
             </div>
-            <div class="filter-group">
-                <button class="filter-btn active" data-sort="rate">Sort by Rate</button>
-                <button class="filter-btn" data-sort="opportunity">By Opportunity</button>
-                <button class="filter-btn" data-sort="trend">By Trend</button>
+            <div class="filter-group" style="margin-left: auto;">
+                <button class="filter-btn active" data-sort="rate">Rate</button>
+                <button class="filter-btn" data-sort="opportunity">Opportunity</button>
+                <button class="filter-btn" data-sort="trend">Trend</button>
             </div>
         </div>
 
         <!-- Main Content Grid -->
         <div class="content-grid">
-            <!-- Short Opportunities (Positive Funding) -->
+            <!-- Short Opportunities -->
             <div class="panel">
                 <div class="panel-header">
                     <div class="panel-title negative">
-                        🔴 SHORT OPPORTUNITIES
+                        SHORT OPPORTUNITIES
                         <span class="panel-badge" id="short-count">0</span>
                     </div>
                 </div>
@@ -723,32 +586,27 @@
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Coin</th>
+                                <th>Symbol</th>
                                 <th>Funding</th>
                                 <th>APR</th>
                                 <th>Trend</th>
                                 <th>Score</th>
-                                <th>Actions</th>
+                                <th style="text-align: right;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="short-tbody">
-                            <tr>
-                                <td colspan="6" class="loading">
-                                    <div class="loading-spinner"></div>
-                                    <span>Loading...</span>
-                                </td>
-                            </tr>
+                            <tr><td colspan="6" class="loading"><div class="loading-spinner"></div><span>Loading...</span></td></tr>
                         </tbody>
                     </table>
                 </div>
                 <div class="last-updated" id="short-last-updated">--</div>
             </div>
 
-            <!-- Long Opportunities (Negative Funding) -->
+            <!-- Long Opportunities -->
             <div class="panel">
                 <div class="panel-header">
                     <div class="panel-title positive">
-                        🟢 LONG OPPORTUNITIES
+                        LONG OPPORTUNITIES
                         <span class="panel-badge" id="long-count">0</span>
                     </div>
                 </div>
@@ -756,21 +614,16 @@
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Coin</th>
+                                <th>Symbol</th>
                                 <th>Funding</th>
                                 <th>APR</th>
                                 <th>Trend</th>
                                 <th>Score</th>
-                                <th>Actions</th>
+                                <th style="text-align: right;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="long-tbody">
-                            <tr>
-                                <td colspan="6" class="loading">
-                                    <div class="loading-spinner"></div>
-                                    <span>Loading...</span>
-                                </td>
-                            </tr>
+                            <tr><td colspan="6" class="loading"><div class="loading-spinner"></div><span>Loading...</span></td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -779,26 +632,26 @@
         </div>
 
         <!-- Cross-Exchange Arbitrage Section -->
-        <div class="panel" style="margin-top: 20px;">
+        <div class="panel full-width" id="cross-exchange-panel">
             <div class="panel-header">
-                <div class="panel-title" style="color: var(--terminal-purple);">
-                    ⚡ CROSS-EXCHANGE ARBITRAGE
+                <div class="panel-title" style="color: var(--terminal-purple, #a78bfa);">
+                    CROSS-EXCHANGE ARBITRAGE
                     <span class="panel-badge" id="cross-exchange-count">0</span>
                 </div>
-                <div style="display: flex; gap: 10px; align-items: center;">
+                <div style="display: flex; gap: 12px; align-items: center;">
                     <div class="exchange-status" id="exchange-status">
-                        <span class="status-dot" id="hl-status-dot" style="color: var(--terminal-green);">● HL</span>
+                        <span class="status-dot" id="hl-status-dot" style="color: #4ade80;">● HL</span>
                         <span class="status-dot" id="aster-status-dot" style="color: #666;">● ASTERDEX</span>
                         <span class="status-dot" id="binance-status-dot" style="color: #666;">● BINANCE</span>
                     </div>
-                    <button class="filter-btn" onclick="loadCrossExchangeData()">🔄 Refresh</button>
+                    <button class="filter-btn" onclick="loadCrossExchangeData()">↻ Refresh</button>
                 </div>
             </div>
             <div class="panel-body">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Coin</th>
+                            <th>Symbol</th>
                             <th>Pair</th>
                             <th>Exchange A</th>
                             <th>Exchange B</th>
@@ -806,17 +659,12 @@
                             <th>Annualized</th>
                             <th>Action</th>
                             <th>Yield</th>
-                            <th>Confidence</th>
-                            <th>Execute</th>
+                            <th>Conf.</th>
+                            <th style="text-align: right;">Exec</th>
                         </tr>
                     </thead>
                     <tbody id="cross-exchange-tbody">
-                        <tr>
-                            <td colspan="10" class="loading">
-                                <div class="loading-spinner"></div>
-                                <span>Loading cross-exchange data...</span>
-                            </td>
-                        </tr>
+                        <tr><td colspan="10" class="loading"><div class="loading-spinner"></div><span>Loading cross-exchange data...</span></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -829,7 +677,7 @@
         <div class="modal">
             <div class="modal-title">Set Funding Alert</div>
             <div class="modal-content">
-                <p style="color: #888; margin-bottom: 16px;">
+                <p style="color: #666; margin-bottom: 16px; font-size: 12px;">
                     Alert when <strong id="alert-symbol" style="color: var(--terminal-cyan);">--</strong> 
                     funding rate crosses:
                 </p>
@@ -845,6 +693,7 @@
     <script>
         // State
         let fundingData = [];
+        let crossExchangeCount = 0;
         let sortBy = 'rate';
         let currentAlertSymbol = null;
 
@@ -852,8 +701,8 @@
         document.addEventListener('DOMContentLoaded', () => {
             loadFundingData();
             loadCrossExchangeData();
-            setInterval(loadFundingData, 300000); // Refresh every 5 minutes
-            setInterval(loadCrossExchangeData, 60000); // Cross-exchange every 1 minute
+            setInterval(loadFundingData, 300000);
+            setInterval(loadCrossExchangeData, 60000);
             setInterval(updateClock, 1000);
             setupFilters();
         });
@@ -872,6 +721,7 @@
                 if (rates.success) {
                     fundingData = rates.rates || [];
                     renderTables();
+                    updateMetricsBar(fundingData);
                 }
 
                 if (stats.success) {
@@ -885,6 +735,18 @@
             }
         }
 
+        // Update metrics bar with computed values
+        function updateMetricsBar(data) {
+            document.getElementById('metric-total').textContent = data.length;
+
+            // Compute avg absolute APR
+            if (data.length > 0) {
+                const avgSpread = data.reduce((sum, d) => sum + Math.abs(d.annualizedRate), 0) / data.length;
+                document.getElementById('metric-avg-spread').textContent = avgSpread.toFixed(1) + '%';
+                document.getElementById('metric-avg-spread').className = 'metric-value ' + (avgSpread > 30 ? 'amber' : avgSpread > 15 ? 'red' : '');
+            }
+        }
+
         // Update stats display
         function updateStats(stats) {
             const bestLongEl = document.getElementById('best-long');
@@ -895,17 +757,26 @@
             if (stats.bestLongFunding) {
                 bestLongEl.innerHTML = `${stats.bestLongFunding.rate.toFixed(2)}% <span class="stat-sublabel">${stats.bestLongFunding.symbol}</span>`;
                 bestLongEl.className = 'stat-value negative';
+
+                // Update metrics bar
+                document.getElementById('metric-best-long').textContent = stats.bestLongFunding.rate.toFixed(1) + '%';
+                document.getElementById('metric-best-long-sub').textContent = stats.bestLongFunding.symbol;
             }
 
             if (stats.bestShortFunding) {
                 bestShortEl.innerHTML = `${stats.bestShortFunding.rate.toFixed(2)}% <span class="stat-sublabel">${stats.bestShortFunding.symbol}</span>`;
                 bestShortEl.className = 'stat-value positive';
+
+                // Update metrics bar
+                document.getElementById('metric-best-short').textContent = stats.bestShortFunding.rate.toFixed(1) + '%';
+                document.getElementById('metric-best-short-sub').textContent = stats.bestShortFunding.symbol;
             }
 
             avgEl.innerHTML = `${stats.averageFunding.toFixed(2)}% <span class="stat-sublabel">APR</span>`;
             avgEl.className = `stat-value ${stats.averageFunding > 0 ? 'positive' : stats.averageFunding < 0 ? 'negative' : 'neutral'}`;
 
             extremeEl.innerHTML = `${stats.extremeMarketsCount} <span class="stat-sublabel">>30% APR</span>`;
+            document.getElementById('metric-extreme').textContent = stats.extremeMarketsCount;
         }
 
         // Render tables
@@ -914,14 +785,12 @@
             const minApr = parseFloat(document.getElementById('min-apr').value) || -Infinity;
             const maxApr = parseFloat(document.getElementById('max-apr').value) || Infinity;
 
-            // Filter data
             let filtered = fundingData.filter(item => {
                 const matchesSearch = item.symbol.toLowerCase().includes(searchTerm);
                 const withinRange = item.annualizedRate >= minApr && item.annualizedRate <= maxApr;
                 return matchesSearch && withinRange;
             });
 
-            // Sort data
             filtered.sort((a, b) => {
                 if (sortBy === 'rate') return Math.abs(b.annualizedRate) - Math.abs(a.annualizedRate);
                 if (sortBy === 'opportunity') return b.opportunityScore - a.opportunityScore;
@@ -932,30 +801,28 @@
                 return 0;
             });
 
-            // Split into positive (short) and negative (long)
             const shortOpportunities = filtered.filter(item => item.annualizedRate > 0);
             const longOpportunities = filtered.filter(item => item.annualizedRate <= 0);
 
-            // Update counts
             document.getElementById('short-count').textContent = shortOpportunities.length;
             document.getElementById('long-count').textContent = longOpportunities.length;
 
-            // Render tables
             document.getElementById('short-tbody').innerHTML = renderTableRows(shortOpportunities, 'short');
             document.getElementById('long-tbody').innerHTML = renderTableRows(longOpportunities, 'long');
+        }
+
+        // Get profit tier class
+        function getProfitTier(apr) {
+            const abs = Math.abs(apr);
+            if (abs >= 40) return 'profit-high';
+            if (abs >= 20) return 'profit-medium';
+            return 'profit-low';
         }
 
         // Render table rows
         function renderTableRows(items, type) {
             if (items.length === 0) {
-                return `
-                    <tr>
-                        <td colspan="6" class="empty-state">
-                            <div class="empty-state-icon">📊</div>
-                            <div>No ${type} opportunities found</div>
-                        </td>
-                    </tr>
-                `;
+                return `<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">·</div><div>No ${type} opportunities in filter</div></td></tr>`;
             }
 
             return items.map(item => {
@@ -964,32 +831,28 @@
                 const trendClass = item.trend === 'increasing' ? 'trend-up' : item.trend === 'decreasing' ? 'trend-down' : 'trend-stable';
                 const scoreClass = item.opportunityScore > 70 ? 'high' : item.opportunityScore > 40 ? 'medium' : 'low';
                 const category = getCategory(item.symbol);
+                const profitTier = getProfitTier(item.annualizedRate);
 
                 return `
                     <tr>
                         <td>
                             <div class="coin-cell">
                                 <div class="coin-icon">${item.symbol.slice(0, 2)}</div>
-                                <div class="coin-name">
+                                <div>
                                     <span class="coin-symbol">${item.symbol}</span>
                                     <span class="coin-category">${category}</span>
                                 </div>
                             </div>
                         </td>
                         <td>
-                            <div class="rate-display">
-                                <span class="rate-value ${isPositive ? 'positive' : 'negative'}">${(item.fundingRate * 100).toFixed(4)}%</span>
-                            </div>
+                            <span class="rate-value ${isPositive ? 'positive' : 'negative'}">${(item.fundingRate * 100).toFixed(4)}%</span>
                         </td>
                         <td>
-                            <div class="rate-display">
-                                <span class="rate-value ${isPositive ? 'positive' : 'negative'}">${item.annualizedRate.toFixed(2)}%</span>
-                            </div>
+                            <span class="rate-value ${isPositive ? 'positive' : 'negative'} ${profitTier}" style="font-weight: 600;">${item.annualizedRate.toFixed(2)}%</span>
                         </td>
                         <td>
                             <span class="trend-indicator ${trendClass}">
-                                <span class="trend-arrow">${trendArrow}</span>
-                                ${item.trend}
+                                <span class="trend-arrow">${trendArrow}</span>${item.trend}
                             </span>
                         </td>
                         <td>
@@ -1000,11 +863,11 @@
                                 <span class="score-value">${Math.round(item.opportunityScore)}</span>
                             </div>
                         </td>
-                        <td>
-                            <div class="action-btns">
-                                <button class="action-btn trade" onclick="trade('${item.symbol}', '${type}')" title="Trade">💱</button>
-                                <button class="action-btn" onclick="addToWatchlist('${item.symbol}')" title="Watchlist">⭐</button>
-                                <button class="action-btn alert" onclick="openAlertModal('${item.symbol}')" title="Set Alert">🔔</button>
+                        <td style="text-align: right;">
+                            <div class="action-btns" style="justify-content: flex-end;">
+                                <button class="action-btn trade" onclick="trade('${item.symbol}', '${type}')" title="Trade">↗</button>
+                                <button class="action-btn" onclick="addToWatchlist('${item.symbol}')" title="Watchlist">★</button>
+                                <button class="action-btn alert" onclick="openAlertModal('${item.symbol}')" title="Alert">⏰</button>
                             </div>
                         </td>
                     </tr>
@@ -1012,15 +875,15 @@
             }).join('');
         }
 
-        // Get category for symbol (simplified)
+        // Get category for symbol
         function getCategory(symbol) {
             const sym = symbol.toLowerCase();
-            if (['btc', 'eth'].includes(sym)) return 'Layer 1';
-            if (['arb', 'op', 'base', 'mnt', 'strk', 'zk'].includes(sym)) return 'Layer 2';
+            if (['btc', 'eth'].includes(sym)) return 'L1';
+            if (['arb', 'op', 'base', 'mnt', 'strk', 'zk'].includes(sym)) return 'L2';
             if (['uni', 'aave', 'crv', 'comp', 'mkr'].includes(sym)) return 'DeFi';
             if (['doge', 'shib', 'pepe', 'floki', 'bonk', 'wif', 'mog'].includes(sym)) return 'Meme';
             if (['render', 'tao', 'fet', 'wld'].includes(sym)) return 'AI';
-            return 'Altcoin';
+            return 'Alt';
         }
 
         // Setup filter event listeners
@@ -1048,20 +911,13 @@
         // Update last updated text
         function updateLastUpdated() {
             const now = new Date().toLocaleTimeString();
-            document.getElementById('short-last-updated').textContent = `Last updated: ${now}`;
-            document.getElementById('long-last-updated').textContent = `Last updated: ${now}`;
+            document.getElementById('short-last-updated').textContent = `Updated ${now}`;
+            document.getElementById('long-last-updated').textContent = `Updated ${now}`;
         }
 
         // Show error state
         function showErrorState() {
-            const errorRow = `
-                <tr>
-                    <td colspan="6" class="empty-state">
-                        <div class="empty-state-icon">⚠️</div>
-                        <div>Failed to load data</div>
-                    </td>
-                </tr>
-            `;
+            const errorRow = `<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">⚠</div><div>Failed to load data</div></td></tr>`;
             document.getElementById('short-tbody').innerHTML = errorRow;
             document.getElementById('long-tbody').innerHTML = errorRow;
         }
@@ -1072,14 +928,13 @@
         }
 
         function addToWatchlist(symbol) {
-            // Store in localStorage for now
             const watchlist = JSON.parse(localStorage.getItem('fundingWatchlist') || '[]');
             if (!watchlist.includes(symbol)) {
                 watchlist.push(symbol);
                 localStorage.setItem('fundingWatchlist', JSON.stringify(watchlist));
-                alert(`${symbol} added to watchlist`);
+                showNotification(`${symbol} added to watchlist`, 'success');
             } else {
-                alert(`${symbol} already in watchlist`);
+                showNotification(`${symbol} already in watchlist`, 'info');
             }
         }
 
@@ -1105,24 +960,21 @@
                     createdAt: new Date().toISOString()
                 });
                 localStorage.setItem('fundingAlerts', JSON.stringify(alerts));
-                alert(`Alert set for ${currentAlertSymbol} at ${threshold}% APR`);
+                showNotification(`Alert set for ${currentAlertSymbol} at ${threshold}% APR`, 'success');
                 closeAlertModal();
             }
         }
 
-        // Close modal on overlay click
         document.getElementById('alert-modal').addEventListener('click', (e) => {
             if (e.target.id === 'alert-modal') closeAlertModal();
         });
 
         // ==========================================
-        // CROSS-EXCHANGE ARBITRAGE FUNCTIONS
+        // CROSS-EXCHANGE ARBITRAGE
         // ==========================================
 
-        // Load cross-exchange data
         async function loadCrossExchangeData() {
             try {
-                // Load opportunities and exchange status in parallel
                 const [oppResponse, exchangeResponse] = await Promise.all([
                     fetch('/api/funding/cross-exchange?minSpread=5&refresh=true'),
                     fetch('/api/funding/exchanges')
@@ -1131,26 +983,22 @@
                 const oppData = await oppResponse.json();
                 const exchangeData = await exchangeResponse.json();
 
-                // Update exchange status indicators
                 updateExchangeStatus(exchangeData.exchanges || []);
 
-                // Render opportunities
                 if (oppData.success) {
                     renderCrossExchangeTable(oppData.opportunities || []);
                 } else {
                     renderCrossExchangeError(oppData.error || 'Failed to load data');
                 }
 
-                // Update last updated time
                 document.getElementById('cross-exchange-last-updated').textContent = 
-                    `Last updated: ${new Date().toLocaleTimeString()}`;
+                    `Updated ${new Date().toLocaleTimeString()}`;
             } catch (error) {
                 console.error('Failed to load cross-exchange data:', error);
                 renderCrossExchangeError('Failed to load cross-exchange data');
             }
         }
 
-        // Update exchange status indicators
         function updateExchangeStatus(exchanges) {
             const hlStatus = exchanges.find(e => e.name === 'hyperliquid');
             const asterStatus = exchanges.find(e => e.name === 'asterdex');
@@ -1160,34 +1008,21 @@
             const asterDot = document.getElementById('aster-status-dot');
             const binanceDot = document.getElementById('binance-status-dot');
 
-            if (hlDot) {
-                hlDot.style.color = hlStatus?.connected ? 'var(--terminal-green)' : '#666';
-            }
-            if (asterDot) {
-                asterDot.style.color = asterStatus?.connected ? 'var(--terminal-green)' : '#666';
-            }
-            if (binanceDot) {
-                binanceDot.style.color = binanceStatus?.connected ? 'var(--terminal-green)' : '#666';
-            }
+            if (hlDot) hlDot.style.color = hlStatus?.connected ? '#4ade80' : '#666';
+            if (asterDot) asterDot.style.color = asterStatus?.connected ? '#4ade80' : '#666';
+            if (binanceDot) binanceDot.style.color = binanceStatus?.connected ? '#4ade80' : '#666';
         }
 
-        // Render cross-exchange table
         function renderCrossExchangeTable(opportunities) {
             const tbody = document.getElementById('cross-exchange-tbody');
             const countBadge = document.getElementById('cross-exchange-count');
 
             countBadge.textContent = opportunities.length;
+            crossExchangeCount = opportunities.length;
+            document.getElementById('metric-cross-ex').textContent = opportunities.length;
 
             if (opportunities.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="empty-state">
-                            <div class="empty-state-icon">⚡</div>
-                            <div>No cross-exchange opportunities found</div>
-                            <div style="font-size: 0.85em; margin-top: 8px;">Try lowering the minimum spread threshold</div>
-                        </td>
-                    </tr>
-                `;
+                tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><div class="empty-state-icon">·</div><div>No cross-exchange opportunities found</div></td></tr>`;
                 return;
             }
 
@@ -1199,87 +1034,59 @@
                 const yieldPct = opp.estimatedYearlyYield.toFixed(2);
                 const exchangeAName = formatExchangeName(opp.exchangeA);
                 const exchangeBName = formatExchangeName(opp.exchangeB);
-                const pairLabel = `${exchangeAName} / ${exchangeBName}`;
+                const pairLabel = `${exchangeAName}/${exchangeBName}`;
                 
-                // Determine colors
-                const rateAColor = opp.exchangeAFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
-                const rateBColor = opp.exchangeBFunding > 0 ? 'var(--terminal-red)' : 'var(--terminal-green)';
-                const spreadColor = Math.abs(opp.annualizedSpread) > 50 ? 'var(--terminal-red)' : 
-                                   Math.abs(opp.annualizedSpread) > 25 ? 'var(--terminal-amber)' : 'var(--terminal-green)';
+                const rateAColor = opp.exchangeAFunding > 0 ? '#f87171' : '#4ade80';
+                const rateBColor = opp.exchangeBFunding > 0 ? '#f87171' : '#4ade80';
                 
-                // Action text
-                const actionText = opp.longExchange && opp.shortExchange
-                    ? `Long ${formatExchangeName(opp.longExchange)} / Short ${formatExchangeName(opp.shortExchange)}`
-                    : (opp.recommendedAction || 'N/A');
+                // Profit tier for spread/annualized
+                const absSpread = Math.abs(parseFloat(annualized));
+                const spreadColor = absSpread > 50 ? '#4ade80' : absSpread > 25 ? '#f59e0b' : '#555';
 
-                // Confidence color
-                const confidenceColor = opp.confidence >= 80 ? 'var(--terminal-green)' : 
-                                       opp.confidence >= 50 ? 'var(--terminal-amber)' : 'var(--terminal-red)';
+                const actionText = opp.longExchange && opp.shortExchange
+                    ? `L ${formatExchangeName(opp.longExchange)} / S ${formatExchangeName(opp.shortExchange)}`
+                    : (opp.recommendedAction || '—');
+
+                const confidenceColor = opp.confidence >= 80 ? '#4ade80' : opp.confidence >= 50 ? '#f59e0b' : '#f87171';
+                const confidenceTier = opp.confidence >= 80 ? 'high' : opp.confidence >= 50 ? 'medium' : 'low';
 
                 return `
-                    <tr data-symbol="${opp.symbol}">
+                    <tr>
                         <td>
                             <div class="coin-cell">
                                 <div class="coin-icon">${opp.symbol.slice(0, 2)}</div>
-                                <div class="coin-name">
-                                    <span class="coin-symbol">${opp.symbol}</span>
-                                </div>
+                                <div><span class="coin-symbol">${opp.symbol}</span></div>
                             </div>
                         </td>
+                        <td><span style="font-size: 10px; color: #555;">${pairLabel}</span></td>
                         <td>
-                            <span style="font-size: 0.8em; color: #9aa4ad;">${pairLabel}</span>
-                        </td>
-                        <td>
-                            <div class="rate-display">
-                                <span style="display: block; font-size: 0.72em; color: #7f8b97; margin-bottom: 3px;">${exchangeAName}</span>
+                            <div>
+                                <span style="display: block; font-size: 9px; color: #444; margin-bottom: 2px;">${exchangeAName}</span>
                                 <span class="rate-value" style="color: ${rateAColor}">${rateA}%</span>
                             </div>
                         </td>
                         <td>
-                            <div class="rate-display">
-                                <span style="display: block; font-size: 0.72em; color: #7f8b97; margin-bottom: 3px;">${exchangeBName}</span>
+                            <div>
+                                <span style="display: block; font-size: 9px; color: #444; margin-bottom: 2px;">${exchangeBName}</span>
                                 <span class="rate-value" style="color: ${rateBColor}">${rateB}%</span>
                             </div>
                         </td>
+                        <td><span class="rate-value" style="color: ${spreadColor}; font-weight: 500;">${spread}%</span></td>
+                        <td><span class="rate-value" style="color: ${spreadColor}; font-weight: 600;">${annualized}%</span></td>
+                        <td><span style="font-size: 10px; color: #3b82f6;" title="${actionText}">${actionText}</span></td>
+                        <td><span class="rate-value" style="color: ${spreadColor}; font-weight: 600;">${yieldPct}%/yr</span></td>
                         <td>
-                            <div class="rate-display">
-                                <span class="rate-value" style="color: ${spreadColor}">${spread}%</span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <div class="score-bar" style="width: 30px;">
+                                    <div class="score-fill ${confidenceTier}" style="width: ${opp.confidence}%"></div>
+                                </div>
+                                <span style="font-size: 10px; color: ${confidenceColor}; font-weight: 500;">${Math.round(opp.confidence)}%</span>
                             </div>
                         </td>
-                        <td>
-                            <div class="rate-display">
-                                <span class="rate-value" style="color: ${spreadColor}">${annualized}%</span>
-                            </div>
-                        </td>
-                        <td>
-                            <span style="font-size: 0.8em; color: var(--terminal-cyan);"
-                                  title="${actionText}">
-                                ${actionText.length > 20 ? actionText.substring(0, 20) + '...' : actionText}
-                            </span>
-                        </td>
-                        <td>
-                            <span class="rate-value" style="color: ${spreadColor}; font-weight: 600;">
-                                ${yieldPct}%/yr
-                            </span>
-                        </td>
-                        <td>
-                            <span style="color: ${confidenceColor}; font-weight: 600;">
-                                ${Math.round(opp.confidence)}%
-                            </span>
-                        </td>
-                        <td>
-                            <div class="action-btns">
-                                <button class="action-btn trade" 
-                                        onclick="executeCrossExchangeArbitrage('${opp.symbol}', '${opp.recommendedAction || ''}', '${opp.shortExchange || ''}', '${opp.longExchange || ''}', '${opp.exchangeA}', '${opp.exchangeB}')" 
-                                        title="Execute Arbitrage"
-                                        ${opp.confidence < 50 ? 'disabled style="opacity: 0.3;"' : ''}>
-                                    ⚡
-                                </button>
-                                <button class="action-btn" 
-                                        onclick="viewCrossExchangeDetails('${opp.symbol}')" 
-                                        title="View Details">
-                                    ℹ️
-                                </button>
+                        <td style="text-align: right;">
+                            <div class="action-btns" style="justify-content: flex-end;">
+                                <button class="action-btn trade" onclick="executeCrossExchangeArbitrage('${opp.symbol}', '${opp.recommendedAction || ''}', '${opp.shortExchange || ''}', '${opp.longExchange || ''}', '${opp.exchangeA}', '${opp.exchangeB}')" title="Execute" ${opp.confidence < 50 ? 'disabled style="opacity: 0.3;"' : ''}>⚡</button>
+                                <button class="action-btn" onclick="viewCrossExchangeDetails('${opp.symbol}')" title="Details">i</button>
                             </div>
                         </td>
                     </tr>
@@ -1287,45 +1094,24 @@
             }).join('');
         }
 
-        // Render cross-exchange error state
         function renderCrossExchangeError(message) {
-            const tbody = document.getElementById('cross-exchange-tbody');
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="10" class="empty-state">
-                        <div class="empty-state-icon">⚠️</div>
-                        <div>${message}</div>
-                    </td>
-                </tr>
-            `;
+            document.getElementById('cross-exchange-tbody').innerHTML = `<tr><td colspan="10" class="empty-state"><div class="empty-state-icon">⚠</div><div>${message}</div></td></tr>`;
         }
 
-        // Execute cross-exchange arbitrage (placeholder)
         async function executeCrossExchangeArbitrage(symbol, action, shortExchange, longExchange, exchangeA, exchangeB) {
             const actionLabel = shortExchange && longExchange
                 ? `short ${formatExchangeName(shortExchange)} / long ${formatExchangeName(longExchange)}`
                 : action.replace(/_/g, ' ');
 
-            if (!confirm(`Execute ${actionLabel} arbitrage for ${symbol}?`)) {
-                return;
-            }
+            if (!confirm(`Execute ${actionLabel} arbitrage for ${symbol}?`)) return;
 
-            // Show notification
             showNotification(`Executing arbitrage for ${symbol}...`, 'info');
 
             try {
-                // This would connect to the execution engine
-                // For now, it's a placeholder
                 const response = await fetch('/api/execution/arbitrage', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        symbol,
-                        action,
-                        shortExchange,
-                        longExchange,
-                        exchanges: [exchangeA, exchangeB].filter(Boolean)
-                    })
+                    body: JSON.stringify({ symbol, action, shortExchange, longExchange, exchanges: [exchangeA, exchangeB].filter(Boolean) })
                 });
 
                 if (response.ok) {
@@ -1335,73 +1121,36 @@
                     showNotification(`Failed: ${error.error || 'Unknown error'}`, 'error');
                 }
             } catch (error) {
-                showNotification('Execution engine not available. This is a placeholder.', 'info');
-                console.log('Cross-exchange execution placeholder:', { symbol, action });
+                showNotification('Execution engine not available.', 'info');
             }
         }
 
         function formatExchangeName(exchange) {
             if (!exchange) return 'Unknown';
-            const mapping = {
-                hyperliquid: 'Hyperliquid',
-                asterdex: 'Asterdex',
-                binance: 'Binance'
-            };
+            const mapping = { hyperliquid: 'Hyperliquid', asterdex: 'Asterdex', binance: 'Binance' };
             return mapping[exchange] || exchange;
         }
 
-        // View cross-exchange details
         function viewCrossExchangeDetails(symbol) {
-            // Open details in modal or navigate to details page
             window.open(`/api/funding/cross-exchange/${symbol}`, '_blank');
         }
 
-        // Show notification
         function showNotification(message, type = 'info') {
-            const colors = {
-                info: 'var(--terminal-cyan)',
-                success: 'var(--terminal-green)',
-                error: 'var(--terminal-red)',
-                warning: 'var(--terminal-amber)'
-            };
-
+            const colors = { info: '#3b82f6', success: '#4ade80', error: '#f87171', warning: '#f59e0b' };
             const notification = document.createElement('div');
             notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: var(--bg-panel);
-                border: 1px solid ${colors[type]};
-                color: ${colors[type]};
-                padding: 16px 24px;
-                font-family: var(--font-mono);
-                font-size: 0.9em;
-                z-index: 10001;
-                animation: slideIn 0.3s ease;
+                position: fixed; top: 16px; right: 16px;
+                background: rgba(10,10,10,0.95); border: 1px solid ${colors[type]}; border-left: 3px solid ${colors[type]};
+                color: ${colors[type]}; padding: 12px 20px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
+                z-index: 10001; animation: slideIn 0.2s ease; backdrop-filter: blur(8px);
             `;
             notification.textContent = message;
-
             document.body.appendChild(notification);
-
             setTimeout(() => {
-                notification.style.animation = 'slideOut 0.3s ease';
-                setTimeout(() => notification.remove(), 300);
-            }, 5000);
+                notification.style.animation = 'slideOut 0.2s ease';
+                setTimeout(() => notification.remove(), 200);
+            }, 4000);
         }
-
-        // Add slide animations
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes slideIn {
-                from { transform: translateX(100%); opacity: 0; }
-                to { transform: translateX(0); opacity: 1; }
-            }
-            @keyframes slideOut {
-                from { transform: translateX(0); opacity: 1; }
-                to { transform: translateX(100%); opacity: 0; }
-            }
-        `;
-        document.head.appendChild(style);
     </script>
 </body>
 </html>

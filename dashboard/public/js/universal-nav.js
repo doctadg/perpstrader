@@ -1,706 +1,319 @@
 /**
  * Universal Navigation System for PerpsTrader Dashboard
- * Provides consistent navigation across all dashboard pages
+ * Bloomberg-terminal style sidebar — minimal, professional
  */
 
 (function() {
     'use strict';
 
-    // Navigation configuration
     const NAV_CONFIG = {
         brand: {
-            title: 'PERPS_TRADER',
-            subtitle: '// NAV',
-            icon: '◈'
+            title: 'VEX CAPITAL',
+            subtitle: 'PerpsTrader v1'
         },
         sections: [
             {
-                id: 'main',
                 title: 'Command',
                 items: [
-                    { id: 'dashboard', label: 'Dashboard', path: '/', icon: '◈', shortcut: 'D', desc: 'Main control terminal' },
-                    { id: 'trace', label: 'Trace Viewer', path: '/trace', icon: '◉', shortcut: 'T', desc: 'Cycle traces & logs' },
-                    { id: 'research', label: 'Research Lab', path: '/research', icon: '◆', shortcut: 'R', desc: 'Strategy evolution & backtesting' },
+                    { id: 'dashboard', label: 'Dashboard', path: '/', icon: '\u25A1', shortcut: 'D' },
+                    { id: 'trace', label: 'Trace Viewer', path: '/trace', icon: '\u25C9', shortcut: 'T' },
+                    { id: 'research', label: 'Research Lab', path: '/research', icon: '\u25C6', shortcut: 'R' },
                 ]
             },
             {
-                id: 'intelligence',
                 title: 'Intelligence',
                 items: [
-                    { id: 'news', label: 'News Feed', path: '/news', icon: '◆', shortcut: 'N', desc: 'Real-time news stream' },
-                    { id: 'heatmap', label: 'News Heatmap', path: '/heatmap', icon: '▣', shortcut: 'H', desc: 'LLM clustered heat system' },
+                    { id: 'news', label: 'News Feed', path: '/news', icon: '\u25A0', shortcut: 'N' },
+                    { id: 'heatmap', label: 'Heatmap', path: '/heatmap', icon: '\u25B3', shortcut: 'H' },
                 ]
             },
             {
-                id: 'markets',
                 title: 'Markets',
                 items: [
-                    { id: 'predictions', label: 'Predictions', path: '/predictions', icon: '◊', shortcut: 'P', desc: 'Prediction markets' },
-                    { id: 'funding-arbitrage', label: 'Funding Arbitrage', path: '/funding-arbitrage', icon: '💰', shortcut: 'F', desc: 'Funding rate opportunities' },
-                    { id: 'safekeeping', label: 'Safekeeping Fund', path: '/safekeeping', icon: '◐', shortcut: 'S', desc: 'Multi-chain yield fund' },
-                    { id: 'pumpfun', label: 'PumpFun Analyzer', path: '/pumpfun', icon: '●', shortcut: 'U', desc: 'Token analysis' },
+                    { id: 'predictions', label: 'Predictions', path: '/predictions', icon: '\u25CB', shortcut: 'P' },
+                    { id: 'funding-arbitrage', label: 'Funding Arb', path: '/funding-arbitrage', icon: '\u00A4', shortcut: 'F' },
+                    { id: 'safekeeping', label: 'Safekeeping', path: '/safekeeping', icon: '\u25C7', shortcut: 'S' },
+                    { id: 'pumpfun', label: 'PumpFun', path: '/pumpfun', icon: '\u25CF', shortcut: 'U' },
                 ]
             }
         ],
         quickActions: [
-            { id: 'emergency', label: 'EMERGENCY STOP', action: 'emergencyStop', icon: '◉', class: 'danger' },
-            { id: 'refresh', label: 'Refresh Data', action: 'refreshData', icon: '↻', class: 'secondary' },
+            { id: 'emergency', label: 'E-STOP', action: 'emergencyStop', class: 'danger' },
+            { id: 'refresh', label: 'Refresh', action: 'refreshData', class: 'secondary' },
         ]
     };
 
-    // State
     let isCollapsed = false;
     let isMobile = window.innerWidth < 1024;
     let socket = null;
 
-    // Initialize navigation
     function init() {
         injectStyles();
         renderNavigation();
         setupEventListeners();
         setupKeyboardShortcuts();
         highlightCurrentPage();
-        
-        // Try to connect to socket for live status
         try {
             socket = io();
             socket.on('connect', () => updateConnectionStatus(true));
             socket.on('disconnect', () => updateConnectionStatus(false));
-        } catch (e) {
-            console.log('Socket not available');
-        }
+        } catch (e) { /* no socket */ }
     }
 
-    // Inject CSS styles
     function injectStyles() {
         if (document.getElementById('universal-nav-styles')) return;
 
         const styles = `
-            /* Universal Navigation System */
             :root {
-                --nav-width: 260px;
-                --nav-width-collapsed: 60px;
-                --nav-bg: rgba(8, 8, 12, 0.98);
-                --nav-border: rgba(0, 242, 255, 0.15);
-                --nav-accent: #00f2ff;
-                --nav-accent-secondary: #00ff9d;
-                --nav-text: #a0a0a0;
-                --nav-text-hover: #ffffff;
-                --nav-section-bg: rgba(0, 242, 255, 0.03);
-                --nav-danger: #ff3e3e;
-                --nav-font-mono: 'JetBrains Mono', monospace;
-                --nav-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                --nav-w: 200px;
+                --nav-w-c: 48px;
+                --nav-bg: rgba(0, 0, 0, 0.98);
+                --nav-border: rgba(255, 255, 255, 0.06);
+                --nav-accent: #3b82f6;
+                --nav-good: #4ade80;
+                --nav-danger: #f87171;
+                --nav-text: rgba(255, 255, 255, 0.45);
+                --nav-text-hover: rgba(255, 255, 255, 0.9);
+                --nav-font: 'Inter', -apple-system, sans-serif;
+                --nav-mono: 'JetBrains Mono', monospace;
+                --nav-t: all 0.15s ease;
             }
 
-            /* Push content when nav is open */
-            body.has-nav {
-                padding-left: var(--nav-width);
-                transition: var(--nav-transition);
-            }
-
-            body.has-nav.nav-collapsed {
-                padding-left: var(--nav-width-collapsed);
-            }
-
-            /* Mobile: overlay instead of push */
+            body.has-nav { padding-left: var(--nav-w); transition: var(--nav-t); }
+            body.has-nav.nav-collapsed { padding-left: var(--nav-w-c); }
             @media (max-width: 1024px) {
-                body.has-nav,
-                body.has-nav.nav-collapsed {
-                    padding-left: 0;
-                }
+                body.has-nav, body.has-nav.nav-collapsed { padding-left: 0; }
             }
 
-            /* Navigation Container */
+            /* === SIDEBAR === */
             #universal-nav {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: var(--nav-width);
-                height: 100vh;
+                position: fixed; top: 0; left: 0;
+                width: var(--nav-w); height: 100vh;
                 background: var(--nav-bg);
                 border-right: 1px solid var(--nav-border);
-                backdrop-filter: blur(20px);
                 z-index: 9999;
-                display: flex;
-                flex-direction: column;
-                transition: var(--nav-transition);
-                font-family: var(--nav-font-mono);
-                font-size: 13px;
+                display: flex; flex-direction: column;
+                transition: var(--nav-t);
+                font-family: var(--nav-font);
             }
+            #universal-nav.collapsed { width: var(--nav-w-c); }
 
-            #universal-nav.collapsed {
-                width: var(--nav-width-collapsed);
-            }
-
-            /* Mobile overlay mode */
             @media (max-width: 1024px) {
-                #universal-nav {
-                    transform: translateX(-100%);
-                    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
-                }
-
-                #universal-nav.open {
-                    transform: translateX(0);
-                }
-
-                #universal-nav.collapsed {
-                    transform: translateX(-100%);
-                    width: var(--nav-width);
-                }
+                #universal-nav { transform: translateX(-100%); width: var(--nav-w); }
+                #universal-nav.open { transform: translateX(0); }
+                #universal-nav.collapsed { transform: translateX(-100%); }
             }
 
-            /* Nav Header */
+            /* Header */
             .nav-header {
-                padding: 20px 16px;
+                padding: 14px 12px 12px;
                 border-bottom: 1px solid var(--nav-border);
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                min-height: 70px;
+                min-height: 52px;
+                display: flex; align-items: center; gap: 8px;
             }
-
             .nav-brand-icon {
-                width: 36px;
-                height: 36px;
-                background: linear-gradient(135deg, var(--nav-accent), var(--nav-accent-secondary));
-                border-radius: 8px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 18px;
-                color: #000;
-                flex-shrink: 0;
-                box-shadow: 0 0 15px rgba(0, 242, 255, 0.3);
+                width: 26px; height: 26px;
+                border: 1px solid rgba(59, 130, 246, 0.25);
+                border-radius: 4px;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 11px; color: var(--nav-accent); flex-shrink: 0;
+                background: rgba(59, 130, 246, 0.06);
             }
-
-            .nav-brand-text {
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-                transition: var(--nav-transition);
-            }
-
-            .collapsed .nav-brand-text {
-                opacity: 0;
-                width: 0;
-            }
-
+            .nav-brand-text { overflow: hidden; transition: var(--nav-t); }
+            .collapsed .nav-brand-text { opacity: 0; width: 0; }
             .nav-brand-title {
-                font-weight: 700;
-                font-size: 14px;
-                color: #fff;
-                letter-spacing: 1px;
-            }
-
-            .nav-brand-subtitle {
-                font-size: 10px;
-                color: var(--nav-accent);
-                letter-spacing: 2px;
-            }
-
-            /* Toggle Button */
-            .nav-toggle {
-                position: absolute;
-                right: -12px;
-                top: 24px;
-                width: 24px;
-                height: 24px;
-                background: var(--nav-bg);
-                border: 1px solid var(--nav-border);
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: pointer;
-                color: var(--nav-accent);
-                font-size: 10px;
-                transition: var(--nav-transition);
-                z-index: 10;
-            }
-
-            .nav-toggle:hover {
-                background: var(--nav-accent);
-                color: #000;
-            }
-
-            .collapsed .nav-toggle {
-                transform: rotate(180deg);
-            }
-
-            @media (max-width: 1024px) {
-                .nav-toggle {
-                    display: none;
-                }
-            }
-
-            /* Nav Content */
-            .nav-content {
-                flex: 1;
-                overflow-y: auto;
-                overflow-x: hidden;
-                padding: 12px 8px;
-            }
-
-            .nav-content::-webkit-scrollbar {
-                width: 4px;
-            }
-
-            .nav-content::-webkit-scrollbar-track {
-                background: transparent;
-            }
-
-            .nav-content::-webkit-scrollbar-thumb {
-                background: var(--nav-border);
-                border-radius: 2px;
-            }
-
-            /* Nav Section */
-            .nav-section {
-                margin-bottom: 8px;
-            }
-
-            .nav-section-title {
-                padding: 8px 12px;
-                font-size: 10px;
-                color: var(--nav-accent);
+                font-weight: 600; font-size: 11px;
+                color: rgba(255,255,255,0.85);
+                letter-spacing: 0.06em;
                 text-transform: uppercase;
-                letter-spacing: 2px;
-                opacity: 0.7;
-                transition: var(--nav-transition);
+            }
+            .nav-brand-sub {
+                font-size: 9px; color: #555;
+                letter-spacing: 0.04em;
+                font-family: var(--nav-mono);
+            }
+
+            /* Toggle */
+            .nav-toggle {
+                position: absolute; right: -11px; top: 18px;
+                width: 20px; height: 20px;
+                background: #111; border: 1px solid var(--nav-border);
+                border-radius: 50%;
+                display: flex; align-items: center; justify-content: center;
+                cursor: pointer; color: #555; font-size: 8px;
+                transition: var(--nav-t); z-index: 10;
+            }
+            .nav-toggle:hover { color: #aaa; border-color: rgba(255,255,255,0.15); }
+            .collapsed .nav-toggle { transform: rotate(180deg); }
+            @media (max-width: 1024px) { .nav-toggle { display: none; } }
+
+            /* Content */
+            .nav-content {
+                flex: 1; overflow-y: auto; overflow-x: hidden;
+                padding: 6px;
+            }
+            .nav-content::-webkit-scrollbar { width: 2px; }
+            .nav-content::-webkit-scrollbar-track { background: transparent; }
+            .nav-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.04); }
+
+            /* Section titles */
+            .nav-section { margin-bottom: 2px; }
+            .nav-section-title {
+                padding: 10px 8px 4px;
+                font-size: 9px; color: #444;
+                text-transform: uppercase; letter-spacing: 0.1em;
+                font-weight: 600; transition: var(--nav-t);
                 white-space: nowrap;
             }
+            .collapsed .nav-section-title { opacity: 0; height: 0; padding: 0; overflow: hidden; }
 
-            .collapsed .nav-section-title {
-                opacity: 0;
-                height: 0;
-                padding: 0;
-                overflow: hidden;
-            }
-
-            /* Nav Items */
+            /* Nav items */
             .nav-item {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                padding: 10px 12px;
-                margin: 2px 0;
-                border-radius: 8px;
+                display: flex; align-items: center; gap: 8px;
+                padding: 6px 8px; margin: 1px 0;
+                border-radius: 4px;
                 color: var(--nav-text);
                 text-decoration: none;
-                transition: var(--nav-transition);
+                transition: var(--nav-t);
                 cursor: pointer;
                 position: relative;
-                overflow: hidden;
+                font-size: 12px;
             }
-
             .nav-item::before {
-                content: '';
-                position: absolute;
-                left: 0;
-                top: 0;
-                bottom: 0;
-                width: 3px;
+                content: ''; position: absolute;
+                left: 0; top: 4px; bottom: 4px; width: 2px;
                 background: var(--nav-accent);
-                opacity: 0;
-                transition: opacity 0.2s;
+                opacity: 0; transition: opacity 0.15s ease;
+                border-radius: 1px;
             }
-
-            .nav-item:hover,
-            .nav-item.active {
-                background: var(--nav-section-bg);
-                color: var(--nav-text-hover);
-            }
-
-            .nav-item.active::before {
-                opacity: 1;
-            }
+            .nav-item:hover { background: rgba(255,255,255,0.03); color: var(--nav-text-hover); }
+            .nav-item.active { background: rgba(59, 130, 246, 0.06); color: var(--nav-text-hover); }
+            .nav-item.active::before { opacity: 1; }
 
             .nav-item-icon {
-                width: 20px;
-                height: 20px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 14px;
-                flex-shrink: 0;
-                color: var(--nav-accent);
+                width: 16px; height: 16px;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 10px; flex-shrink: 0;
+                color: #555; transition: color 0.15s ease;
             }
-
-            .nav-item-content {
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-                flex: 1;
-                transition: var(--nav-transition);
-            }
-
-            .collapsed .nav-item-content {
-                opacity: 0;
-                width: 0;
-            }
+            .nav-item:hover .nav-item-icon { color: #888; }
+            .nav-item.active .nav-item-icon { color: var(--nav-accent); }
 
             .nav-item-label {
-                font-weight: 500;
-                white-space: nowrap;
+                font-weight: 500; font-size: 12px; white-space: nowrap;
+                overflow: hidden; text-overflow: ellipsis;
             }
-
-            .nav-item-desc {
-                font-size: 10px;
-                color: #666;
-                white-space: nowrap;
-                transition: color 0.2s;
-            }
-
-            .nav-item:hover .nav-item-desc {
-                color: #888;
-            }
+            .collapsed .nav-item-label { opacity: 0; width: 0; overflow: hidden; }
 
             .nav-item-shortcut {
-                font-size: 10px;
-                color: var(--nav-accent);
-                opacity: 0.5;
-                padding: 2px 6px;
-                background: rgba(0, 242, 255, 0.1);
-                border-radius: 4px;
-                transition: var(--nav-transition);
+                margin-left: auto;
+                font-size: 9px; color: #333;
+                font-family: var(--nav-mono);
+                transition: var(--nav-t);
             }
+            .collapsed .nav-item-shortcut { display: none; }
+            .nav-item:hover .nav-item-shortcut { color: #555; }
 
-            .collapsed .nav-item-shortcut {
-                display: none;
-            }
-
-            /* Tooltip for collapsed mode */
+            /* Tooltips (collapsed only) */
             .nav-item[data-tooltip]::after {
                 content: attr(data-tooltip);
-                position: absolute;
-                left: 100%;
-                top: 50%;
+                position: absolute; left: calc(100% + 8px); top: 50%;
                 transform: translateY(-50%);
-                margin-left: 12px;
-                padding: 8px 12px;
-                background: rgba(0, 0, 0, 0.9);
-                border: 1px solid var(--nav-border);
-                border-radius: 6px;
-                color: #fff;
-                font-size: 12px;
+                padding: 5px 8px;
+                background: rgba(0,0,0,0.95);
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 4px;
+                color: rgba(255,255,255,0.85);
+                font-size: 11px; font-weight: 500;
                 white-space: nowrap;
-                opacity: 0;
-                visibility: hidden;
-                transition: all 0.2s;
-                z-index: 10000;
-                pointer-events: none;
+                opacity: 0; visibility: hidden;
+                transition: all 0.15s ease;
+                z-index: 10000; pointer-events: none;
             }
+            .collapsed .nav-item[data-tooltip]:hover::after { opacity: 1; visibility: visible; }
 
-            .collapsed .nav-item[data-tooltip]:hover::after {
-                opacity: 1;
-                visibility: visible;
-            }
-
-            /* Status Bar */
+            /* Status */
             .nav-status {
-                padding: 12px;
+                padding: 8px 10px;
                 border-top: 1px solid var(--nav-border);
-                background: rgba(0, 0, 0, 0.3);
+                display: flex; align-items: center; gap: 6px;
             }
-
-            .nav-status-item {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                font-size: 11px;
-                color: var(--nav-text);
-                margin-bottom: 6px;
-            }
-
             .nav-status-dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: var(--nav-accent-secondary);
-                box-shadow: 0 0 8px var(--nav-accent-secondary);
-                animation: pulse 2s infinite;
+                width: 5px; height: 5px; border-radius: 50%;
+                background: var(--nav-good);
+                animation: nav-pulse 2s infinite;
+                flex-shrink: 0;
             }
-
-            .nav-status-dot.disconnected {
-                background: var(--nav-danger);
-                box-shadow: 0 0 8px var(--nav-danger);
-                animation: none;
+            .nav-status-dot.off { background: var(--nav-danger); animation: none; }
+            .nav-status-text {
+                font-size: 10px; color: #444;
+                font-family: var(--nav-mono);
             }
+            .collapsed .nav-status-text { display: none; }
+            @keyframes nav-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-            @keyframes pulse {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.4; }
-            }
-
-            .collapsed .nav-status-item span:last-child {
-                display: none;
-            }
-
-            /* Quick Actions */
+            /* Actions */
             .nav-actions {
-                padding: 12px;
+                padding: 8px;
                 border-top: 1px solid var(--nav-border);
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
+                display: flex; flex-direction: column; gap: 4px;
             }
-
             .nav-action-btn {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                padding: 10px 12px;
+                display: flex; align-items: center; gap: 6px;
+                padding: 6px 8px;
                 border: 1px solid var(--nav-border);
-                border-radius: 6px;
-                background: transparent;
+                border-radius: 4px; background: transparent;
                 color: var(--nav-text);
-                font-family: var(--nav-font-mono);
-                font-size: 12px;
-                cursor: pointer;
-                transition: var(--nav-transition);
-                text-transform: uppercase;
-                letter-spacing: 1px;
+                font-family: var(--nav-mono);
+                font-size: 10px; font-weight: 500;
+                cursor: pointer; transition: var(--nav-t);
+                letter-spacing: 0.03em;
             }
-
             .nav-action-btn:hover {
-                background: var(--nav-section-bg);
-                border-color: var(--nav-accent);
+                background: rgba(255,255,255,0.03);
+                border-color: rgba(255,255,255,0.12);
                 color: var(--nav-text-hover);
             }
-
             .nav-action-btn.danger {
-                border-color: rgba(255, 62, 62, 0.3);
+                border-color: rgba(248, 113, 113, 0.15);
+                color: rgba(248, 113, 113, 0.7);
+            }
+            .nav-action-btn.danger:hover {
+                background: rgba(248, 113, 113, 0.06);
+                border-color: rgba(248, 113, 113, 0.35);
                 color: var(--nav-danger);
             }
+            .collapsed .nav-action-btn span:last-child { display: none; }
+            .collapsed .nav-action-btn { justify-content: center; padding: 6px; }
 
-            .nav-action-btn.danger:hover {
-                background: rgba(255, 62, 62, 0.1);
-                border-color: var(--nav-danger);
-            }
-
-            .collapsed .nav-action-btn span {
-                display: none;
-            }
-
-            .collapsed .nav-action-btn {
-                justify-content: center;
-                padding: 10px;
-            }
-
-            /* Mobile Menu Button */
+            /* Mobile */
             .nav-mobile-btn {
                 display: none;
-                position: fixed;
-                top: 20px;
-                left: 20px;
-                z-index: 10000;
-                width: 40px;
-                height: 40px;
-                background: var(--nav-bg);
-                border: 1px solid var(--nav-border);
-                border-radius: 8px;
-                color: var(--nav-accent);
-                font-size: 18px;
+                position: fixed; top: 12px; left: 12px; z-index: 10000;
+                width: 32px; height: 32px;
+                background: var(--nav-bg); border: 1px solid var(--nav-border);
+                border-radius: 4px; color: #666; font-size: 14px;
                 cursor: pointer;
-                backdrop-filter: blur(10px);
             }
-
             @media (max-width: 1024px) {
-                .nav-mobile-btn {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }
+                .nav-mobile-btn { display: flex; align-items: center; justify-content: center; }
             }
 
-            /* Mobile Overlay */
             .nav-overlay {
-                display: none;
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0, 0, 0, 0.5);
-                z-index: 9998;
-                opacity: 0;
-                transition: opacity 0.3s;
+                display: none; position: fixed; inset: 0;
+                background: rgba(0,0,0,0.5); z-index: 9998;
+                opacity: 0; transition: opacity 0.15s ease;
             }
-
             @media (max-width: 1024px) {
-                .nav-overlay.active {
-                    display: block;
-                    opacity: 1;
-                }
+                .nav-overlay.active { display: block; opacity: 1; }
             }
 
-            /* Bloomberg-style refinement pass */
-            body.has-nav {
-                padding-left: 272px;
-            }
-
-            body.has-nav.nav-collapsed {
-                padding-left: 68px;
-            }
-
-            #universal-nav {
-                width: 272px;
-                background: linear-gradient(180deg, rgba(8, 12, 16, 0.985), rgba(8, 12, 16, 0.97));
-                border-right: 1px solid rgba(255, 196, 116, 0.22);
-                box-shadow: 8px 0 30px rgba(0, 0, 0, 0.38);
-            }
-
-            #universal-nav.collapsed {
-                width: 68px;
-            }
-
-            .nav-header {
-                padding: 14px 12px;
-                min-height: 62px;
-                background: linear-gradient(90deg, rgba(255, 196, 116, 0.08), rgba(102, 215, 229, 0.06));
-            }
-
-            .nav-brand-icon {
-                border-radius: 6px;
-                border: 1px solid rgba(255, 196, 116, 0.45);
-                box-shadow: 0 0 16px rgba(255, 196, 116, 0.25);
-            }
-
-            .nav-brand-title {
-                font-size: 12px;
-                letter-spacing: 1.4px;
-            }
-
-            .nav-brand-subtitle {
-                color: #ffc474;
-                font-size: 9px;
-            }
-
-            .nav-toggle {
-                border-color: rgba(255, 196, 116, 0.35);
-            }
-
-            .nav-content {
-                padding: 8px 8px 10px;
-            }
-
-            .nav-section {
-                margin-bottom: 10px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-                padding-bottom: 8px;
-            }
-
-            .nav-section:last-child {
-                border-bottom: none;
-            }
-
-            .nav-section-title {
-                color: #ffc474;
-                font-size: 9px;
-                letter-spacing: 2px;
-                font-weight: 700;
-            }
-
-            .nav-item {
-                border-radius: 6px;
-                border: 1px solid transparent;
-                padding: 9px 10px;
-                margin: 3px 0;
-            }
-
-            .nav-item:hover,
-            .nav-item.active {
-                background: rgba(255, 196, 116, 0.08);
-                border-color: rgba(255, 196, 116, 0.36);
-                box-shadow: inset 0 0 0 1px rgba(255, 196, 116, 0.08);
-            }
-
-            .nav-item::before,
-            .nav-item.active::before {
-                background: #ffc474;
-            }
-
-            .nav-item-icon {
-                color: #66d7e5;
-            }
-
-            .nav-item-label {
-                font-size: 12px;
-                letter-spacing: 0.02em;
-            }
-
-            .nav-item-desc {
-                color: #778a95;
-                font-size: 9px;
-                letter-spacing: 0.02em;
-            }
-
-            .nav-item-shortcut {
-                color: #ffc474;
-                border: 1px solid rgba(255, 196, 116, 0.34);
-                background: rgba(255, 196, 116, 0.1);
-                font-size: 9px;
-                padding: 2px 5px;
-            }
-
-            .nav-status {
-                border-top: 1px solid rgba(255, 196, 116, 0.2);
-                background: rgba(7, 12, 16, 0.88);
-            }
-
-            .nav-status-item {
-                font-size: 10px;
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
-            }
-
-            .nav-actions {
-                border-top: 1px solid rgba(255, 196, 116, 0.2);
-                background: rgba(7, 12, 16, 0.9);
-            }
-
-            .nav-action-btn {
-                border-radius: 6px;
-                border-color: rgba(102, 215, 229, 0.24);
-                background: rgba(10, 16, 21, 0.78);
-                font-size: 10px;
-                padding: 8px 10px;
-            }
-
-            .nav-action-btn:hover {
-                border-color: rgba(255, 196, 116, 0.56);
-                background: rgba(255, 196, 116, 0.1);
-            }
-
-            .nav-mobile-btn {
-                top: 14px;
-                left: 14px;
-                border-color: rgba(255, 196, 116, 0.32);
-                color: #ffc474;
-            }
-
-            /* Page Content Adjustment */
-            .top-bar {
-                padding-left: 292px !important;
-            }
-
-            body.nav-collapsed .top-bar {
-                padding-left: 88px !important;
-            }
-
+            /* top-bar offset */
+            .top-bar { padding-left: calc(var(--nav-w) + 16px) !important; }
+            body.nav-collapsed .top-bar { padding-left: calc(var(--nav-w-c) + 16px) !important; }
             @media (max-width: 1024px) {
-                body.has-nav,
-                body.has-nav.nav-collapsed {
-                    padding-left: 0;
-                }
-
-                .top-bar {
-                    padding-left: 70px !important;
-                }
-
-                body.nav-collapsed .top-bar {
-                    padding-left: 70px !important;
-                }
+                .top-bar { padding-left: 52px !important; }
+                body.nav-collapsed .top-bar { padding-left: 52px !important; }
             }
         `;
 
@@ -710,278 +323,155 @@
         document.head.appendChild(styleEl);
     }
 
-    // Render navigation HTML
     function renderNavigation() {
         if (document.getElementById('universal-nav')) return;
-
-        // Add body class
         document.body.classList.add('has-nav');
 
-        // Create mobile menu button
+        // Mobile button
         const mobileBtn = document.createElement('button');
         mobileBtn.className = 'nav-mobile-btn';
-        mobileBtn.innerHTML = '☰';
+        mobileBtn.innerHTML = '\u2630';
         mobileBtn.onclick = toggleMobile;
         document.body.appendChild(mobileBtn);
 
-        // Create overlay
+        // Overlay
         const overlay = document.createElement('div');
         overlay.className = 'nav-overlay';
         overlay.onclick = closeMobile;
         document.body.appendChild(overlay);
 
-        // Create navigation container
+        // Nav
         const nav = document.createElement('nav');
         nav.id = 'universal-nav';
-        
-        // Build nav HTML
-        let navHTML = `
-            <div class="nav-toggle" onclick="window.UniversalNav.toggle()">◀</div>
-            
+
+        let html = `
+            <div class="nav-toggle" onclick="window.UniversalNav.toggle()">\u25C0</div>
             <div class="nav-header">
-                <div class="nav-brand-icon">${NAV_CONFIG.brand.icon}</div>
+                <div class="nav-brand-icon">VC</div>
                 <div class="nav-brand-text">
-                    <span class="nav-brand-title">${NAV_CONFIG.brand.title}</span>
-                    <span class="nav-brand-subtitle">${NAV_CONFIG.brand.subtitle}</span>
+                    <div class="nav-brand-title">${NAV_CONFIG.brand.title}</div>
+                    <div class="nav-brand-sub">${NAV_CONFIG.brand.subtitle}</div>
                 </div>
             </div>
-
             <div class="nav-content">
         `;
 
-        // Add sections
         NAV_CONFIG.sections.forEach(section => {
-            navHTML += `
-                <div class="nav-section">
-                    <div class="nav-section-title">${section.title}</div>
-            `;
-
+            html += `<div class="nav-section"><div class="nav-section-title">${section.title}</div>`;
             section.items.forEach(item => {
-                const tooltip = `${item.label} [${item.shortcut}]`;
-                navHTML += `
-                    <a href="${item.path}" class="nav-item" data-id="${item.id}" data-tooltip="${tooltip}">
+                html += `
+                    <a href="${item.path}" class="nav-item" data-id="${item.id}" data-tooltip="${item.label} [${item.shortcut}]">
                         <span class="nav-item-icon">${item.icon}</span>
-                        <div class="nav-item-content">
-                            <span class="nav-item-label">${item.label}</span>
-                            <span class="nav-item-desc">${item.desc}</span>
-                        </div>
+                        <span class="nav-item-label">${item.label}</span>
                         <span class="nav-item-shortcut">${item.shortcut}</span>
-                    </a>
-                `;
+                    </a>`;
             });
-
-            navHTML += `</div>`;
+            html += `</div>`;
         });
 
-        navHTML += `</div>`; // End nav-content
+        html += `</div>`; // nav-content
 
-        // Add status
-        navHTML += `
+        html += `
             <div class="nav-status">
-                <div class="nav-status-item">
-                    <span class="nav-status-dot" id="nav-status-dot"></span>
-                    <span id="nav-status-text">Connected</span>
-                </div>
+                <span class="nav-status-dot" id="nav-status-dot"></span>
+                <span class="nav-status-text" id="nav-status-text">CONNECTED</span>
             </div>
-        `;
-
-        // Add quick actions
-        navHTML += `<div class="nav-actions">`;
-        NAV_CONFIG.quickActions.forEach(action => {
-            navHTML += `
-                <button class="nav-action-btn ${action.class}" onclick="window.UniversalNav.${action.action}()">
-                    <span>${action.icon}</span>
-                    <span>${action.label}</span>
+            <div class="nav-actions">
+                <button class="nav-action-btn danger" onclick="window.UniversalNav.emergencyStop()">
+                    <span>\u25A0</span><span>ESTOP</span>
                 </button>
-            `;
-        });
-        navHTML += `</div>`;
+                <button class="nav-action-btn" onclick="window.UniversalNav.refreshData()">
+                    <span>\u21BB</span><span>REFRESH</span>
+                </button>
+            </div>`;
 
-        nav.innerHTML = navHTML;
+        nav.innerHTML = html;
         document.body.appendChild(nav);
     }
 
-    // Setup event listeners
     function setupEventListeners() {
-        // Handle window resize
         window.addEventListener('resize', () => {
-            const newIsMobile = window.innerWidth < 1024;
-            if (newIsMobile !== isMobile) {
-                isMobile = newIsMobile;
-                if (!isMobile) {
-                    closeMobile();
-                }
-            }
+            const was = isMobile;
+            isMobile = window.innerWidth < 1024;
+            if (was && !isMobile) closeMobile();
         });
-
-        // Handle escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                closeMobile();
-            }
-        });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMobile(); });
     }
 
-    // Setup keyboard shortcuts
     function setupKeyboardShortcuts() {
-        document.addEventListener('keydown', (e) => {
-            // Only handle if not in input
+        document.addEventListener('keydown', e => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-            // Handle Alt + key shortcuts
-            if (e.altKey) {
-                const key = e.key.toUpperCase();
-                
-                NAV_CONFIG.sections.forEach(section => {
-                    section.items.forEach(item => {
-                        if (item.shortcut === key) {
-                            e.preventDefault();
-                            window.location.href = item.path;
-                        }
-                    });
-                });
-
-                // Special shortcuts
-                if (key === 'M') {
-                    e.preventDefault();
-                    toggleMobile();
-                }
-                if (key === 'B') {
-                    e.preventDefault();
-                    toggle();
-                }
-            }
+            if (!e.altKey) return;
+            const key = e.key.toUpperCase();
+            NAV_CONFIG.sections.forEach(s => s.items.forEach(item => {
+                if (item.shortcut === key) { e.preventDefault(); window.location.href = item.path; }
+            }));
+            if (key === 'M') { e.preventDefault(); toggleMobile(); }
+            if (key === 'B') { e.preventDefault(); toggle(); }
         });
     }
 
-    // Highlight current page
     function highlightCurrentPage() {
-        const currentPath = window.location.pathname;
-        const items = document.querySelectorAll('.nav-item');
-        
-        items.forEach(item => {
-            const itemPath = item.getAttribute('href');
-            if (currentPath === itemPath || 
-                (itemPath !== '/' && currentPath.startsWith(itemPath)) ||
-                (currentPath === '/' && itemPath === '/')) {
-                item.classList.add('active');
-            } else {
-                item.classList.remove('active');
-            }
+        const path = window.location.pathname;
+        document.querySelectorAll('.nav-item').forEach(item => {
+            const href = item.getAttribute('href');
+            const match = path === href ||
+                (href !== '/' && path.startsWith(href)) ||
+                (path === '/' && href === '/');
+            item.classList.toggle('active', match);
         });
     }
 
-    // Toggle navigation collapsed state
     function toggle() {
         isCollapsed = !isCollapsed;
-        const nav = document.getElementById('universal-nav');
-        
-        if (isCollapsed) {
-            nav.classList.add('collapsed');
-            document.body.classList.add('nav-collapsed');
-        } else {
-            nav.classList.remove('collapsed');
-            document.body.classList.remove('nav-collapsed');
-        }
-
-        // Save preference
+        document.getElementById('universal-nav').classList.toggle('collapsed', isCollapsed);
+        document.body.classList.toggle('nav-collapsed', isCollapsed);
         localStorage.setItem('navCollapsed', isCollapsed);
     }
 
-    // Toggle mobile menu
     function toggleMobile() {
-        const nav = document.getElementById('universal-nav');
-        const overlay = document.querySelector('.nav-overlay');
-        
-        nav.classList.toggle('open');
-        overlay.classList.toggle('active');
+        document.getElementById('universal-nav').classList.toggle('open');
+        document.querySelector('.nav-overlay').classList.toggle('active');
     }
 
-    // Close mobile menu
     function closeMobile() {
-        const nav = document.getElementById('universal-nav');
-        const overlay = document.querySelector('.nav-overlay');
-        
-        nav.classList.remove('open');
-        overlay.classList.remove('active');
+        document.getElementById('universal-nav').classList.remove('open');
+        document.querySelector('.nav-overlay').classList.remove('active');
     }
 
-    // Update connection status
     function updateConnectionStatus(connected) {
         const dot = document.getElementById('nav-status-dot');
         const text = document.getElementById('nav-status-text');
-        
-        if (connected) {
-            dot.classList.remove('disconnected');
-            text.textContent = 'Connected';
-        } else {
-            dot.classList.add('disconnected');
-            text.textContent = 'Disconnected';
-        }
+        if (connected) { dot.classList.remove('off'); text.textContent = 'CONNECTED'; }
+        else { dot.classList.add('off'); text.textContent = 'DISCONNECTED'; }
     }
 
-    // Emergency stop action
     function emergencyStop() {
-        if (confirm('⚠️ EMERGENCY STOP\n\nClose ALL positions and cancel ALL orders?\n\nThis action cannot be undone.')) {
+        if (confirm('EMERGENCY STOP\n\nClose ALL positions and cancel ALL orders?\n\nThis cannot be undone.')) {
             fetch('/api/emergency-stop', { method: 'POST' })
                 .then(r => r.json())
-                .then(data => {
-                    alert('Emergency stop executed: ' + data.message);
-                })
-                .catch(err => {
-                    alert('Emergency stop failed: ' + err.message);
-                });
+                .then(d => alert('Emergency stop: ' + d.message))
+                .catch(e => alert('Failed: ' + e.message));
         }
     }
 
-    // Refresh data action
     function refreshData() {
-        // Dispatch custom event for pages to handle
         window.dispatchEvent(new CustomEvent('nav-refresh-data'));
-        
-        // Show brief feedback
-        const btn = document.querySelector('.nav-action-btn:not(.danger)');
-        if (btn) {
-            const original = btn.innerHTML;
-            btn.innerHTML = '<span>↻</span><span>Refreshing...</span>';
-            setTimeout(() => {
-                btn.innerHTML = original;
-            }, 1000);
-        }
     }
 
-    // Restore saved preferences
     function restorePreferences() {
-        const savedCollapsed = localStorage.getItem('navCollapsed');
-        if (savedCollapsed === 'true') {
+        if (localStorage.getItem('navCollapsed') === 'true') {
             isCollapsed = true;
             const nav = document.getElementById('universal-nav');
-            if (nav) {
-                nav.classList.add('collapsed');
-                document.body.classList.add('nav-collapsed');
-            }
+            if (nav) { nav.classList.add('collapsed'); document.body.classList.add('nav-collapsed'); }
         }
     }
 
-    // Expose API
-    window.UniversalNav = {
-        toggle,
-        toggleMobile,
-        closeMobile,
-        emergencyStop,
-        refreshData,
-        init,
-        updateConnectionStatus
-    };
+    window.UniversalNav = { toggle, toggleMobile, closeMobile, emergencyStop, refreshData, init, updateConnectionStatus };
 
-    // Initialize when DOM is ready
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            init();
-            restorePreferences();
-        });
+        document.addEventListener('DOMContentLoaded', () => { init(); restorePreferences(); });
     } else {
-        init();
-        restorePreferences();
+        init(); restorePreferences();
     }
 })();

@@ -59,10 +59,10 @@ class SnipeService {
   private tokenPrices = new Map<string, number>(); // tokenMint -> price multiplier vs entry
 
   constructor() {
-    this.minScoreToBuy = parseFloat(process.env.PUMPFUN_MIN_BUY_SCORE || '0.7');
-    this.solPerSnipe = parseFloat(process.env.PUMPFUN_SNIPER_SOL_AMOUNT || '0.5');
-    this.maxSnipePerHour = parseInt(process.env.PUMPFUN_MAX_SNIPE_PER_HOUR || '10');
-    this.cooldownMs = parseInt(process.env.PUMPFUN_SNIPER_COOLDOWN_MS || '3000');
+    this.minScoreToBuy = parseFloat(process.env.PUMPFUN_MIN_BUY_SCORE || '0.4');
+    this.solPerSnipe = parseFloat(process.env.PUMPFUN_SNIPER_SOL_AMOUNT || '0.3');
+    this.maxSnipePerHour = parseInt(process.env.PUMPFUN_MAX_SNIPE_PER_HOUR || '15');
+    this.cooldownMs = parseInt(process.env.PUMPFUN_SNIPER_COOLDOWN_MS || '2000');
   }
 
   onToken(callback: TokenCallback): void {
@@ -309,10 +309,10 @@ class SnipeService {
    * This is the fast path -- full AI analysis happens in the background pipeline
    */
   private async evaluateAndSnipe(event: NewTokenEvent): Promise<void> {
-    // Quick heuristic score (0-1)
-    let score = 0.5; // baseline
+    // Quick heuristic score (0-1) — starts lower, rewards more signals
+    let score = 0.3; // baseline (was 0.5)
 
-    // Has a name and symbol (not empty)
+    // Has a name and symbol (not empty/UNKNOWN)
     if (event.tokenName && event.tokenName !== 'UNKNOWN' && event.tokenName.length > 2) score += 0.1;
     if (event.tokenSymbol && event.tokenSymbol !== 'UNKNOWN' && event.tokenSymbol.length > 1) score += 0.05;
 
@@ -322,11 +322,15 @@ class SnipeService {
     // Has creator (not deployer wallet pattern)
     if (event.creator && event.creator.length > 30) score += 0.05;
 
-    // Symbol is reasonable length (3-10 chars)
-    if (event.tokenSymbol.length >= 2 && event.tokenSymbol.length <= 10) score += 0.05;
+    // Symbol is reasonable length (2-6 chars, typical ticker)
+    if (event.tokenSymbol.length >= 2 && event.tokenSymbol.length <= 6) score += 0.1; // was 0.05, tighter range
+    else if (event.tokenSymbol.length <= 10) score += 0.05;
 
-    // Name is reasonable (not just the symbol)
-    if (event.tokenName !== event.tokenSymbol && event.tokenName.length > event.tokenSymbol.length) score += 0.05;
+    // Name is different from symbol (shows effort in naming)
+    if (event.tokenName !== event.tokenSymbol && event.tokenName.length > event.tokenSymbol.length) score += 0.1; // was 0.05
+
+    // Has bonding curve address (means it's on the curve, buyable)
+    if (event.bondingCurveAddress) score += 0.15;
 
     // Check if we already have an AI analysis from the pumpfun-agent pipeline
     // (The analysis pipeline runs separately and stores results in pumpfun-store)
@@ -388,6 +392,7 @@ class SnipeService {
       candidate.event.tokenSymbol,
       this.solPerSnipe,
       DEFAULT_TP_LEVELS,
+      candidate.score,
     );
 
     candidate.buyExecuted = result.success;
@@ -418,58 +423,84 @@ class SnipeService {
   }
 
   /**
-   * Paper mode: simulate price movements for open positions
-   * Random walk with drift, checking TP levels
+   * Paper mode: monitor real on-chain price movements for open positions.
+   * Falls back to random-walk simulation if RPC connection fails.
    */
   private startPriceSimulation(): void {
-    const simulate = () => {
+    const simulate = async () => {
       if (!this.running) return;
 
       // Process any queued snipes first
       this.processSnipeQueue();
 
       const positions = bondingCurveService.getPositions();
+      if (positions.length === 0) {
+        setTimeout(simulate, 5000);
+        return;
+      }
+
+      let realMultipliers: Map<string, number> | null = null;
+
+      // Try real on-chain price sampling first
+      try {
+        realMultipliers = await bondingCurveService.sampleAndUpdatePositions();
+      } catch (err) {
+        logger.debug(`[PriceSimulation] On-chain sampling failed, falling back to random-walk: ${err}`);
+      }
+
       for (const position of positions) {
-        const currentMultiplier = this.tokenPrices.get(position.tokenMint) || 1.0;
+        // Use real multiplier if available, otherwise fall back to random-walk
+        let newMultiplier: number;
 
-        // Random walk: most pump.fun tokens either go to 0 or moon
-        // 30% chance of significant pump, 50% chance of gradual decline, 20% flat/slight up
-        const rand = Math.random();
-        let change: number;
-
-        if (rand < 0.3) {
-          // Pump: 5-20% increase
-          change = 1 + (Math.random() * 0.15 + 0.05);
-        } else if (rand < 0.8) {
-          // Decline: 1-5% decrease
-          change = 1 - (Math.random() * 0.04 + 0.01);
+        if (realMultipliers && realMultipliers.has(position.tokenMint)) {
+          // Use real on-chain price
+          newMultiplier = realMultipliers.get(position.tokenMint)!;
+          logger.debug(`[PriceSimulation] ${position.tokenSymbol} real price: ${newMultiplier.toFixed(3)}x`);
         } else {
-          // Flat/slight up: -1% to +3%
-          change = 1 + (Math.random() * 0.04 - 0.01);
+          // Fallback: random-walk simulation
+          const currentMultiplier = this.tokenPrices.get(position.tokenMint) || 1.0;
+
+          const rand = Math.random();
+          let change: number;
+
+          if (rand < 0.3) {
+            // Pump: 5-20% increase
+            change = 1 + (Math.random() * 0.15 + 0.05);
+          } else if (rand < 0.8) {
+            // Decline: 1-5% decrease
+            change = 1 - (Math.random() * 0.04 + 0.01);
+          } else {
+            // Flat/slight up: -1% to +3%
+            change = 1 + (Math.random() * 0.04 - 0.01);
+          }
+
+          // 0.2% chance of rug (instant crash)
+          if (Math.random() < 0.002) {
+            change = 0.01; // 99% loss
+            logger.warn(`[PAPER SIM] RUG DETECTED: ${position.tokenSymbol}`);
+          }
+
+          newMultiplier = currentMultiplier * change;
+          this.tokenPrices.set(position.tokenMint, newMultiplier);
+          logger.debug(`[PriceSimulation] ${position.tokenSymbol} simulated price: ${newMultiplier.toFixed(3)}x`);
         }
 
-        // 10% chance of rug (instant crash)
-        if (Math.random() < 0.002) {
-          change = 0.01; // 99% loss
-          logger.warn(`[PAPER SIM] RUG DETECTED: ${position.tokenSymbol}`);
-        }
-
-        const newMultiplier = currentMultiplier * change;
+        // Always keep tokenPrices in sync with the latest multiplier
         this.tokenPrices.set(position.tokenMint, newMultiplier);
 
-        // Check stop loss at 0.5x (50% down)
-        if (newMultiplier <= 0.5) {
-          logger.warn(`[PAPER SIM] STOP LOSS: ${position.tokenSymbol} at ${newMultiplier.toFixed(2)}x`);
-          bondingCurveService.emergencySell(position.tokenMint, newMultiplier);
+        // Check stop loss at 0.4x (60% down)
+        if (newMultiplier <= 0.4) {
+          logger.warn(`[PriceSimulation] STOP LOSS: ${position.tokenSymbol} at ${newMultiplier.toFixed(2)}x`);
+          await bondingCurveService.emergencySell(position.tokenMint, newMultiplier);
           this.tokenPrices.delete(position.tokenMint);
           continue;
         }
 
         // Check TP levels
-        bondingCurveService.checkAndSell(position.tokenMint, newMultiplier);
+        await bondingCurveService.checkAndSell(position.tokenMint, newMultiplier);
       }
 
-      // Log portfolio summary every 30 seconds (check modulo)
+      // Log portfolio summary periodically
       setTimeout(simulate, 5000);
     };
 

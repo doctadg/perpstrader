@@ -2,14 +2,15 @@
 // Provides embeddings and labeling for news/heatmap system via OpenRouter API
 // Primary for news components, with GLM as fallback for trading components
 // Enhanced with Redis caching for ultra-fast responses
+// Enhanced with circuit breaker + retry with backoff to prevent 429 storms
 
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import https from 'https';
 import http from 'http';
 import configManager from './config';
 import logger from './logger';
 import redisCache from './redis-cache';
-import { acquireRateLimitSlot, reportRateLimitHit } from './shared-rate-limiter';
+import { acquireRateLimitSlot, reportRateLimitHit, reportSuccess } from './shared-rate-limiter';
 import { getTitleFingerprint } from './title-cleaner';
 
 const config = configManager.get();
@@ -46,6 +47,77 @@ interface CategorizationResult {
   trendKeywords?: string[];
 }
 
+// ── Circuit Breaker ──────────────────────────────────────────────────────
+// Prevents API calls when the endpoint is consistently failing (429s, 5xx).
+// After `failureThreshold` consecutive failures, opens for `resetTimeoutMs`.
+// Then allows one probe call; if it succeeds, closes again.
+
+type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+class CircuitBreaker {
+  private state: CircuitState = 'CLOSED';
+  private consecutiveFailures = 0;
+  private readonly failureThreshold: number;
+  private readonly resetTimeoutMs: number;
+  private readonly backoffMultiplier: number;
+  private readonly maxResetTimeoutMs: number;
+  private nextAttemptTime = 0;
+  private readonly name: string;
+
+  constructor(name: string, opts?: {
+    failureThreshold?: number;
+    resetTimeoutMs?: number;
+    backoffMultiplier?: number;
+    maxResetTimeoutMs?: number;
+  }) {
+    this.name = name;
+    this.failureThreshold = opts?.failureThreshold ?? 5;
+    this.resetTimeoutMs = opts?.resetTimeoutMs ?? 30_000;
+    this.backoffMultiplier = opts?.backoffMultiplier ?? 2;
+    this.maxResetTimeoutMs = opts?.maxResetTimeoutMs ?? 120_000;
+  }
+
+  canExecute(): boolean {
+    if (this.state === 'CLOSED') return true;
+    if (this.state === 'OPEN') {
+      if (Date.now() < this.nextAttemptTime) return false;
+      this.state = 'HALF_OPEN';
+      logger.info(`[CircuitBreaker:${this.name}] Entering HALF_OPEN — allowing one probe call`);
+      return true;
+    }
+    // HALF_OPEN: allow one call
+    return true;
+  }
+
+  recordSuccess(): void {
+    if (this.state !== 'CLOSED') {
+      logger.info(`[CircuitBreaker:${this.name}] Closing — probe succeeded`);
+    }
+    this.state = 'CLOSED';
+    this.consecutiveFailures = 0;
+  }
+
+  recordFailure(): void {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.failureThreshold) {
+      const timeout = Math.min(
+        this.resetTimeoutMs * Math.pow(this.backoffMultiplier, Math.floor(this.consecutiveFailures / this.failureThreshold) - 1),
+        this.maxResetTimeoutMs
+      );
+      this.nextAttemptTime = Date.now() + timeout;
+      if (this.state !== 'OPEN') {
+        logger.warn(
+          `[CircuitBreaker:${this.name}] OPENING after ${this.consecutiveFailures} consecutive failures — cooldown ${Math.round(timeout / 1000)}s`
+        );
+      }
+      this.state = 'OPEN';
+    }
+  }
+
+  getState(): CircuitState { return this.state; }
+  getConsecutiveFailures(): number { return this.consecutiveFailures; }
+}
+
 class OpenRouterService {
   private baseUrl: string;
   private apiKey: string;
@@ -57,16 +129,130 @@ class OpenRouterService {
   private cacheHits: number = 0;
   private cacheMisses: number = 0;
 
+  // Circuit breaker: shared across all API calls in this service
+  private circuitBreaker: CircuitBreaker;
+
+  // Retry config
+  private static readonly MAX_RETRIES = 5;
+  private static readonly RETRY_BASE_DELAY_MS = 1000;
+  private static readonly RETRY_MAX_DELAY_MS = 30_000;
+
   constructor() {
     this.baseUrl = config.openrouter.baseUrl;
     this.apiKey = config.openrouter.apiKey;
     this.labelingModel = config.openrouter.labelingModel;
     this.embeddingModel = config.openrouter.embeddingModel;
     this.timeout = config.openrouter.timeout;
+    this.circuitBreaker = new CircuitBreaker('OpenRouter', {
+      failureThreshold: 5,
+      resetTimeoutMs: 30_000,
+      maxResetTimeoutMs: 120_000,
+    });
   }
 
   canUseService(): boolean {
-    return !!this.apiKey && this.apiKey.length > 0 && this.apiKey !== 'your-api-key-here';
+    // Check live config as fallback — constructor-captured apiKey can be empty
+    // if configManager loaded before dotenv populated process.env
+    const key = this.apiKey || configManager.get().openrouter.apiKey;
+    return !!key && key.length > 0 && key !== 'your-api-key-here';
+  }
+
+  /**
+   * Get circuit breaker state for observability
+   */
+  getCircuitBreakerState(): { state: string; failures: number } {
+    return {
+      state: this.circuitBreaker.getState(),
+      failures: this.circuitBreaker.getConsecutiveFailures(),
+    };
+  }
+
+  /**
+   * Execute an API call with circuit breaker check, retry with exponential backoff,
+   * and proper 429 handling using Retry-After header.
+   * Returns null if circuit breaker is open or all retries exhausted.
+   */
+  private async callWithRetry<T>(
+    caller: string,
+    rateLimitKey: string,
+    apiCall: () => Promise<T>
+  ): Promise<T | null> {
+    // Circuit breaker check
+    if (!this.circuitBreaker.canExecute()) {
+      logger.warn(
+        `[OpenRouter] ${caller}: circuit breaker OPEN — skipping call (failures: ${this.circuitBreaker.getConsecutiveFailures()})`
+      );
+      return null;
+    }
+
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= OpenRouterService.MAX_RETRIES; attempt++) {
+      try {
+        // Rate limit slot
+        await acquireRateLimitSlot(rateLimitKey);
+
+        const result = await apiCall();
+
+        // Success — reset circuit breaker and rate limiter
+        this.circuitBreaker.recordSuccess();
+        reportSuccess();
+        return result;
+
+      } catch (error: any) {
+        lastError = error;
+        const status = error?.response?.status;
+
+        // Report 429 to shared rate limiter for adaptive backoff
+        if (status === 429) {
+          const retryAfter = error?.response?.headers?.['retry-after'];
+          let retryAfterMs: number | undefined;
+          if (retryAfter) {
+            const parsed = parseInt(retryAfter, 10);
+            if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+          }
+          reportRateLimitHit(rateLimitKey, retryAfterMs);
+
+          this.circuitBreaker.recordFailure();
+
+          if (attempt < OpenRouterService.MAX_RETRIES) {
+            const backoff = retryAfterMs
+              || Math.min(
+                  OpenRouterService.RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 500,
+                  OpenRouterService.RETRY_MAX_DELAY_MS
+                );
+            logger.warn(`[OpenRouter] ${caller}: 429 on attempt ${attempt}/${OpenRouterService.MAX_RETRIES}, retrying in ${Math.round(backoff)}ms...`);
+            await new Promise(r => setTimeout(r, backoff));
+            continue;
+          }
+
+          logger.warn(`[OpenRouter] ${caller}: 429 exhausted all ${OpenRouterService.MAX_RETRIES} retries`);
+          return null;
+        }
+
+        // Non-429 error: retry with exponential backoff for transient errors
+        if (status >= 500 || error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT' || error?.code === 'ECONNREFUSED') {
+          this.circuitBreaker.recordFailure();
+
+          if (attempt < OpenRouterService.MAX_RETRIES) {
+            const backoff = Math.min(
+              OpenRouterService.RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 500,
+              OpenRouterService.RETRY_MAX_DELAY_MS
+            );
+            logger.warn(`[OpenRouter] ${caller}: ${status || error?.code} error on attempt ${attempt}/${OpenRouterService.MAX_RETRIES}, retrying in ${Math.round(backoff)}ms...`);
+            await new Promise(r => setTimeout(r, backoff));
+            continue;
+          }
+        }
+
+        // Non-retryable error (4xx except 429, or unknown)
+        logger.debug(`[OpenRouter] ${caller}: non-retryable error: ${this.safeErrorMessage(error)}`);
+        return null;
+      }
+    }
+
+    logger.warn(`[OpenRouter] ${caller}: all ${OpenRouterService.MAX_RETRIES} retries exhausted: ${this.safeErrorMessage(lastError)}`);
+    return null;
   }
 
   private safeErrorMessage(error: any): string {
@@ -113,32 +299,35 @@ class OpenRouterService {
     this.cacheMisses++;
 
     try {
-      // Shared rate limit: enforce 1 call per 10s across all z.ai services
-      await acquireRateLimitSlot('OpenRouter-embedding');
-
       const safeText = text.substring(0, 8000);
 
-      const response = await axiosInstance.post<OpenRouterEmbeddingResponse>(
-        `${this.baseUrl}/chat/completions`,
-        {
-          model: this.embeddingModel,
-          messages: [
-            {
-              role: 'user',
-              content: `Generate an embedding vector for this text: ${safeText}`,
-            },
-          ],
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://perps-trader.ai',
-            'X-Title': 'PerpsTrader News System',
+      const response = await this.callWithRetry(
+        'generateEmbedding',
+        'OpenRouter-embedding',
+        () => axiosInstance.post<OpenRouterEmbeddingResponse>(
+          `${this.baseUrl}/chat/completions`,
+          {
+            model: this.embeddingModel,
+            messages: [
+              {
+                role: 'user',
+                content: `Generate an embedding vector for this text: ${safeText}`,
+              },
+            ],
           },
-          timeout: this.timeout,
-        }
+          {
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://perps-trader.ai',
+              'X-Title': 'PerpsTrader News System',
+            },
+            timeout: this.timeout,
+          }
+        )
       );
+
+      if (!response) return null;
 
       // Try to extract embedding from response
       const data = response.data;
@@ -152,16 +341,6 @@ class OpenRouterService {
       logger.warn('[OpenRouter] Unexpected embedding response format');
       return null;
     } catch (error: any) {
-      // Report 429 to shared rate limiter for adaptive backoff
-      if (error?.response?.status === 429) {
-        const retryAfter = error?.response?.headers?.['retry-after'];
-        let retryAfterMs: number | undefined;
-        if (retryAfter) {
-          const parsed = parseInt(retryAfter, 10);
-          if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
-        }
-        reportRateLimitHit('OpenRouter-embedding', retryAfterMs);
-      }
       logger.debug(`[OpenRouter] Embedding generation failed: ${this.safeErrorMessage(error)}`);
       return null;
     }
@@ -272,36 +451,39 @@ Return JSON ONLY:
 }`;
 
     try {
-      // Shared rate limit: enforce 1 call per 10s across all z.ai services
-      await acquireRateLimitSlot('OpenRouter-eventLabel');
-
-      const response = await axiosInstance.post<OpenRouterChatResponse>(
-        `${this.baseUrl}/chat/completions`,
-        {
-          model: this.labelingModel,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a precise financial news analyst. Always respond with valid JSON only.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 500,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://perps-trader.ai',
-            'X-Title': 'PerpsTrader News System',
+      const response = await this.callWithRetry(
+        'generateEventLabel',
+        'OpenRouter-eventLabel',
+        () => axiosInstance.post<OpenRouterChatResponse>(
+          `${this.baseUrl}/chat/completions`,
+          {
+            model: this.labelingModel,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a precise financial news analyst. Always respond with valid JSON only.',
+              },
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+            temperature: 0.1,
+            max_tokens: 500,
           },
-          timeout: this.timeout,
-        }
+          {
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://perps-trader.ai',
+              'X-Title': 'PerpsTrader News System',
+            },
+            timeout: this.timeout,
+          }
+        )
       );
+
+      if (!response) return null;
 
       const content = response.data.choices[0]?.message?.content || '';
       const match = content.match(/\{[\s\S]*\}/);
@@ -358,16 +540,6 @@ Return JSON ONLY:
 
       return result;
     } catch (error: any) {
-      // Report 429 to shared rate limiter for adaptive backoff
-      if (error?.response?.status === 429) {
-        const retryAfter = error?.response?.headers?.['retry-after'];
-        let retryAfterMs: number | undefined;
-        if (retryAfter) {
-          const parsed = parseInt(retryAfter, 10);
-          if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
-        }
-        reportRateLimitHit('OpenRouter-eventLabel', retryAfterMs);
-      }
       logger.debug(`[OpenRouter] Event label generation failed: ${this.safeErrorMessage(error)}`);
       return null;
     }
@@ -479,36 +651,42 @@ Return JSON ONLY in this format:
 }`;
 
     try {
-      // Shared rate limit: enforce 1 call per 10s across all z.ai services
-      await acquireRateLimitSlot('OpenRouter-batchEventLabel');
-
-      const response = await axiosInstance.post<OpenRouterChatResponse>(
-        `${this.baseUrl}/chat/completions`,
-        {
-          model: this.labelingModel,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a precise financial news analyst. Always respond with valid JSON only.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 8000,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://perps-trader.ai',
-            'X-Title': 'PerpsTrader News System',
+      const response = await this.callWithRetry(
+        `batchEventLabel-${batchIndex}`,
+        'OpenRouter-batchEventLabel',
+        () => axiosInstance.post<OpenRouterChatResponse>(
+          `${this.baseUrl}/chat/completions`,
+          {
+            model: this.labelingModel,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a precise financial news analyst. Always respond with valid JSON only.',
+              },
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+            temperature: 0.1,
+            max_tokens: 8000,
           },
-          timeout: this.timeout * 2,
-        }
+          {
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://perps-trader.ai',
+              'X-Title': 'PerpsTrader News System',
+            },
+            timeout: this.timeout * 2,
+          }
+        )
       );
+
+      if (!response) {
+        logger.warn(`[OpenRouter] Batch ${batchIndex}: API call failed/skipped`);
+        return results;
+      }
 
       const content = response.data.choices[0]?.message?.content || '';
 
@@ -593,16 +771,6 @@ Return JSON ONLY in this format:
       }
       logger.info(`[OpenRouter] Batch ${batchIndex}: ${results.size} labeled from ${batch.length} articles`);
     } catch (error: any) {
-      // Report 429 to shared rate limiter for adaptive backoff
-      if (error?.response?.status === 429) {
-        const retryAfter = error?.response?.headers?.['retry-after'];
-        let retryAfterMs: number | undefined;
-        if (retryAfter) {
-          const parsed = parseInt(retryAfter, 10);
-          if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
-        }
-        reportRateLimitHit('OpenRouter-batchEventLabel', retryAfterMs);
-      }
       logger.warn(`[OpenRouter] Batch ${batchIndex} failed: ${this.safeErrorMessage(error)}`);
     }
 
@@ -724,36 +892,42 @@ Return JSON in this format:
 }`;
 
     try {
-      // Shared rate limit: enforce 1 call per 10s across all z.ai services
-      await acquireRateLimitSlot('OpenRouter-batchCategorization');
-
-      const response = await axiosInstance.post<OpenRouterChatResponse>(
-        `${this.baseUrl}/chat/completions`,
-        {
-          model: this.labelingModel,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert news categorizer for financial markets. Always respond with valid JSON only.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 8000,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://perps-trader.ai',
-            'X-Title': 'PerpsTrader News System',
+      const response = await this.callWithRetry(
+        `batchCategorization-${batchIndex}`,
+        'OpenRouter-batchCategorization',
+        () => axiosInstance.post<OpenRouterChatResponse>(
+          `${this.baseUrl}/chat/completions`,
+          {
+            model: this.labelingModel,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are an expert news categorizer for financial markets. Always respond with valid JSON only.',
+              },
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+            temperature: 0.1,
+            max_tokens: 8000,
           },
-          timeout: this.timeout * 2,
-        }
+          {
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://perps-trader.ai',
+              'X-Title': 'PerpsTrader News System',
+            },
+            timeout: this.timeout * 2,
+          }
+        )
       );
+
+      if (!response) {
+        logger.warn(`[OpenRouter] Categorization batch ${batchIndex}: API call failed/skipped`);
+        return results;
+      }
 
       const content = response.data.choices[0]?.message?.content || '';
       let jsonMatch = content.match(/\{[\s\S]*"articles"[\s\S]*\}/);

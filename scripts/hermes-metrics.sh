@@ -63,19 +63,25 @@ pending_ideas = q1("SELECT COUNT(*) FROM strategy_ideas WHERE status='PENDING'")
 total_backtested = q1("SELECT COUNT(*) FROM strategy_performance")
 
 # Top backtested strategies
+# NOTE: strategy_performance has no name/type columns — must JOIN with strategies
 top_strats = q("""
-    SELECT name, type, sharpe_ratio, win_rate, profit_factor, max_drawdown, total_trades
-    FROM strategy_performance WHERE total_trades > 10
-    ORDER BY sharpe_ratio DESC LIMIT 5
+    SELECT s.name, s.type, sp.sharpe, sp.win_rate, sp.profit_factor, sp.max_drawdown, sp.total_trades
+    FROM strategy_performance sp
+    JOIN strategies s ON sp.strategy_id = s.id
+    WHERE sp.total_trades > 10
+    ORDER BY sp.sharpe DESC LIMIT 5
 """)
 
-# Type performance
+# Type performance (aggregate via strategies table for type info)
 type_perf = q("""
-    SELECT type, COUNT(*) as cnt,
-           ROUND(AVG(sharpe_ratio),2) as avg_sharpe,
-           ROUND(AVG(win_rate*100),1) as avg_wr,
-           ROUND(AVG(profit_factor),2) as avg_pf
-    FROM strategy_performance GROUP BY type ORDER BY AVG(sharpe_ratio) DESC
+    SELECT s.type, COUNT(*) as cnt,
+           ROUND(AVG(sp.sharpe),2) as avg_sharpe,
+           ROUND(AVG(sp.win_rate*100),1) as avg_wr,
+           ROUND(AVG(sp.profit_factor),2) as avg_pf
+    FROM strategy_performance sp
+    JOIN strategies s ON sp.strategy_id = s.id
+    WHERE sp.total_trades > 0
+    GROUP BY s.type ORDER BY AVG(sp.sharpe) DESC
 """)
 
 # Best exits

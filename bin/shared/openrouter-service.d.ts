@@ -22,8 +22,25 @@ declare class OpenRouterService {
     private timeout;
     private cacheHits;
     private cacheMisses;
+    private circuitBreaker;
+    private static readonly MAX_RETRIES;
+    private static readonly RETRY_BASE_DELAY_MS;
+    private static readonly RETRY_MAX_DELAY_MS;
     constructor();
     canUseService(): boolean;
+    /**
+     * Get circuit breaker state for observability
+     */
+    getCircuitBreakerState(): {
+        state: string;
+        failures: number;
+    };
+    /**
+     * Execute an API call with circuit breaker check, retry with exponential backoff,
+     * and proper 429 handling using Retry-After header.
+     * Returns null if circuit breaker is open or all retries exhausted.
+     */
+    private callWithRetry;
     private safeErrorMessage;
     /**
      * Get cache statistics

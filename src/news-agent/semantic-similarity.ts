@@ -355,8 +355,8 @@ class SemanticSimilarityService {
 
     if (norm1 === 0 || norm2 === 0) return 0;
 
-    // Normalize to 0-1 range (cosine similarity is -1 to 1)
-    return (dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2)) + 1) / 2;
+    // Raw cosine similarity (-1 to 1); embeddings are non-negative so range is ~0-1
+    return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
   }
 
   /**

@@ -669,7 +669,7 @@
       { path: '/', label: 'Dash', icon: '◈' },
       { path: '/news', label: 'News', icon: '◆' },
       { path: '/heatmap', label: 'Markets', icon: '▣' },
-      { path: '/funding-arbitrage', label: 'Arb', icon: '⚡' },
+      { path: '/funding-arbitrage', label: 'Arb', icon: '◈' },
       { path: '/predictions', label: 'More', icon: '◊' }
     ];
 
@@ -714,7 +714,7 @@
       <div class="app-header-right">
         ${options.showNotifications ? `
           <button class="app-icon-btn has-badge" id="notifBtn">
-            🔔
+            N
             <span class="badge"></span>
           </button>
         ` : ''}

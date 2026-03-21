@@ -3,1027 +3,333 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PERPS_TRADER // SAFEKEEPING_FUND</title>
+    <title>SAFEKEEPING // Fund Dashboard</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="/js/universal-nav.js"></script>
+    <link rel="stylesheet" href="/css/terminal-unified.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap');
-
-        :root {
-            --bg-obsidian: #050507;
-            --bg-panel: rgba(12, 12, 18, 0.85);
-            --terminal-green: #00ff9d;
-            --terminal-cyan: #00f2ff;
-            --terminal-amber: #ffb300;
-            --terminal-red: #ff3e3e;
-            --terminal-purple: #b829dd;
-            --terminal-orange: #ff8c00;
-            --border-low: rgba(0, 242, 255, 0.15);
-            --border-med: rgba(0, 242, 255, 0.4);
-            --font-mono: 'JetBrains Mono', monospace;
-            --font-sans: 'Inter', sans-serif;
-            --glow-cyan: 0 0 15px rgba(0, 242, 255, 0.3);
-            --glow-green: 0 0 15px rgba(0, 255, 157, 0.3);
-            --glow-red: 0 0 15px rgba(255, 62, 62, 0.3);
-            --glow-amber: 0 0 15px rgba(255, 179, 0, 0.3);
-            --glow-orange: 0 0 15px rgba(255, 140, 0, 0.3);
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            scrollbar-width: thin;
-            scrollbar-color: var(--terminal-cyan) transparent;
-        }
-
-        body {
-            font-family: var(--font-sans);
-            background: var(--bg-obsidian);
-            color: #e0e0e0;
-            min-height: 100vh;
-            overflow-x: hidden;
-            position: relative;
-        }
-
-        body::before {
-            content: " ";
-            display: block;
-            position: fixed;
-            top: 0; left: 0; bottom: 0; right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
-                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            z-index: 1000;
-            background-size: 100% 4px, 3px 100%;
-            pointer-events: none;
-            opacity: 0.15;
-        }
-
-        .container {
-            max-width: 1800px;
+        /* ── Safekeeping Dashboard ── */
+        body.unified-theme.page-safekeeping .container {
+            width: 100%;
+            max-width: 1920px;
             margin: 0 auto;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
+            padding: 20px 24px;
+            gap: 16px;
         }
 
         /* ── Top Bar ── */
         .top-bar {
             display: flex;
+            align-items: center;
             justify-content: space-between;
-            align-items: center;
-            padding: 12px 24px;
-            background: var(--bg-panel);
+            padding: 12px 20px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.02);
             border: 1px solid var(--border-low);
-            border-left: 4px solid var(--terminal-orange);
-            backdrop-filter: blur(8px);
         }
+        .top-bar .left { display: flex; align-items: center; gap: 16px; }
+        .top-bar .system-id { font-size: 11px; color: #555; letter-spacing: 0.06em; }
+        .top-bar .system-title { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.85); letter-spacing: -0.01em; }
+        .top-bar .system-title span { color: var(--accent); }
+        .top-bar .right { display: flex; align-items: center; gap: 20px; font-size: 11px; }
+        .status-module { display: flex; align-items: center; gap: 16px; }
+        .connection-indicator { display: flex; align-items: center; gap: 6px; }
+        .live-dot { width: 6px; height: 6px; border-radius: 50%; background: #555; }
+        #ws-status { color: #666; font-size: 10px; letter-spacing: 0.04em; }
+        #last-update-time { color: #444; font-family: var(--font-mono); font-size: 11px; }
 
-        .system-id {
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            letter-spacing: 2px;
-            color: var(--terminal-orange);
-            text-transform: uppercase;
-        }
-
-        .system-title {
-            font-weight: 800;
-            font-size: 1.4em;
-            letter-spacing: -0.5px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .system-title span { color: var(--terminal-orange); text-shadow: var(--glow-orange); }
-
-        .status-module {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-        }
-
-        .connection-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 4px 12px;
-            background: rgba(0, 255, 157, 0.1);
-            border: 1px solid var(--terminal-green);
-            color: var(--terminal-green);
-        }
-
-        .connection-indicator.disconnected {
-            background: rgba(255, 62, 62, 0.1);
-            border-color: var(--terminal-red);
-            color: var(--terminal-red);
-        }
-
-        .live-dot {
-            width: 6px; height: 6px;
-            background: var(--terminal-green);
-            border-radius: 50%;
-            box-shadow: 0 0 8px var(--terminal-green);
-            animation: flicker 1.5s infinite;
-        }
-
-        .connection-indicator.disconnected .live-dot {
-            background: var(--terminal-red);
-            box-shadow: 0 0 8px var(--terminal-red);
-            animation: none;
-        }
-
-        @keyframes flicker {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        /* ── Cycle Header Bar ── */
+        /* ── Cycle Status ── */
         .cycle-bar {
             display: flex;
+            align-items: center;
             justify-content: space-between;
-            align-items: center;
-            padding: 10px 24px;
-            background: var(--bg-panel);
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.02);
             border: 1px solid var(--border-low);
-            border-left: 4px solid var(--terminal-amber);
-            font-family: var(--font-mono);
-            font-size: 0.78em;
+            border-left: 3px solid var(--warn);
+            border-radius: 8px;
+            font-size: 12px;
         }
+        .cycle-info { display: flex; gap: 24px; }
+        .cycle-info .label { color: #555; }
+        .cycle-info .value { color: var(--accent); font-weight: 600; font-family: var(--font-mono); font-size: 12px; }
+        .cycle-status { border-radius: 6px; font-size: 11px; font-weight: 600; padding: 4px 14px; letter-spacing: 0.04em; }
+        .cycle-status.active { background: rgba(74,222,128,0.08); color: var(--good); border: 1px solid rgba(74,222,128,0.2); }
+        .cycle-status.idle { background: rgba(255,255,255,0.02); color: #666; border: 1px solid var(--border-low); }
+        .cycle-status.error { background: rgba(248,113,113,0.08); color: var(--bad); border: 1px solid rgba(248,113,113,0.2); }
+        .cycle-status.halted { background: rgba(245,158,11,0.08); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
+        .cycle-status.rebalancing { background: rgba(245,158,11,0.08); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
 
-        .cycle-bar .cycle-info {
-            display: flex;
-            align-items: center;
-            gap: 24px;
-        }
-
-        .cycle-bar .cycle-info .label {
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-size: 0.85em;
-        }
-
-        .cycle-bar .cycle-info .value {
-            color: var(--terminal-cyan);
-            font-weight: 600;
-        }
-
-        .cycle-status {
-            padding: 4px 14px;
-            border-radius: 4px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-size: 0.85em;
-        }
-
-        .cycle-status.active {
-            background: rgba(0, 255, 157, 0.12);
-            color: var(--terminal-green);
-            border: 1px solid rgba(0, 255, 157, 0.3);
-        }
-
-        .cycle-status.idle {
-            background: rgba(136, 136, 136, 0.12);
-            color: #888;
-            border: 1px solid rgba(136, 136, 136, 0.3);
-        }
-
-        .cycle-status.error {
-            background: rgba(255, 62, 62, 0.12);
-            color: var(--terminal-red);
-            border: 1px solid rgba(255, 62, 62, 0.3);
-            animation: error-pulse 2s infinite;
-        }
-
-        .cycle-status.halted {
-            background: rgba(255, 140, 0, 0.12);
-            color: var(--terminal-orange);
-            border: 1px solid rgba(255, 140, 0, 0.3);
-        }
-
-        .cycle-status.rebalancing {
-            background: rgba(255, 179, 0, 0.12);
-            color: var(--terminal-amber);
-            border: 1px solid rgba(255, 179, 0, 0.3);
-            animation: rebalance-pulse 1s infinite;
-        }
-
-        @keyframes error-pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-
-        @keyframes rebalance-pulse {
-            0%, 100% { border-color: rgba(255, 179, 0, 0.3); }
-            50% { border-color: rgba(255, 179, 0, 0.8); }
-        }
-
-        /* ── Stats Grid ── */
-        .stats-grid {
+        /* ── Hero Metrics Row ── */
+        .hero-metrics {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr;
             gap: 16px;
         }
-
-        .stat-card {
-            background: var(--bg-panel);
+        .hero-card {
+            background: rgba(255,255,255,0.02);
             border: 1px solid var(--border-low);
+            border-radius: 10px;
             padding: 20px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, var(--terminal-orange), transparent);
-            opacity: 0.6;
-        }
-
-        .stat-card.green::before { background: linear-gradient(90deg, var(--terminal-green), transparent); }
-        .stat-card.red::before { background: linear-gradient(90deg, var(--terminal-red), transparent); }
-        .stat-card.cyan::before { background: linear-gradient(90deg, var(--terminal-cyan), transparent); }
-        .stat-card.amber::before { background: linear-gradient(90deg, var(--terminal-amber), transparent); }
-
-        .stat-label {
-            font-family: var(--font-mono);
-            font-size: 0.65em;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 8px;
-        }
-
-        .stat-value {
-            font-family: var(--font-mono);
-            font-size: 1.6em;
-            font-weight: 700;
             display: flex;
-            align-items: baseline;
-            gap: 8px;
-        }
-
-        .stat-value.positive { color: var(--terminal-green); text-shadow: var(--glow-green); }
-        .stat-value.negative { color: var(--terminal-red); text-shadow: var(--glow-red); }
-        .stat-value.neutral { color: var(--terminal-cyan); text-shadow: var(--glow-cyan); }
-        .stat-value.amber { color: var(--terminal-amber); text-shadow: var(--glow-amber); }
-        .stat-value.orange { color: var(--terminal-orange); text-shadow: var(--glow-orange); }
-
-        .stat-sublabel {
-            font-size: 0.5em;
-            color: #666;
-            font-weight: 400;
-        }
-
-        /* ── Chain Status Cards ── */
-        .chain-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-        }
-
-        .chain-card {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
-            padding: 20px;
-            position: relative;
-            overflow: hidden;
-            transition: border-color 0.3s;
-        }
-
-        .chain-card.connected { border-color: rgba(0, 255, 157, 0.3); }
-        .chain-card.disconnected { border-color: rgba(255, 62, 62, 0.3); }
-
-        .chain-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 2px;
-            background: var(--terminal-green);
-            opacity: 0.4;
-        }
-
-        .chain-card.disconnected::before {
-            background: var(--terminal-red);
-        }
-
-        .chain-header {
-            display: flex;
+            flex-direction: column;
             justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
+            min-height: 100px;
         }
+        .hero-card.balance { border-color: rgba(59,130,246,0.15); }
+        .hero-card.balance .hero-value { font-size: 32px; color: #fff; }
+        .hero-card .hero-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+        .hero-card .hero-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; }
+        .hero-card .hero-sub { font-size: 11px; color: #555; margin-top: 6px; font-family: var(--font-mono); }
+        .hero-card .hero-sub .positive { color: var(--good); }
+        .hero-card .hero-sub .negative { color: var(--bad); }
 
-        .chain-name {
-            font-family: var(--font-mono);
-            font-size: 0.95em;
-            font-weight: 700;
-            color: #e0e0e0;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .chain-status-badge {
-            font-family: var(--font-mono);
-            font-size: 0.65em;
-            padding: 3px 10px;
-            border-radius: 3px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
-        }
-
-        .chain-status-badge.online {
-            background: rgba(0, 255, 157, 0.12);
-            color: var(--terminal-green);
-            border: 1px solid rgba(0, 255, 157, 0.3);
-        }
-
-        .chain-status-badge.offline {
-            background: rgba(255, 62, 62, 0.12);
-            color: var(--terminal-red);
-            border: 1px solid rgba(255, 62, 62, 0.3);
-        }
-
-        .chain-metrics {
+        /* ── Secondary Stats Row ── */
+        .stats-row {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(5, 1fr);
             gap: 12px;
         }
-
-        .chain-metric {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
+        .stat-card {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-low);
+            border-radius: 8px;
+            padding: 14px 16px;
         }
+        .stat-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+        .stat-value { font-size: 18px; font-weight: 700; font-family: var(--font-mono); }
+        .stat-value.positive { color: var(--good); }
+        .stat-value.negative { color: var(--bad); }
+        .stat-value.neutral { color: var(--accent); }
+        .stat-value.amber { color: var(--warn); }
+        .stat-sublabel { font-size: 12px; font-weight: 400; color: #555; margin-left: 2px; }
 
-        .chain-metric .cm-label {
-            font-family: var(--font-mono);
-            font-size: 0.6em;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .chain-metric .cm-value {
-            font-family: var(--font-mono);
-            font-size: 1em;
-            font-weight: 600;
-            color: var(--terminal-cyan);
-        }
-
-        .chain-metric .cm-value.green { color: var(--terminal-green); }
-        .chain-metric .cm-value.amber { color: var(--terminal-amber); }
-        .chain-metric .cm-value.red { color: var(--terminal-red); }
-
-        /* ── Content Grid ── */
+        /* ── Panels ── */
         .content-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
+            gap: 16px;
         }
+        .content-grid.dual { grid-template-columns: 1fr 1fr; }
+        .content-grid.triple { grid-template-columns: 1fr 1fr 1fr; }
+        .content-grid.sidebar { grid-template-columns: 2fr 1fr; }
+        .content-grid.sidebar-reverse { grid-template-columns: 1fr 2fr; }
 
-        .content-grid.triple {
-            grid-template-columns: 1fr 1fr 1fr;
-        }
-
-        @media (max-width: 1200px) {
-            .content-grid { grid-template-columns: 1fr; }
-            .content-grid.triple { grid-template-columns: 1fr; }
-            .chain-grid { grid-template-columns: 1fr; }
-        }
-
-        /* ── Panel ── */
         .panel {
-            background: var(--bg-panel);
+            background: rgba(255,255,255,0.02);
             border: 1px solid var(--border-low);
-            display: flex;
-            flex-direction: column;
+            border-radius: 10px;
             overflow: hidden;
         }
-
         .panel-header {
-            background: rgba(0, 242, 255, 0.05);
-            border-bottom: 1px solid var(--border-low);
-            padding: 12px 16px;
             display: flex;
+            align-items: center;
             justify-content: space-between;
-            align-items: center;
-        }
-
-        .panel-title {
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: #aaa;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .panel-title .count-badge {
-            font-size: 0.7em;
-            padding: 2px 8px;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 4px;
-            color: var(--terminal-cyan);
-        }
-
-        .panel-body {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
-        .panel-body.tight {
-            max-height: 400px;
-        }
-
-        /* ── Data Table ── */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: var(--font-mono);
-        }
-
-        .data-table th {
-            text-align: left;
-            padding: 10px 14px;
-            font-size: 0.62em;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            padding: 12px 16px;
             border-bottom: 1px solid var(--border-low);
-            background: rgba(0, 0, 0, 0.25);
+        }
+        .panel-title { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
+        .panel-title .count-badge { color: var(--accent); font-family: var(--font-mono); font-size: 12px; margin-left: 6px; }
+        .panel-body { padding: 0; overflow-y: auto; max-height: 380px; }
+        .panel-body.tight { padding: 0; }
+        .panel-full { grid-column: 1 / -1; }
+
+        /* ── Data Tables ── */
+        .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .data-table thead th {
+            padding: 8px 14px;
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #555;
+            background: rgba(0,0,0,0.3);
+            border-bottom: 1px solid var(--border-low);
+            font-family: var(--font-sans);
+            font-weight: 500;
             position: sticky;
             top: 0;
-            z-index: 10;
+            z-index: 1;
         }
-
+        .data-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.02); }
+        .data-table tbody tr:hover { background: rgba(255,255,255,0.015); }
         .data-table td {
-            padding: 10px 14px;
-            font-size: 0.82em;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            padding: 9px 14px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
         }
+        .data-table .empty-state {
+            padding: 40px 20px;
+            text-align: center;
+            color: #444;
+        }
+        .data-table .empty-state-icon { font-size: 20px; margin-bottom: 6px; opacity: 0.3; }
 
-        .data-table tr:hover { background: rgba(0, 242, 255, 0.03); }
+        .pnl-positive { color: var(--good) !important; font-weight: 600; }
+        .pnl-negative { color: var(--bad) !important; font-weight: 600; }
 
         /* ── Status Badges ── */
-        .status-badge {
-            display: inline-block;
-            padding: 2px 10px;
-            border-radius: 3px;
-            font-size: 0.75em;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
+        .status-badge { border-radius: 4px; font-size: 10px; padding: 2px 8px; font-weight: 600; letter-spacing: 0.03em; }
+        .status-badge.active { background: rgba(74,222,128,0.08); color: var(--good); border: 1px solid rgba(74,222,128,0.2); }
+        .status-badge.pending { background: rgba(245,158,11,0.08); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
+        .status-badge.closing { background: rgba(245,158,11,0.08); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
+        .status-badge.error { background: rgba(248,113,113,0.08); color: var(--bad); border: 1px solid rgba(248,113,113,0.2); }
+        .status-badge.idle { background: rgba(255,255,255,0.02); color: #666; border: 1px solid var(--border-low); }
 
-        .status-badge.active {
-            background: rgba(0, 255, 157, 0.12);
-            color: var(--terminal-green);
-            border: 1px solid rgba(0, 255, 157, 0.25);
-        }
+        /* ── Chain Cards ── */
+        .chain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .chain-card { background: rgba(255,255,255,0.02); border: 1px solid var(--border-low); border-radius: 8px; padding: 16px; }
+        .chain-card.connected { border-color: rgba(74,222,128,0.15); }
+        .chain-card.disconnected { border-color: rgba(248,113,113,0.15); }
+        .chain-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .chain-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
+        .chain-status-badge { border-radius: 4px; font-size: 10px; padding: 2px 10px; font-weight: 600; letter-spacing: 0.04em; }
+        .chain-status-badge.online { background: rgba(74,222,128,0.08); color: var(--good); border: 1px solid rgba(74,222,128,0.2); }
+        .chain-status-badge.offline { background: rgba(248,113,113,0.08); color: var(--bad); border: 1px solid rgba(248,113,113,0.2); }
+        .chain-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .chain-metric { display: flex; flex-direction: column; gap: 2px; }
+        .chain-metric .cm-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.04em; }
+        .chain-metric .cm-value { font-size: 13px; font-family: var(--font-mono); font-weight: 600; color: rgba(255,255,255,0.7); }
+        .chain-metric .cm-value.green { color: var(--good); }
+        .chain-metric .cm-value.amber { color: var(--warn); }
+        .chain-metric .cm-value.red { color: var(--bad); }
 
-        .status-badge.pending {
-            background: rgba(255, 179, 0, 0.12);
-            color: var(--terminal-amber);
-            border: 1px solid rgba(255, 179, 0, 0.25);
-        }
-
-        .status-badge.closing {
-            background: rgba(255, 140, 0, 0.12);
-            color: var(--terminal-orange);
-            border: 1px solid rgba(255, 140, 0, 0.25);
-        }
-
-        .status-badge.error {
-            background: rgba(255, 62, 62, 0.12);
-            color: var(--terminal-red);
-            border: 1px solid rgba(255, 62, 62, 0.25);
-        }
-
-        .status-badge.idle {
-            background: rgba(136, 136, 136, 0.1);
-            color: #888;
-            border: 1px solid rgba(136, 136, 136, 0.2);
-        }
-
-        /* ── AI Analysis Panel ── */
-        .ai-section {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            padding: 16px;
-        }
-
-        .ai-header-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .risk-indicator {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-family: var(--font-mono);
-            font-size: 0.85em;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .risk-low {
-            background: rgba(0, 255, 157, 0.1);
-            color: var(--terminal-green);
-            border: 1px solid rgba(0, 255, 157, 0.3);
-        }
-
-        .risk-medium {
-            background: rgba(255, 179, 0, 0.1);
-            color: var(--terminal-amber);
-            border: 1px solid rgba(255, 179, 0, 0.3);
-        }
-
-        .risk-high {
-            background: rgba(255, 62, 62, 0.1);
-            color: var(--terminal-red);
-            border: 1px solid rgba(255, 62, 62, 0.3);
-        }
-
-        .risk-extreme {
-            background: rgba(255, 62, 62, 0.15);
-            color: var(--terminal-red);
-            border: 1px solid rgba(255, 62, 62, 0.5);
-            animation: error-pulse 1.5s infinite;
-        }
-
-        .regime-badge {
-            font-family: var(--font-mono);
-            font-size: 0.75em;
-            padding: 4px 12px;
-            background: rgba(0, 242, 255, 0.08);
-            border: 1px solid rgba(0, 242, 255, 0.2);
-            color: var(--terminal-cyan);
-            border-radius: 4px;
-        }
-
-        .ai-subsection {
-            border-top: 1px solid var(--border-low);
-            padding-top: 12px;
-        }
-
-        .ai-subsection-title {
-            font-family: var(--font-mono);
-            font-size: 0.68em;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            margin-bottom: 8px;
-        }
-
-        .ai-list {
-            list-style: none;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .ai-list li {
-            font-family: var(--font-mono);
-            font-size: 0.78em;
-            color: #ccc;
-            padding: 6px 10px;
-            background: rgba(0, 0, 0, 0.2);
-            border-left: 2px solid var(--border-low);
-            border-radius: 0 4px 4px 0;
-        }
-
-        .ai-list li.recommendation {
-            border-left-color: var(--terminal-cyan);
-        }
-
-        .ai-list li.anomaly {
-            border-left-color: var(--terminal-amber);
-            color: var(--terminal-amber);
-        }
-
-        .ai-list li.anomaly.critical {
-            border-left-color: var(--terminal-red);
-            color: var(--terminal-red);
-        }
+        /* ── AI Analysis ── */
+        .ai-section { padding: 16px; }
+        .ai-header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+        .risk-indicator { border-radius: 6px; font-size: 11px; font-weight: 600; padding: 4px 12px; letter-spacing: 0.03em; }
+        .risk-low { background: rgba(74,222,128,0.08); color: var(--good); border: 1px solid rgba(74,222,128,0.2); }
+        .risk-medium { background: rgba(245,158,11,0.08); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
+        .risk-high { background: rgba(248,113,113,0.08); color: var(--bad); border: 1px solid rgba(248,113,113,0.2); }
+        .risk-extreme { background: rgba(248,113,113,0.12); color: var(--bad); border: 1px solid rgba(248,113,113,0.3); }
+        .regime-badge { background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); color: var(--accent); border-radius: 4px; font-size: 10px; padding: 3px 10px; font-weight: 600; letter-spacing: 0.03em; }
+        .ai-subsection { margin-bottom: 14px; }
+        .ai-subsection-title { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+        .ai-list { list-style: none; padding: 0; margin: 0; }
+        .ai-list li { padding: 6px 10px; background: rgba(0,0,0,0.3); border-left: 2px solid var(--border-low); border-radius: 0 4px 4px 0; color: rgba(255,255,255,0.5); font-size: 12px; margin-bottom: 4px; }
+        .ai-list li.recommendation { border-left-color: var(--accent); }
+        .ai-list li.anomaly { border-left-color: var(--warn); color: var(--warn); }
+        .ai-list li.anomaly.critical { border-left-color: var(--bad); color: var(--bad); }
 
         /* ── Safety Checks ── */
-        .safety-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            padding: 16px;
-        }
+        .safety-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0; }
+        .safety-check { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 12px; }
+        .safety-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+        .safety-icon.pass { background: rgba(74,222,128,0.08); color: var(--good); border: 1px solid rgba(74,222,128,0.15); }
+        .safety-icon.fail { background: rgba(248,113,113,0.08); color: var(--bad); border: 1px solid rgba(248,113,113,0.15); }
+        .safety-icon.warn { background: rgba(245,158,11,0.08); color: var(--warn); border: 1px solid rgba(245,158,11,0.15); }
+        .safety-name { flex: 1; color: rgba(255,255,255,0.6); font-size: 12px; }
+        .safety-result { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; font-family: var(--font-mono); }
+        .safety-result.pass { color: var(--good); }
+        .safety-result.fail { color: var(--bad); }
+        .safety-result.warn { color: var(--warn); }
 
-        .safety-check {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 12px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            font-family: var(--font-mono);
-            font-size: 0.72em;
-        }
+        /* ── Confidence Bars ── */
+        .confidence-bar { width: 40px; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+        .confidence-fill { height: 100%; border-radius: 2px; }
+        .confidence-fill.high { background: var(--good); }
+        .confidence-fill.medium { background: var(--warn); }
+        .confidence-fill.low { background: var(--bad); }
 
-        .safety-icon {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.7em;
-            font-weight: 700;
-            flex-shrink: 0;
-        }
+        /* ── Rebalance History ── */
+        .rebalance-row { display: grid; grid-template-columns: 160px 1fr 80px 80px; align-items: center; padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,0.02); font-size: 12px; font-family: var(--font-mono); }
+        .rebalance-row .timestamp { color: #555; }
+        .rebalance-row .action { color: rgba(255,255,255,0.6); }
+        .rebalance-row .result { font-weight: 600; font-size: 10px; letter-spacing: 0.04em; }
+        .rebalance-row .result.success { color: var(--good); }
+        .rebalance-row .result.failed { color: var(--bad); }
+        .rebalance-row .result.pending { color: var(--warn); }
+        .rebalance-row .gas { color: #555; text-align: right; }
+        .rebalance-header { color: #555 !important; background: rgba(0,0,0,0.4); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-sans); }
 
-        .safety-icon.pass {
-            background: rgba(0, 255, 157, 0.15);
-            color: var(--terminal-green);
-            border: 1px solid rgba(0, 255, 157, 0.3);
-        }
-
-        .safety-icon.fail {
-            background: rgba(255, 62, 62, 0.15);
-            color: var(--terminal-red);
-            border: 1px solid rgba(255, 62, 62, 0.3);
-        }
-
-        .safety-icon.warn {
-            background: rgba(255, 179, 0, 0.15);
-            color: var(--terminal-amber);
-            border: 1px solid rgba(255, 179, 0, 0.3);
-        }
-
-        .safety-name {
-            color: #999;
-            flex: 1;
-        }
-
-        .safety-result {
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .safety-result.pass { color: var(--terminal-green); }
-        .safety-result.fail { color: var(--terminal-red); }
-        .safety-result.warn { color: var(--terminal-amber); }
+        /* ── Event Log ── */
+        .event-log { max-height: 200px; overflow-y: auto; padding: 8px 0; }
+        .event-line { display: flex; align-items: center; gap: 10px; padding: 4px 16px; font-size: 11px; font-family: var(--font-mono); border-bottom: 1px solid rgba(255,255,255,0.01); }
+        .event-time { color: #444; min-width: 90px; }
+        .event-type { border-radius: 3px; padding: 1px 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; min-width: 50px; text-align: center; }
+        .event-type.cycle { background: rgba(59,130,246,0.08); color: var(--accent); }
+        .event-type.exec { background: rgba(74,222,128,0.08); color: var(--good); }
+        .event-type.pos { background: rgba(245,158,11,0.08); color: var(--warn); }
+        .event-type.alert { background: rgba(248,113,113,0.08); color: var(--bad); }
+        .event-type.halt { background: rgba(248,113,113,0.12); color: var(--bad); }
+        .event-type.system { background: rgba(255,255,255,0.04); color: #888; }
+        .event-msg { color: rgba(255,255,255,0.4); }
 
         /* ── Controls ── */
         .controls-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 16px;
-            padding: 16px 24px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border-low);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 20px; background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-low); border-radius: 8px; font-size: 12px;
         }
-
-        .controls-left {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-family: var(--font-mono);
-            font-size: 0.78em;
-            color: #666;
-        }
-
-        .controls-right {
-            display: flex;
-            gap: 12px;
-        }
-
+        .controls-left { display: flex; gap: 16px; color: #555; font-family: var(--font-mono); font-size: 11px; }
+        .controls-left span .val { color: var(--accent); }
+        .controls-right { display: flex; gap: 10px; }
         .btn {
-            font-family: var(--font-mono);
-            font-size: 0.78em;
-            font-weight: 600;
-            padding: 10px 24px;
-            border: 1px solid var(--border-low);
-            background: transparent;
-            color: #ccc;
-            cursor: pointer;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.2s;
-            border-radius: 4px;
+            font-family: var(--font-sans); border-radius: 6px; font-size: 12px; font-weight: 500;
+            padding: 7px 16px; cursor: pointer; transition: all 150ms;
+            border: 1px solid var(--border-low); background: transparent; color: rgba(255,255,255,0.6);
         }
+        .btn:hover:not(:disabled) { background: rgba(255,255,255,0.04); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-rebalance { border-color: var(--warn); color: var(--warn); }
+        .btn-rebalance:hover:not(:disabled) { background: rgba(245,158,11,0.08); }
+        .btn-halt { border-color: var(--bad); color: var(--bad); }
+        .btn-halt:hover:not(:disabled) { background: rgba(248,113,113,0.08); }
+        .btn-resume { border-color: var(--good); color: var(--good); }
+        .btn-resume:hover:not(:disabled) { background: rgba(74,222,128,0.08); }
 
-        .btn:hover {
-            background: rgba(0, 242, 255, 0.05);
-            border-color: var(--terminal-cyan);
-            color: var(--terminal-cyan);
-        }
+        /* ── Toast ── */
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+        .toast { border-radius: 6px; padding: 10px 16px; font-size: 12px; background: rgba(0,0,0,0.8); border: 1px solid var(--border-low); backdrop-filter: blur(12px); animation: toastIn 0.3s ease; color: rgba(255,255,255,0.7); }
+        .toast.success { border-color: rgba(74,222,128,0.3); color: var(--good); }
+        .toast.error { border-color: rgba(248,113,113,0.3); color: var(--bad); }
+        .toast.warning { border-color: rgba(245,158,11,0.3); color: var(--warn); }
+        .toast.halt { border-color: rgba(245,158,11,0.4); color: var(--warn); }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateX(20px); } }
 
-        .btn:disabled {
-            opacity: 0.35;
-            cursor: not-allowed;
-        }
-
-        .btn-rebalance {
-            border-color: var(--terminal-amber);
-            color: var(--terminal-amber);
-        }
-
-        .btn-rebalance:hover:not(:disabled) {
-            background: rgba(255, 179, 0, 0.1);
-            box-shadow: var(--glow-amber);
-        }
-
-        .btn-halt {
-            border-color: var(--terminal-red);
-            color: var(--terminal-red);
-        }
-
-        .btn-halt:hover:not(:disabled) {
-            background: rgba(255, 62, 62, 0.15);
-            box-shadow: var(--glow-red);
-        }
-
-        .btn-halt:active:not(:disabled) {
-            background: rgba(255, 62, 62, 0.3);
-        }
-
-        .btn-resume {
-            border-color: var(--terminal-green);
-            color: var(--terminal-green);
-        }
-
-        .btn-resume:hover:not(:disabled) {
-            background: rgba(0, 255, 157, 0.1);
-            box-shadow: var(--glow-green);
-        }
-
-        /* ── Rebalance History ── */
-        .rebalance-row {
-            display: grid;
-            grid-template-columns: 160px 1fr 100px 80px;
-            gap: 12px;
-            padding: 10px 16px;
-            font-family: var(--font-mono);
-            font-size: 0.78em;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-            align-items: center;
-        }
-
-        .rebalance-row:hover { background: rgba(0, 242, 255, 0.03); }
-
-        .rebalance-row .timestamp { color: #666; font-size: 0.9em; }
-        .rebalance-row .action { color: #ccc; }
-        .rebalance-row .result { font-weight: 600; }
-        .rebalance-row .result.success { color: var(--terminal-green); }
-        .rebalance-row .result.failed { color: var(--terminal-red); }
-        .rebalance-row .result.pending { color: var(--terminal-amber); }
-        .rebalance-row .gas { color: #888; }
-
-        .rebalance-header {
-            font-size: 0.68em !important;
-            color: #555 !important;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
-            border-bottom: 1px solid var(--border-low) !important;
-            background: rgba(0, 0, 0, 0.2);
-        }
-
-        /* ── Event Log ── */
-        .event-log {
-            max-height: 250px;
-            overflow-y: auto;
-            padding: 8px;
-            font-family: var(--font-mono);
-            font-size: 0.72em;
-        }
-
-        .event-line {
-            padding: 4px 8px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-            display: flex;
-            gap: 12px;
-            align-items: flex-start;
-        }
-
-        .event-line:hover { background: rgba(0, 242, 255, 0.02); }
-
-        .event-time { color: #555; white-space: nowrap; flex-shrink: 0; }
-        .event-type {
-            padding: 1px 6px;
-            border-radius: 2px;
-            font-size: 0.9em;
-            font-weight: 600;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-
-        .event-type.cycle { background: rgba(0, 242, 255, 0.1); color: var(--terminal-cyan); }
-        .event-type.exec { background: rgba(0, 255, 157, 0.1); color: var(--terminal-green); }
-        .event-type.pos { background: rgba(255, 179, 0, 0.1); color: var(--terminal-amber); }
-        .event-type.alert { background: rgba(255, 62, 62, 0.1); color: var(--terminal-red); }
-        .event-type.halt { background: rgba(255, 140, 0, 0.15); color: var(--terminal-orange); }
-
-        .event-msg { color: #999; }
-
-        /* ── Confidence Bar ── */
-        .confidence-bar {
-            width: 50px;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 3px;
-            overflow: hidden;
-            display: inline-block;
-            vertical-align: middle;
-            margin-right: 6px;
-        }
-
-        .confidence-fill {
-            height: 100%;
-            border-radius: 3px;
-            transition: width 0.4s ease;
-        }
-
-        .confidence-fill.high { background: var(--terminal-green); }
-        .confidence-fill.medium { background: var(--terminal-amber); }
-        .confidence-fill.low { background: var(--terminal-red); }
-
-        /* ── Empty / Loading ── */
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: #555;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-        }
-
-        .empty-state-icon { font-size: 2em; margin-bottom: 12px; opacity: 0.4; }
-
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 40px;
-            gap: 12px;
-            color: var(--terminal-cyan);
-            font-family: var(--font-mono);
-            font-size: 0.85em;
-        }
-
-        .loading-spinner {
-            width: 18px; height: 18px;
-            border: 2px solid var(--border-low);
-            border-top-color: var(--terminal-cyan);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* ── Toast Notifications ── */
-        .toast-container {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 10001;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .toast {
-            background: var(--bg-panel);
-            border: 1px solid var(--terminal-cyan);
-            color: var(--terminal-cyan);
-            padding: 14px 22px;
-            font-family: var(--font-mono);
-            font-size: 0.82em;
-            border-radius: 4px;
-            animation: toastIn 0.3s ease;
-            backdrop-filter: blur(8px);
-        }
-
-        .toast.success { border-color: var(--terminal-green); color: var(--terminal-green); }
-        .toast.error { border-color: var(--terminal-red); color: var(--terminal-red); }
-        .toast.warning { border-color: var(--terminal-amber); color: var(--terminal-amber); }
-        .toast.halt { border-color: var(--terminal-orange); color: var(--terminal-orange); }
-
-        @keyframes toastIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-
-        @keyframes toastOut {
-            from { transform: translateX(0); opacity: 1; }
-            to { transform: translateX(100%); opacity: 0; }
-        }
-
-        /* ── Scrollbar ── */
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border-low); }
-        ::-webkit-scrollbar-thumb:hover { background: var(--terminal-cyan); }
-
-        /* ── Confirm Modal ── */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.8);
-            z-index: 10000;
-            align-items: center;
-            justify-content: center;
-        }
-
+        /* ── Modal ── */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
         .modal-overlay.active { display: flex; }
-
-        .modal {
-            background: var(--bg-panel);
-            border: 1px solid var(--border-med);
-            max-width: 480px;
-            width: 90%;
-            padding: 28px;
-        }
-
-        .modal-title {
-            font-family: var(--font-mono);
-            font-size: 0.9em;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: var(--terminal-amber);
-            margin-bottom: 12px;
-        }
-
-        .modal-title.danger { color: var(--terminal-red); }
-
-        .modal-body {
-            color: #999;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            margin-bottom: 24px;
-            line-height: 1.6;
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-        }
-
-        .modal-btn {
-            padding: 10px 20px;
-            border: 1px solid var(--border-low);
-            background: transparent;
-            color: #888;
-            font-family: var(--font-mono);
-            font-size: 0.8em;
-            cursor: pointer;
-            transition: all 0.2s;
-            border-radius: 4px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .modal-btn:hover { background: rgba(0, 242, 255, 0.05); }
-        .modal-btn.danger { border-color: var(--terminal-red); color: var(--terminal-red); }
-        .modal-btn.danger:hover { background: rgba(255, 62, 62, 0.15); }
-        .modal-btn.confirm { border-color: var(--terminal-amber); color: var(--terminal-amber); }
-        .modal-btn.confirm:hover { background: rgba(255, 179, 0, 0.1); }
+        .modal { background: rgba(20,20,20,0.98); border: 1px solid var(--border-med); border-radius: 12px; padding: 24px; max-width: 420px; width: 90%; }
+        .modal-title { font-size: 16px; font-weight: 600; color: var(--warn); margin-bottom: 12px; }
+        .modal-title.danger { color: var(--bad); }
+        .modal-body { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 20px; line-height: 1.6; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .modal-btn { padding: 8px 20px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid var(--border-low); background: transparent; color: rgba(255,255,255,0.6); font-family: var(--font-sans); transition: all 150ms; }
+        .modal-btn:hover { background: rgba(255,255,255,0.04); }
+        .modal-btn.danger { border-color: var(--bad); color: var(--bad); }
+        .modal-btn.danger:hover { background: rgba(248,113,113,0.08); }
+        .modal-btn.confirm { border-color: var(--warn); color: var(--warn); }
+        .modal-btn.confirm:hover { background: rgba(245,158,11,0.08); }
 
         /* ── Responsive ── */
+        @media (max-width: 1400px) {
+            .hero-metrics { grid-template-columns: 1fr 1fr 1fr; }
+            .hero-card.balance { grid-column: 1 / -1; }
+            .stats-row { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 1100px) {
+            .content-grid.dual, .content-grid.triple, .content-grid.sidebar, .content-grid.sidebar-reverse { grid-template-columns: 1fr; }
+            .chain-grid { grid-template-columns: 1fr; }
+            .hero-metrics { grid-template-columns: 1fr 1fr; }
+        }
         @media (max-width: 768px) {
             .top-bar { flex-direction: column; gap: 8px; text-align: center; }
-            .stats-grid { grid-template-columns: 1fr 1fr; }
+            .top-bar .left, .top-bar .right { justify-content: center; }
+            .cycle-bar { flex-direction: column; gap: 8px; align-items: flex-start; }
+            .hero-metrics { grid-template-columns: 1fr; }
+            .stats-row { grid-template-columns: 1fr 1fr; }
             .safety-grid { grid-template-columns: 1fr; }
-            .controls-bar { flex-direction: column; }
-            .rebalance-row { grid-template-columns: 1fr; gap: 4px; }
+            .controls-bar { flex-direction: column; gap: 10px; }
+            .rebalance-row { grid-template-columns: 1fr; gap: 2px; }
         }
-
-        /* Full width panel */
-        .panel-full { grid-column: 1 / -1; }
     </style>
 </head>
-<body>
+<body class="unified-theme page-safekeeping">
     <div id="toast-container" class="toast-container"></div>
 
-    <!-- Confirm Modal -->
+    <!-- Modal -->
     <div class="modal-overlay" id="confirm-modal">
         <div class="modal">
             <div class="modal-title" id="modal-title">CONFIRM</div>
@@ -1036,55 +342,66 @@
     </div>
 
     <div class="container">
-        <!-- ═══ Top Bar ═══ -->
+        <!-- Top Bar -->
         <header class="top-bar">
-            <div class="system-id">[ SAFEKEEPING_MODULE ]</div>
-            <div class="system-title">
-                <span>SAFEKEEPING</span>_FUND
+            <div class="left">
+                <div class="system-id">SAFEKEEPING</div>
+                <div class="system-title"><span>Fund</span> Dashboard</div>
             </div>
-            <div class="status-module">
-                <div class="connection-indicator" id="ws-indicator">
-                    <span class="live-dot" id="ws-dot"></span>
-                    <span id="ws-status">CONNECTING</span>
+            <div class="right">
+                <div class="status-module">
+                    <div class="connection-indicator" id="ws-indicator">
+                        <span class="live-dot" id="ws-dot"></span>
+                        <span id="ws-status">CONNECTING</span>
+                    </div>
+                    <div id="last-update-time">--:--:--</div>
                 </div>
-                <div id="last-update-time" style="color:#666;">--:--:--</div>
             </div>
         </header>
 
-        <!-- ═══ Cycle Status Bar ═══ -->
+        <!-- Cycle Bar -->
         <div class="cycle-bar">
             <div class="cycle-info">
-                <div>
-                    <span class="label">Cycle </span>
-                    <span class="value" id="cycle-number">#---</span>
-                </div>
-                <div>
-                    <span class="label">Started </span>
-                    <span class="value" id="cycle-start">--</span>
-                </div>
-                <div>
-                    <span class="label">Duration </span>
-                    <span class="value" id="cycle-duration">--:--</span>
-                </div>
-                <div>
-                    <span class="label">Next Scan </span>
-                    <span class="value" id="next-scan">--:--</span>
-                </div>
+                <div><span class="label">Cycle </span><span class="value" id="cycle-number">#---</span></div>
+                <div><span class="label">Started </span><span class="value" id="cycle-start">--</span></div>
+                <div><span class="label">Duration </span><span class="value" id="cycle-duration">--:--</span></div>
+                <div><span class="label">Next Scan </span><span class="value" id="next-scan">--:--</span></div>
             </div>
             <div class="cycle-status idle" id="cycle-status">INITIALIZING</div>
         </div>
 
-        <!-- ═══ Key Metrics ═══ -->
-        <div class="stats-grid">
-            <div class="stat-card green">
-                <div class="stat-label">Total Value Locked</div>
-                <div class="stat-value positive" id="metric-tvl">--<span class="stat-sublabel">USD</span></div>
+        <!-- Hero Metrics -->
+        <div class="hero-metrics">
+            <div class="hero-card balance">
+                <div class="hero-label">Fund Balance</div>
+                <div class="hero-value" id="metric-tvl">--<span class="stat-sublabel"> USD</span></div>
+                <div class="hero-sub" id="tvl-change">--</div>
             </div>
-            <div class="stat-card amber">
-                <div class="stat-label">Weighted APR</div>
-                <div class="stat-value amber" id="metric-apr">--<span class="stat-sublabel">%</span></div>
+            <div class="hero-card">
+                <div class="hero-label">Daily P&L</div>
+                <div class="hero-value" id="metric-daily-pnl" style="color:var(--good);">--<span class="stat-sublabel"> USD</span></div>
+                <div class="hero-sub" id="daily-pnl-pct">--</div>
             </div>
-            <div class="stat-card cyan">
+            <div class="hero-card">
+                <div class="hero-label">Win Rate</div>
+                <div class="hero-value" id="metric-success" style="color:var(--good);">--<span class="stat-sublabel">%</span></div>
+                <div class="hero-sub" id="win-loss-record">--</div>
+            </div>
+            <div class="hero-card">
+                <div class="hero-label">Max Drawdown</div>
+                <div class="hero-value" id="metric-drawdown" style="color:var(--bad);">--<span class="stat-sublabel">%</span></div>
+                <div class="hero-sub">from peak</div>
+            </div>
+            <div class="hero-card">
+                <div class="hero-label">Weighted APR</div>
+                <div class="hero-value" style="color:var(--warn);" id="metric-apr">--<span class="stat-sublabel">%</span></div>
+                <div class="hero-sub">across all chains</div>
+            </div>
+        </div>
+
+        <!-- Secondary Stats -->
+        <div class="stats-row">
+            <div class="stat-card">
                 <div class="stat-label">Active Positions</div>
                 <div class="stat-value neutral" id="metric-positions">--</div>
             </div>
@@ -1092,17 +409,21 @@
                 <div class="stat-label">Total Rebalances</div>
                 <div class="stat-value neutral" id="metric-rebalances">--</div>
             </div>
-            <div class="stat-card green">
-                <div class="stat-label">Success Rate</div>
-                <div class="stat-value positive" id="metric-success">--<span class="stat-sublabel">%</span></div>
-            </div>
-            <div class="stat-card red">
+            <div class="stat-card">
                 <div class="stat-label">Gas Spent</div>
-                <div class="stat-value" id="metric-gas" style="color: var(--terminal-orange);">--<span class="stat-sublabel">USD</span></div>
+                <div class="stat-value amber" id="metric-gas">--<span class="stat-sublabel">USD</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Avg Trade P&L</div>
+                <div class="stat-value" id="metric-avg-pnl" style="color:var(--accent);">--<span class="stat-sublabel">USD</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Sharpe Ratio</div>
+                <div class="stat-value" id="metric-sharpe" style="color:var(--accent);">--</div>
             </div>
         </div>
 
-        <!-- ═══ Chain Status Cards ═══ -->
+        <!-- Chain Status -->
         <div class="chain-grid" id="chain-cards">
             <div class="chain-card disconnected" id="chain-ethereum">
                 <div class="chain-header">
@@ -1110,22 +431,10 @@
                     <div class="chain-status-badge offline" id="eth-badge">OFFLINE</div>
                 </div>
                 <div class="chain-metrics">
-                    <div class="chain-metric">
-                        <span class="cm-label">Positions</span>
-                        <span class="cm-value" id="eth-positions">--</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">APR</span>
-                        <span class="cm-value green" id="eth-apr">--%</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">Value</span>
-                        <span class="cm-value" id="eth-value">$--</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">Gas Price</span>
-                        <span class="cm-value amber" id="eth-gas">-- gwei</span>
-                    </div>
+                    <div class="chain-metric"><span class="cm-label">Positions</span><span class="cm-value" id="eth-positions">--</span></div>
+                    <div class="chain-metric"><span class="cm-label">APR</span><span class="cm-value green" id="eth-apr">--%</span></div>
+                    <div class="chain-metric"><span class="cm-label">Value</span><span class="cm-value" id="eth-value">$--</span></div>
+                    <div class="chain-metric"><span class="cm-label">Gas Price</span><span class="cm-value amber" id="eth-gas">-- gwei</span></div>
                 </div>
             </div>
             <div class="chain-card disconnected" id="chain-bsc">
@@ -1134,22 +443,10 @@
                     <div class="chain-status-badge offline" id="bsc-badge">OFFLINE</div>
                 </div>
                 <div class="chain-metrics">
-                    <div class="chain-metric">
-                        <span class="cm-label">Positions</span>
-                        <span class="cm-value" id="bsc-positions">--</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">APR</span>
-                        <span class="cm-value green" id="bsc-apr">--%</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">Value</span>
-                        <span class="cm-value" id="bsc-value">$--</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">Gas Price</span>
-                        <span class="cm-value amber" id="bsc-gas">-- gwei</span>
-                    </div>
+                    <div class="chain-metric"><span class="cm-label">Positions</span><span class="cm-value" id="bsc-positions">--</span></div>
+                    <div class="chain-metric"><span class="cm-label">APR</span><span class="cm-value green" id="bsc-apr">--%</span></div>
+                    <div class="chain-metric"><span class="cm-label">Value</span><span class="cm-value" id="bsc-value">$--</span></div>
+                    <div class="chain-metric"><span class="cm-label">Gas Price</span><span class="cm-value amber" id="bsc-gas">-- gwei</span></div>
                 </div>
             </div>
             <div class="chain-card disconnected" id="chain-solana">
@@ -1158,36 +455,20 @@
                     <div class="chain-status-badge offline" id="sol-badge">OFFLINE</div>
                 </div>
                 <div class="chain-metrics">
-                    <div class="chain-metric">
-                        <span class="cm-label">Positions</span>
-                        <span class="cm-value" id="sol-positions">--</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">APR</span>
-                        <span class="cm-value green" id="sol-apr">--%</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">Value</span>
-                        <span class="cm-value" id="sol-value">$--</span>
-                    </div>
-                    <div class="chain-metric">
-                        <span class="cm-label">Priority Fee</span>
-                        <span class="cm-value amber" id="sol-fee">--</span>
-                    </div>
+                    <div class="chain-metric"><span class="cm-label">Positions</span><span class="cm-value" id="sol-positions">--</span></div>
+                    <div class="chain-metric"><span class="cm-label">APR</span><span class="cm-value green" id="sol-apr">--%</span></div>
+                    <div class="chain-metric"><span class="cm-label">Value</span><span class="cm-value" id="sol-value">$--</span></div>
+                    <div class="chain-metric"><span class="cm-label">Priority Fee</span><span class="cm-value amber" id="sol-fee">--</span></div>
                 </div>
             </div>
         </div>
 
-        <!-- ═══ Main Content: Positions + Opportunities ═══ -->
-        <div class="content-grid">
-            <!-- Current Positions -->
+        <!-- Positions + Opportunities -->
+        <div class="content-grid dual">
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">
-                        ◈ Active Positions
-                        <span class="count-badge" id="positions-count">0</span>
-                    </div>
-                    <span style="font-family:var(--font-mono);font-size:0.7em;color:#555;" id="positions-total-value">$0</span>
+                    <div class="panel-title">Active Positions <span class="count-badge" id="positions-count">0</span></div>
+                    <span style="font-family:var(--font-mono);font-size:11px;color:#555;" id="positions-total-value">$0</span>
                 </div>
                 <div class="panel-body">
                     <table class="data-table">
@@ -1198,11 +479,12 @@
                                 <th>DEX</th>
                                 <th>APR</th>
                                 <th>Value</th>
+                                <th>P&L</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody id="positions-tbody">
-                            <tr><td colspan="6" class="empty-state">
+                            <tr><td colspan="7" class="empty-state">
                                 <div class="empty-state-icon">◈</div>
                                 <div>LOADING POSITIONS...</div>
                             </td></tr>
@@ -1210,15 +492,10 @@
                     </table>
                 </div>
             </div>
-
-            <!-- Top Opportunities -->
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">
-                        ◇ Top Opportunities
-                        <span class="count-badge" id="opps-count">0</span>
-                    </div>
-                    <span style="font-family:var(--font-mono);font-size:0.7em;color:#555;">BEST YIELD</span>
+                    <div class="panel-title">Top Opportunities <span class="count-badge" id="opps-count">0</span></div>
+                    <span style="font-family:var(--font-mono);font-size:11px;color:#555;">BEST YIELD</span>
                 </div>
                 <div class="panel-body">
                     <table class="data-table">
@@ -1243,30 +520,25 @@
             </div>
         </div>
 
-        <!-- ═══ AI Analysis + Safety Checks ═══ -->
-        <div class="content-grid">
-            <!-- AI Analysis -->
+        <!-- AI Analysis + Safety -->
+        <div class="content-grid sidebar">
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">◆ AI Analysis</div>
-                    <span style="font-family:var(--font-mono);font-size:0.7em;color:#555;" id="ai-timestamp">--</span>
+                    <div class="panel-title">AI Analysis</div>
+                    <span style="font-family:var(--font-mono);font-size:11px;color:#555;" id="ai-timestamp">--</span>
                 </div>
-                <div class="panel-body tight">
+                <div class="panel-body" style="max-height:none;">
                     <div class="ai-section">
                         <div class="ai-header-row">
-                            <div class="risk-indicator risk-low" id="risk-level">
-                                ◉ LOW RISK
-                            </div>
+                            <div class="risk-indicator risk-low" id="risk-level">◉ LOW RISK</div>
                             <div class="regime-badge" id="market-regime">RANGE_BOUND</div>
                         </div>
-
                         <div class="ai-subsection">
                             <div class="ai-subsection-title">Recommendations</div>
                             <ul class="ai-list" id="ai-recommendations">
                                 <li class="recommendation">Awaiting AI analysis...</li>
                             </ul>
                         </div>
-
                         <div class="ai-subsection">
                             <div class="ai-subsection-title">Anomalies Detected</div>
                             <ul class="ai-list" id="ai-anomalies">
@@ -1276,36 +548,32 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Safety Checks -->
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">◉ Safety Checks</div>
-                    <span class="count-badge" id="safety-pass-count" style="color:var(--terminal-green);">--/9</span>
+                    <div class="panel-title">Safety Checks</div>
+                    <span class="count-badge" id="safety-pass-count" style="color:var(--good);">--/9</span>
                 </div>
                 <div class="panel-body" style="max-height:none;">
-                    <div class="safety-grid" id="safety-grid">
-                        <!-- Populated by JS -->
-                    </div>
+                    <div class="safety-grid" id="safety-grid"></div>
                 </div>
             </div>
         </div>
 
-        <!-- ═══ Rebalance History ═══ -->
+        <!-- Rebalance History -->
         <div class="panel">
             <div class="panel-header">
-                <div class="panel-title">⟳ Rebalance History</div>
-                <span style="font-family:var(--font-mono);font-size:0.7em;color:#555;">LAST 10</span>
+                <div class="panel-title">Rebalance History</div>
+                <span style="font-family:var(--font-mono);font-size:11px;color:#555;">LAST 10</span>
             </div>
             <div class="panel-body tight">
                 <div class="rebalance-row rebalance-header">
                     <span>Timestamp</span>
                     <span>Action</span>
                     <span>Result</span>
-                    <span>Gas Cost</span>
+                    <span style="text-align:right;">Gas Cost</span>
                 </div>
                 <div id="rebalance-list">
-                    <div class="empty-state">
+                    <div class="empty-state" style="padding:20px;">
                         <div class="empty-state-icon">⟳</div>
                         <div>NO REBALANCE HISTORY</div>
                     </div>
@@ -1313,11 +581,11 @@
             </div>
         </div>
 
-        <!-- ═══ Event Log ═══ -->
+        <!-- Event Log -->
         <div class="panel">
             <div class="panel-header">
-                <div class="panel-title">▸ Live Event Log</div>
-                <button class="btn" style="padding:4px 12px;font-size:0.7em;" onclick="clearEventLog()">Clear</button>
+                <div class="panel-title">Live Event Log</div>
+                <button class="btn" style="padding:3px 12px;font-size:11px;" onclick="clearEventLog()">Clear</button>
             </div>
             <div class="event-log" id="event-log">
                 <div class="empty-state" style="padding:20px;">
@@ -1326,22 +594,16 @@
             </div>
         </div>
 
-        <!-- ═══ Controls Bar ═══ -->
+        <!-- Controls -->
         <div class="controls-bar">
             <div class="controls-left">
-                <span>Auto-refresh: <span style="color:var(--terminal-cyan);" id="refresh-timer">30s</span></span>
-                <span>|</span>
-                <span>Uptime: <span style="color:var(--terminal-cyan);" id="uptime">--:--:--</span></span>
-                <span>|</span>
-                <span>Events: <span style="color:var(--terminal-cyan);" id="event-count">0</span></span>
+                <span>Refresh: <span class="val" id="refresh-timer">30s</span></span>
+                <span>Uptime: <span class="val" id="uptime">--:--:--</span></span>
+                <span>Events: <span class="val" id="event-count">0</span></span>
             </div>
             <div class="controls-right">
-                <button class="btn btn-rebalance" id="btn-rebalance" onclick="triggerRebalance()">
-                    ⟳ Manual Rebalance
-                </button>
-                <button class="btn btn-halt" id="btn-halt" onclick="triggerHalt()">
-                    ⊘ Emergency Halt
-                </button>
+                <button class="btn btn-rebalance" id="btn-rebalance" onclick="triggerRebalance()">⟳ Manual Rebalance</button>
+                <button class="btn btn-halt" id="btn-halt" onclick="triggerHalt()">⊘ Emergency Halt</button>
             </div>
         </div>
     </div>
@@ -1362,7 +624,7 @@
         let countdownInterval = null;
         let startTime = Date.now();
         let eventCounter = 0;
-        let pendingAction = null; // for modal confirm
+        let pendingAction = null;
         let isHalted = false;
 
         // ── Safety check definitions ──
@@ -1375,7 +637,7 @@
             { id: 'liquidity_depth', name: 'Liquidity Depth', icon: '🌊' },
             { id: 'oracle_health', name: 'Oracle Health', icon: '🔮' },
             { id: 'smart_contract', name: 'Smart Contract', icon: '📜' },
-            { id: 'emergency reserve', name: 'Emergency Reserve', icon: '🛡️' },
+            { id: 'emergency_reserve', name: 'Emergency Reserve', icon: '🛡️' },
         ];
 
         // ── Init ──
@@ -1406,7 +668,6 @@
                     logEvent('alert', 'WebSocket disconnected');
                 });
 
-                // Safekeeping events
                 socket.on('safekeeping:cycle:start', (data) => {
                     logEvent('cycle', `Cycle #${data.cycle || '?'} started`);
                     toast(`Cycle #${data.cycle || '?'} started`, 'success');
@@ -1463,19 +724,15 @@
         }
 
         function updateConnectionUI(connected) {
-            const indicator = document.getElementById('ws-indicator');
             const dot = document.getElementById('ws-dot');
             const status = document.getElementById('ws-status');
-
             if (connected) {
-                indicator.classList.remove('disconnected');
-                dot.style.background = 'var(--terminal-green)';
-                dot.style.boxShadow = '0 0 8px var(--terminal-green)';
+                dot.style.background = 'var(--good)';
+                dot.style.boxShadow = '0 0 8px var(--good)';
                 status.textContent = 'LIVE';
             } else {
-                indicator.classList.add('disconnected');
-                dot.style.background = 'var(--terminal-red)';
-                dot.style.boxShadow = '0 0 8px var(--terminal-red)';
+                dot.style.background = 'var(--bad)';
+                dot.style.boxShadow = '0 0 8px var(--bad)';
                 status.textContent = 'OFFLINE';
             }
         }
@@ -1506,20 +763,67 @@
             const status = cycle.status || data.status || 'idle';
             updateCycleStatus(status);
 
-            // Metrics
+            // Hero metrics
             const metrics = data.metrics || data.stats || {};
-            setText('metric-tvl', `${formatCurrency(metrics.tvl || data.tvl || 0)}<span class="stat-sublabel">USD</span>`);
-            setText('metric-apr', `${formatPercent(metrics.weightedApr || metrics.apr || 0)}<span class="stat-sublabel">%</span>`);
-            setText('metric-positions', metrics.activePositions || metrics.positions || 0);
-            setText('metric-rebalances', metrics.totalRebalances || metrics.rebalances || 0);
+            const tvl = metrics.tvl || data.tvl || 0;
+            setText('metric-tvl', `$${formatCurrency(tvl)}<span class="stat-sublabel"> USD</span>`);
 
+            // Daily P&L
+            const dailyPnl = metrics.dailyPnl || metrics.dailyPnl || 0;
+            const pnlEl = document.getElementById('metric-daily-pnl');
+            pnlEl.innerHTML = `${dailyPnl >= 0 ? '+' : ''}$${formatCurrency(Math.abs(dailyPnl))}<span class="stat-sublabel"> USD</span>`;
+            pnlEl.style.color = dailyPnl >= 0 ? 'var(--good)' : 'var(--bad)';
+
+            // Daily P&L %
+            const dailyPnlPct = metrics.dailyPnlPct || 0;
+            const pnlPctEl = document.getElementById('daily-pnl-pct');
+            pnlPctEl.innerHTML = `<span class="${dailyPnlPct >= 0 ? 'positive' : 'negative'}">${dailyPnlPct >= 0 ? '↑' : '↓'} ${Math.abs(dailyPnlPct).toFixed(2)}%</span> today`;
+
+            // Win rate
             const successRate = metrics.successRate || 0;
             const successEl = document.getElementById('metric-success');
             successEl.innerHTML = `${successRate.toFixed(1)}<span class="stat-sublabel">%</span>`;
-            successEl.className = 'stat-value ' + (successRate >= 90 ? 'positive' : successRate >= 70 ? 'amber' : 'negative');
+            successEl.style.color = successRate >= 70 ? 'var(--good)' : successRate >= 50 ? 'var(--warn)' : 'var(--bad)';
+
+            // Win/loss record
+            const wins = metrics.wins || metrics.totalWins || 0;
+            const losses = metrics.losses || metrics.totalLosses || 0;
+            setText('win-loss-record', `${wins}W / ${losses}L`);
+
+            // Max drawdown
+            const maxDd = metrics.maxDrawdown || metrics.drawdown || 0;
+            const ddEl = document.getElementById('metric-drawdown');
+            ddEl.innerHTML = `${maxDd.toFixed(2)}<span class="stat-sublabel">%</span>`;
+            ddEl.style.color = maxDd >= 15 ? 'var(--bad)' : maxDd >= 8 ? 'var(--warn)' : 'var(--good)';
+
+            // TVL change
+            const tvlChange = metrics.tvlChange || metrics.dailyChange || 0;
+            const tvlChangeEl = document.getElementById('tvl-change');
+            if (tvlChange !== 0) {
+                tvlChangeEl.innerHTML = `<span class="${tvlChange >= 0 ? 'positive' : 'negative'}">${tvlChange >= 0 ? '↑' : '↓'} $${formatCurrency(Math.abs(tvlChange))} (24h)</span>`;
+            } else {
+                tvlChangeEl.textContent = '24h change: --';
+            }
+
+            // APR
+            setText('metric-apr', `${formatPercent(metrics.weightedApr || metrics.apr || 0)}<span class="stat-sublabel">%</span>`);
+
+            // Secondary stats
+            setText('metric-positions', metrics.activePositions || metrics.positions || 0);
+            setText('metric-rebalances', metrics.totalRebalances || metrics.rebalances || 0);
 
             const gasEl = document.getElementById('metric-gas');
-            gasEl.innerHTML = `${formatCurrency(metrics.gasSpent || metrics.gas || 0)}<span class="stat-sublabel">USD</span>`;
+            gasEl.innerHTML = `$${formatCurrency(metrics.gasSpent || metrics.gas || 0)}<span class="stat-sublabel">USD</span>`;
+
+            // Avg P&L
+            const avgPnl = metrics.avgPnl || metrics.avgTradePnl || 0;
+            const avgPnlEl = document.getElementById('metric-avg-pnl');
+            avgPnlEl.innerHTML = `${avgPnl >= 0 ? '+' : '-'}$${formatCurrency(Math.abs(avgPnl))}<span class="stat-sublabel">USD</span>`;
+            avgPnlEl.style.color = avgPnl >= 0 ? 'var(--good)' : 'var(--bad)';
+
+            // Sharpe
+            const sharpe = metrics.sharpeRatio || metrics.sharpe || '--';
+            setText('metric-sharpe', typeof sharpe === 'number' ? sharpe.toFixed(2) : sharpe);
 
             // Chain cards
             renderChainCards(data.chains || data.chainStatus || {});
@@ -1588,7 +892,7 @@
                 if (chain === 'solana') {
                     setText('sol-fee', c.priorityFee || c.fee || '--');
                 } else {
-                    setText(`${prefix}-gas`, (c.gasPrice || '--') + (chain === 'ethereum' ? ' gwei' : ' gwei'));
+                    setText(`${prefix}-gas`, (c.gasPrice || '--') + ' gwei');
                 }
             });
         }
@@ -1602,7 +906,7 @@
             document.getElementById('positions-total-value').textContent = '$' + formatNumber(totalValue);
 
             if (!positions.length) {
-                tbody.innerHTML = `<tr><td colspan="6" class="empty-state">
+                tbody.innerHTML = `<tr><td colspan="7" class="empty-state">
                     <div class="empty-state-icon">◈</div>
                     <div>NO ACTIVE POSITIONS</div>
                 </td></tr>`;
@@ -1611,17 +915,21 @@
 
             tbody.innerHTML = positions.map(p => {
                 const apr = p.apr || 0;
-                const aprColor = apr >= 15 ? 'var(--terminal-green)' : apr >= 5 ? 'var(--terminal-amber)' : 'var(--terminal-red)';
+                const aprColor = apr >= 15 ? 'var(--good)' : apr >= 5 ? 'var(--warn)' : 'var(--bad)';
                 const status = (p.status || 'active').toLowerCase();
                 const statusClass = status === 'active' ? 'active' : status === 'pending' ? 'pending' : status === 'closing' ? 'closing' : status === 'error' ? 'error' : 'idle';
                 const chainLabel = formatChain(p.chain);
+                const pnl = p.pnl || p.unrealizedPnl || 0;
+                const pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+                const pnlStr = pnl !== 0 ? `${pnl >= 0 ? '+' : ''}$${formatCurrency(Math.abs(pnl))}` : '--';
 
                 return `<tr>
-                    <td style="font-weight:600;color:#fff;">${p.symbol || '--'}</td>
-                    <td style="color:#888;font-size:0.9em;">${chainLabel}</td>
-                    <td style="color:#888;font-size:0.9em;">${p.dex || '--'}</td>
+                    <td style="font-weight:600;color:rgba(255,255,255,0.9);">${p.symbol || '--'}</td>
+                    <td style="color:#666;">${chainLabel}</td>
+                    <td style="color:#666;">${p.dex || '--'}</td>
                     <td style="color:${aprColor};font-weight:600;">${formatPercent(apr)}%</td>
-                    <td style="color:var(--terminal-cyan);">$${formatNumber(p.value || p.usdValue || 0)}</td>
+                    <td>$${formatNumber(p.value || p.usdValue || 0)}</td>
+                    <td class="${pnlClass}">${pnlStr}</td>
                     <td><span class="status-badge ${statusClass}">${status}</span></td>
                 </tr>`;
             }).join('');
@@ -1642,21 +950,21 @@
 
             tbody.innerHTML = opps.map(o => {
                 const apr = o.apr || 0;
-                const aprColor = apr >= 30 ? 'var(--terminal-green)' : apr >= 15 ? 'var(--terminal-amber)' : 'var(--terminal-red)';
+                const aprColor = apr >= 30 ? 'var(--good)' : apr >= 15 ? 'var(--warn)' : 'var(--bad)';
                 const conf = o.confidence || o.score || 0;
                 const confClass = conf >= 70 ? 'high' : conf >= 40 ? 'medium' : 'low';
-                const confColor = conf >= 70 ? 'var(--terminal-green)' : conf >= 40 ? 'var(--terminal-amber)' : 'var(--terminal-red)';
+                const confColor = conf >= 70 ? 'var(--good)' : conf >= 40 ? 'var(--warn)' : 'var(--bad)';
                 const chainLabel = formatChain(o.chain);
 
                 return `<tr>
-                    <td style="font-weight:600;color:#fff;">${o.pool || o.symbol || '--'}</td>
-                    <td style="color:#888;font-size:0.9em;">${chainLabel}</td>
-                    <td style="color:#888;font-size:0.9em;">${o.dex || '--'}</td>
+                    <td style="font-weight:600;color:rgba(255,255,255,0.9);">${o.pool || o.symbol || '--'}</td>
+                    <td style="color:#666;">${chainLabel}</td>
+                    <td style="color:#666;">${o.dex || '--'}</td>
                     <td style="color:${aprColor};font-weight:600;">${formatPercent(apr)}%</td>
-                    <td style="color:var(--terminal-cyan);">$${formatNumber(o.tvl || 0)}</td>
+                    <td>$${formatNumber(o.tvl || 0)}</td>
                     <td>
                         <div class="confidence-bar"><div class="confidence-fill ${confClass}" style="width:${conf}%"></div></div>
-                        <span style="color:${confColor};font-weight:600;font-size:0.9em;">${Math.round(conf)}%</span>
+                        <span style="color:${confColor};font-weight:600;font-size:11px;">${Math.round(conf)}%</span>
                     </td>
                 </tr>`;
             }).join('');
@@ -1664,7 +972,6 @@
 
         // ── AI Analysis ──
         function renderAIAnalysis(analysis) {
-            // Risk level
             const riskEl = document.getElementById('risk-level');
             const risk = (analysis.riskLevel || analysis.risk || 'low').toLowerCase();
             const riskLabels = { low: '◉ LOW RISK', medium: '◉ MED RISK', high: '◉ HIGH RISK', extreme: '◉ EXTREME RISK' };
@@ -1672,33 +979,25 @@
             riskEl.textContent = riskLabels[risk] || riskLabels.low;
             riskEl.className = 'risk-indicator ' + (riskClasses[risk] || 'risk-low');
 
-            // Market regime
             const regimeEl = document.getElementById('market-regime');
             regimeEl.textContent = (analysis.marketRegime || analysis.regime || 'RANGE_BOUND').toUpperCase().replace(/ /g, '_');
 
-            // Timestamp
             document.getElementById('ai-timestamp').textContent = analysis.timestamp ? formatDateTime(new Date(analysis.timestamp)) : formatTime(new Date());
 
-            // Recommendations
             const recsEl = document.getElementById('ai-recommendations');
             const recs = analysis.recommendations || [];
-            if (recs.length) {
-                recsEl.innerHTML = recs.map(r => `<li class="recommendation">${r}</li>`).join('');
-            } else {
-                recsEl.innerHTML = '<li class="recommendation" style="color:#666;">No recommendations</li>';
-            }
+            recsEl.innerHTML = recs.length
+                ? recs.map(r => `<li class="recommendation">${r}</li>`).join('')
+                : '<li class="recommendation" style="color:#666;">No recommendations</li>';
 
-            // Anomalies
             const anomEl = document.getElementById('ai-anomalies');
             const anomalies = analysis.anomalies || [];
-            if (anomalies.length) {
-                anomEl.innerHTML = anomalies.map(a => {
+            anomEl.innerHTML = anomalies.length
+                ? anomalies.map(a => {
                     const isCritical = (a.severity || a.level || '').toLowerCase() === 'critical';
                     return `<li class="anomaly ${isCritical ? 'critical' : ''}">${a.message || a.text || a}</li>`;
-                }).join('');
-            } else {
-                anomEl.innerHTML = '<li style="color:#666;">No anomalies detected</li>';
-            }
+                }).join('')
+                : '<li style="color:#666;">No anomalies detected</li>';
         }
 
         // ── Safety Checks ──
@@ -1715,50 +1014,39 @@
 
         function renderSafetyChecksState(checks) {
             let passCount = 0;
-
             SAFETY_CHECKS.forEach(sc => {
                 const check = checks[sc.id] || {};
                 const status = (check.status || check.result || 'pass').toLowerCase();
                 const passed = status === 'pass' || status === 'ok';
                 const warned = status === 'warn' || status === 'warning';
-
                 if (passed) passCount++;
 
                 const iconEl = document.getElementById(`safety-icon-${sc.id}`);
                 const resultEl = document.getElementById(`safety-result-${sc.id}`);
-
-                if (iconEl) {
-                    iconEl.className = 'safety-icon ' + (passed ? 'pass' : warned ? 'warn' : 'fail');
-                }
+                if (iconEl) iconEl.className = 'safety-icon ' + (passed ? 'pass' : warned ? 'warn' : 'fail');
                 if (resultEl) {
                     resultEl.className = 'safety-result ' + (passed ? 'pass' : warned ? 'warn' : 'fail');
                     resultEl.textContent = passed ? 'PASS' : warned ? 'WARN' : 'FAIL';
                 }
             });
 
-            document.getElementById('safety-pass-count').textContent = `${passCount}/9`;
-            document.getElementById('safety-pass-count').style.color = passCount >= 8 ? 'var(--terminal-green)' : passCount >= 6 ? 'var(--terminal-amber)' : 'var(--terminal-red)';
+            const countEl = document.getElementById('safety-pass-count');
+            countEl.textContent = `${passCount}/9`;
+            countEl.style.color = passCount >= 8 ? 'var(--good)' : passCount >= 6 ? 'var(--warn)' : 'var(--bad)';
         }
 
         // ── Rebalance History ──
         function renderRebalanceHistory(history) {
             const container = document.getElementById('rebalance-list');
-
             if (!history || !history.length) {
-                container.innerHTML = `<div class="empty-state">
-                    <div class="empty-state-icon">⟳</div>
-                    <div>NO REBALANCE HISTORY</div>
-                </div>`;
+                container.innerHTML = `<div class="empty-state" style="padding:20px;"><div class="empty-state-icon">⟳</div><div>NO REBALANCE HISTORY</div></div>`;
                 return;
             }
-
-            const items = history.slice(0, 10);
-            container.innerHTML = items.map(h => {
+            container.innerHTML = history.slice(0, 10).map(h => {
                 const ts = h.timestamp || h.time || h.date;
                 const result = (h.result || h.status || 'success').toLowerCase();
                 const resultClass = result === 'success' || result === 'ok' ? 'success' : result === 'pending' ? 'pending' : 'failed';
                 const gas = h.gasCost || h.gas || h.gasUsed;
-
                 return `<div class="rebalance-row">
                     <span class="timestamp">${ts ? formatDateTime(new Date(ts)) : '--'}</span>
                     <span class="action">${h.action || h.type || h.description || '--'}</span>
@@ -1770,114 +1058,50 @@
 
         // ── Controls ──
         window.triggerRebalance = function() {
-            if (isHalted) {
-                toast('System is halted — resume first', 'error');
-                return;
-            }
-            showModal(
-                'CONFIRM REBALANCE',
-                'Trigger a manual rebalance cycle? The system will scan all chains and execute optimal position adjustments.',
-                'confirm',
-                async () => {
-                    const btn = document.getElementById('btn-rebalance');
-                    btn.disabled = true;
-                    btn.textContent = '⟳ REBALANCING...';
-                    toast('Rebalance initiated...', 'warning');
-
-                    try {
-                        const resp = await fetch('/api/safekeeping/rebalance', { method: 'POST' });
-                        const data = await resp.json();
-                        if (resp.ok) {
-                            toast('Rebalance cycle started', 'success');
-                            logEvent('exec', 'Manual rebalance triggered');
-                            fetchState();
-                        } else {
-                            toast(`Rebalance failed: ${data.error || 'unknown'}`, 'error');
-                            logEvent('alert', `Rebalance error: ${data.error || 'unknown'}`);
-                        }
-                    } catch (e) {
-                        toast(`Rebalance error: ${e.message}`, 'error');
-                        logEvent('alert', `Rebalance fetch error: ${e.message}`);
-                    }
-
-                    btn.disabled = false;
-                    btn.textContent = '⟳ Manual Rebalance';
-                }
-            );
+            if (isHalted) { toast('System is halted — resume first', 'error'); return; }
+            showModal('CONFIRM REBALANCE', 'Trigger a manual rebalance cycle? The system will scan all chains and execute optimal position adjustments.', 'confirm', async () => {
+                const btn = document.getElementById('btn-rebalance');
+                btn.disabled = true; btn.textContent = '⟳ REBALANCING...';
+                toast('Rebalance initiated...', 'warning');
+                try {
+                    const resp = await fetch('/api/safekeeping/rebalance', { method: 'POST' });
+                    const data = await resp.json();
+                    if (resp.ok) { toast('Rebalance cycle started', 'success'); logEvent('exec', 'Manual rebalance triggered'); fetchState(); }
+                    else { toast(`Rebalance failed: ${data.error || 'unknown'}`, 'error'); logEvent('alert', `Rebalance error: ${data.error || 'unknown'}`); }
+                } catch (e) { toast(`Rebalance error: ${e.message}`, 'error'); logEvent('alert', `Rebalance fetch error: ${e.message}`); }
+                btn.disabled = false; btn.textContent = '⟳ Manual Rebalance';
+            });
         };
 
         window.triggerHalt = function() {
             if (isHalted) {
-                // Resume
-                showModal(
-                    'RESUME OPERATIONS',
-                    'Resume normal safekeeping operations? The system will resume scanning and rebalancing.',
-                    'confirm',
-                    async () => {
-                        try {
-                            const resp = await fetch('/api/safekeeping/rebalance', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ action: 'resume' })
-                            });
-                            if (resp.ok) {
-                                isHalted = false;
-                                updateHaltButton();
-                                toast('Operations resumed', 'success');
-                                logEvent('system', 'Operations resumed');
-                                fetchState();
-                            }
-                        } catch (e) {
-                            toast(`Resume error: ${e.message}`, 'error');
-                        }
-                    }
-                );
+                showModal('RESUME OPERATIONS', 'Resume normal safekeeping operations? The system will resume scanning and rebalancing.', 'confirm', async () => {
+                    try {
+                        const resp = await fetch('/api/safekeeping/rebalance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) });
+                        if (resp.ok) { isHalted = false; updateHaltButton(); toast('Operations resumed', 'success'); logEvent('system', 'Operations resumed'); fetchState(); }
+                    } catch (e) { toast(`Resume error: ${e.message}`, 'error'); }
+                });
                 return;
             }
-
-            showModal(
-                '⚠ EMERGENCY HALT',
-                'This will immediately halt all safekeeping operations. All positions will be held (not closed). Are you absolutely sure?',
-                'danger',
-                async () => {
-                    const btn = document.getElementById('btn-halt');
-                    btn.disabled = true;
-                    btn.textContent = '⊘ HALTING...';
-                    toast('EMERGENCY HALT in progress...', 'halt');
-
-                    try {
-                        const resp = await fetch('/api/safekeeping/halt', { method: 'POST' });
-                        const data = await resp.json();
-                        if (resp.ok) {
-                            isHalted = true;
-                            updateHaltButton();
-                            toast('EMERGENCY HALT activated', 'halt');
-                            logEvent('halt', 'Emergency halt activated');
-                            fetchState();
-                        } else {
-                            toast(`Halt failed: ${data.error || 'unknown'}`, 'error');
-                        }
-                    } catch (e) {
-                        toast(`Halt error: ${e.message}`, 'error');
-                    }
-
-                    btn.disabled = false;
-                    if (!isHalted) btn.textContent = '⊘ Emergency Halt';
-                }
-            );
+            showModal('⚠ EMERGENCY HALT', 'This will immediately halt all safekeeping operations. All positions will be held (not closed). Are you absolutely sure?', 'danger', async () => {
+                const btn = document.getElementById('btn-halt');
+                btn.disabled = true; btn.textContent = '⊘ HALTING...';
+                toast('EMERGENCY HALT in progress...', 'halt');
+                try {
+                    const resp = await fetch('/api/safekeeping/halt', { method: 'POST' });
+                    const data = await resp.json();
+                    if (resp.ok) { isHalted = true; updateHaltButton(); toast('EMERGENCY HALT activated', 'halt'); logEvent('halt', 'Emergency halt activated'); fetchState(); }
+                    else { toast(`Halt failed: ${data.error || 'unknown'}`, 'error'); }
+                } catch (e) { toast(`Halt error: ${e.message}`, 'error'); }
+                btn.disabled = false; if (!isHalted) btn.textContent = '⊘ Emergency Halt';
+            });
         };
 
         function updateHaltButton() {
             const btn = document.getElementById('btn-halt');
-            if (isHalted) {
-                btn.textContent = '◎ Resume Operations';
-                btn.className = 'btn btn-resume';
-                btn.id = 'btn-halt';
-            } else {
-                btn.textContent = '⊘ Emergency Halt';
-                btn.className = 'btn btn-halt';
-                btn.id = 'btn-halt';
-            }
+            btn.textContent = isHalted ? '◎ Resume Operations' : '⊘ Emergency Halt';
+            btn.className = isHalted ? 'btn btn-resume' : 'btn btn-halt';
+            btn.id = 'btn-halt';
         }
 
         // ── Auto Refresh ──
@@ -1886,10 +1110,7 @@
             countdownInterval = setInterval(() => {
                 refreshCountdown--;
                 document.getElementById('refresh-timer').textContent = refreshCountdown + 's';
-                if (refreshCountdown <= 0) {
-                    refreshCountdown = 30;
-                    fetchState();
-                }
+                if (refreshCountdown <= 0) { refreshCountdown = 30; fetchState(); }
             }, 1000);
         }
 
@@ -1897,33 +1118,20 @@
         function logEvent(type, message) {
             eventCounter++;
             document.getElementById('event-count').textContent = eventCounter;
-
             const log = document.getElementById('event-log');
-            // Clear initial empty state
             if (eventCounter === 1) log.innerHTML = '';
-
             const now = new Date();
             const time = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
-
             const line = document.createElement('div');
             line.className = 'event-line';
-            line.innerHTML = `
-                <span class="event-time">${time}</span>
-                <span class="event-type ${type}">${type.toUpperCase()}</span>
-                <span class="event-msg">${message}</span>
-            `;
+            line.innerHTML = `<span class="event-time">${time}</span><span class="event-type ${type}">${type.toUpperCase()}</span><span class="event-msg">${message}</span>`;
             log.prepend(line);
-
-            // Keep max 100 events
-            while (log.children.length > 100) {
-                log.removeChild(log.lastChild);
-            }
+            while (log.children.length > 100) log.removeChild(log.lastChild);
         }
 
         window.clearEventLog = function() {
             document.getElementById('event-log').innerHTML = '<div class="empty-state" style="padding:20px;"><div style="color:#444;">Log cleared</div></div>';
-            eventCounter = 0;
-            document.getElementById('event-count').textContent = '0';
+            eventCounter = 0; document.getElementById('event-count').textContent = '0';
         };
 
         // ── Modal ──
@@ -1931,24 +1139,15 @@
             document.getElementById('modal-title').textContent = title;
             document.getElementById('modal-title').className = 'modal-title' + (btnClass === 'danger' ? ' danger' : '');
             document.getElementById('modal-body').textContent = body;
-
             const confirmBtn = document.getElementById('modal-confirm');
             confirmBtn.className = 'modal-btn ' + btnClass;
             confirmBtn.textContent = btnClass === 'danger' ? 'HALT' : 'Confirm';
-
             pendingAction = onConfirm;
             document.getElementById('confirm-modal').classList.add('active');
         }
 
-        window.closeModal = function() {
-            document.getElementById('confirm-modal').classList.remove('active');
-            pendingAction = null;
-        };
-
-        window.confirmAction = function() {
-            if (pendingAction) pendingAction();
-            closeModal();
-        };
+        window.closeModal = function() { document.getElementById('confirm-modal').classList.remove('active'); pendingAction = null; };
+        window.confirmAction = function() { if (pendingAction) pendingAction(); closeModal(); };
 
         // ── Uptime ──
         function updateUptime() {
@@ -1959,92 +1158,28 @@
             document.getElementById('uptime').textContent = `${h}:${m}:${s}`;
         }
 
-        // ── Toast Notifications ──
+        // ── Toast ──
         function toast(message, type = 'info') {
             const container = document.getElementById('toast-container');
             const el = document.createElement('div');
-            el.className = 'toast ' + type;
-            el.textContent = message;
+            el.className = 'toast ' + type; el.textContent = message;
             container.appendChild(el);
-
-            setTimeout(() => {
-                el.style.animation = 'toastOut 0.3s ease forwards';
-                setTimeout(() => el.remove(), 300);
-            }, 4000);
+            setTimeout(() => { el.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(() => el.remove(), 300); }, 4000);
         }
 
         // ── Formatters ──
-        function formatCurrency(n) {
-            if (typeof n !== 'number') n = parseFloat(n) || 0;
-            if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-            if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
-            return n.toFixed(2);
-        }
+        function formatCurrency(n) { if (typeof n !== 'number') n = parseFloat(n) || 0; if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K'; return n.toFixed(2); }
+        function formatNumber(n) { if (typeof n !== 'number') n = parseFloat(n) || 0; if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K'; return n.toFixed(2); }
+        function formatPercent(n) { if (typeof n !== 'number') n = parseFloat(n) || 0; return n.toFixed(2); }
+        function formatTime(d) { return d.toTimeString().split(' ')[0]; }
+        function formatDateTime(d) { if (!(d instanceof Date) || isNaN(d)) return '--'; return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${d.toTimeString().split(' ')[0]}`; }
+        function formatDuration(startStr) { if (!startStr) return '--:--'; const start = new Date(startStr); if (isNaN(start)) return '--:--'; const diff = Math.floor((Date.now() - start) / 1000); const m = Math.floor(diff / 60); const s = diff % 60; const h = Math.floor(m / 60); return h > 0 ? `${h}h ${m % 60}m` : `${m}m ${s}s`; }
+        function formatDurationUntil(timestamp) { if (!timestamp) return '--:--'; const target = new Date(timestamp); if (isNaN(target)) return '--:--'; const diff = Math.max(0, Math.floor((target - Date.now()) / 1000)); return `${String(Math.floor(diff / 60)).padStart(2, '0')}:${String(diff % 60).padStart(2, '0')}`; }
+        function formatChain(chain) { if (!chain) return '--'; const map = { ethereum: 'ETH', eth: 'ETH', bsc: 'BSC', binance: 'BSC', solana: 'SOL', sol: 'SOL', polygon: 'MATIC', arb: 'ARB', arbitrum: 'ARB' }; return map[chain.toLowerCase()] || chain.toUpperCase(); }
+        function setText(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; }
 
-        function formatNumber(n) {
-            if (typeof n !== 'number') n = parseFloat(n) || 0;
-            if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-            if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
-            return n.toFixed(2);
-        }
-
-        function formatPercent(n) {
-            if (typeof n !== 'number') n = parseFloat(n) || 0;
-            return n.toFixed(2);
-        }
-
-        function formatTime(d) {
-            return d.toTimeString().split(' ')[0];
-        }
-
-        function formatDateTime(d) {
-            if (!(d instanceof Date) || isNaN(d)) return '--';
-            const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            const time = d.toTimeString().split(' ')[0];
-            return `${date} ${time}`;
-        }
-
-        function formatDuration(startStr) {
-            if (!startStr) return '--:--';
-            const start = new Date(startStr);
-            if (isNaN(start)) return '--:--';
-            const diff = Math.floor((Date.now() - start) / 1000);
-            const m = Math.floor(diff / 60);
-            const s = diff % 60;
-            const h = Math.floor(m / 60);
-            if (h > 0) return `${h}h ${m % 60}m`;
-            return `${m}m ${s}s`;
-        }
-
-        function formatDurationUntil(timestamp) {
-            if (!timestamp) return '--:--';
-            const target = new Date(timestamp);
-            if (isNaN(target)) return '--:--';
-            const diff = Math.max(0, Math.floor((target - Date.now()) / 1000));
-            const m = Math.floor(diff / 60);
-            const s = diff % 60;
-            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-        }
-
-        function formatChain(chain) {
-            if (!chain) return '--';
-            const map = {
-                ethereum: 'ETH', eth: 'ETH', bsc: 'BSC', binance: 'BSC',
-                solana: 'SOL', sol: 'SOL', polygon: 'MATIC', arb: 'ARB', arbitrum: 'ARB'
-            };
-            return map[chain.toLowerCase()] || chain.toUpperCase();
-        }
-
-        function setText(id, html) {
-            const el = document.getElementById(id);
-            if (el) el.innerHTML = html;
-        }
-
-        // ── Keyboard shortcuts ──
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeModal();
-            if (e.ctrlKey && e.key === 'r') { e.preventDefault(); fetchState(); }
-        });
+        // ── Keyboard ──
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); if (e.ctrlKey && e.key === 'r') { e.preventDefault(); fetchState(); } });
 
         // ── Boot ──
         document.addEventListener('DOMContentLoaded', init);

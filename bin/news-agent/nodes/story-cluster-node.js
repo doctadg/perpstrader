@@ -66,7 +66,12 @@ const ACTIVITY_BOOST_HOURS = 2;
 async function storyClusterNode(state) {
     let articles = state.categorizedNews;
     if (articles.length === 0) {
-        return { currentStep: 'CLUSTERING_SKIPPED_NO_ARTICLES' };
+        logger_1.default.info('[StoryClusterNode] No new articles from pipeline, fetching unclustered articles from DB...');
+        articles = await story_cluster_store_1.default.getUnclusteredArticles(CLUSTER_BATCH_SIZE);
+        if (articles.length === 0) {
+            return { currentStep: 'CLUSTERING_SKIPPED_NO_ARTICLES' };
+        }
+        logger_1.default.info(`[StoryClusterNode] Found ${articles.length} unclustered articles from DB`);
     }
     // Filter out non-market-moving content (e.g., "Fact Check Team: Exploring...")
     const beforeFilter = articles.length;

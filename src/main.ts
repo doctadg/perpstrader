@@ -104,6 +104,7 @@ function spawnChildProcess(config: ChildProcessConfig): ChildProcess {
     const child = fork(scriptPath, [], {
         silent: false,
         execArgv: [],
+        env: process.env, // Explicitly pass env to ensure child processes get OPENROUTER_API_KEY etc.
     });
     
     CHILD_PROCESSES.set(name, child);

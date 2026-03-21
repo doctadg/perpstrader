@@ -386,6 +386,27 @@ class IdeaQueue {
         return rows.map(row => this.rowToIdea(row));
     }
     /**
+     * Get market data candles for backtesting (reuses existing DB connection)
+     */
+    getMarketDataForBacktest(symbols, cutoffTime) {
+        if (!this.db)
+            return [];
+        const placeholders = symbols.map(() => '?').join(', ');
+        const rows = this.db.prepare(`SELECT symbol, timestamp, open, high, low, close, volume
+       FROM market_data
+       WHERE symbol IN (${placeholders}) AND timestamp >= ?
+       ORDER BY symbol, timestamp ASC`).all(...symbols, cutoffTime);
+        return rows.map(row => ({
+            symbol: row.symbol,
+            timestamp: new Date(row.timestamp),
+            open: row.open,
+            high: row.high,
+            low: row.low,
+            close: row.close,
+            volume: row.volume,
+        }));
+    }
+    /**
      * Delete old completed ideas
      */
     async cleanupOldIdeas(ageDays = 30) {

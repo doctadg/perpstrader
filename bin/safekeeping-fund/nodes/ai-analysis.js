@@ -65,8 +65,8 @@ async function performAIAnalysis(state) {
     }
     const prompt = buildAnalysisPrompt(state);
     try {
-        const response = await axios_1.default.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: 'z-ai/glm-4.7-flash', // Cheap fast model instead of expensive Claude
+        const response = await axios_1.default.post(`${config.openrouter?.baseUrl || 'https://openrouter.ai/api/v1'}/chat/completions`, {
+            model: config.openrouter?.labelingModel || 'z-ai/glm-5-turbo',
             messages: [
                 {
                     role: 'system',
@@ -99,25 +99,25 @@ async function performAIAnalysis(state) {
  * Build analysis prompt from state
  */
 function buildAnalysisPrompt(state) {
-    const opportunities = state.topOpportunities.slice(0, 10);
+    const opportunities = (Array.isArray(state.topOpportunities) ? state.topOpportunities : []).slice(0, 10);
     return `
 You are analyzing DeFi yield opportunities for an autonomous safekeeping fund.
 
 CURRENT PORTFOLIO:
-- Total Value: $${state.totalValue.toFixed(2)}
-- Current APR: ${state.totalEffectiveAPR.toFixed(2)}%
-- Positions: ${state.positions.length}
-- APR Trend: ${state.aprTrend}
+|- Total Value: $${state.totalValue.toFixed(2)}
+|- Current APR: ${state.totalEffectiveAPR.toFixed(2)}%
+|- Positions: ${state.positions.length}
+|- APR Trend: ${state.aprTrend}
 
 TOP 10 YIELD OPPORTUNITIES:
 ${opportunities.map((opp, i) => `
-${i + 1}. ${opp.token0.symbol}/${opp.token1.symbol} on ${opp.dex} (${opp.chain})
-   - Pool: ${opp.address.slice(0, 10)}...
-   - TVL: $${opp.tvl.toLocaleString()}
-   - Fee APR: ${opp.feeAPR.toFixed(2)}%
-   - Effective APR: ${opp.effectiveAPR.toFixed(2)}%
-   - Risk Score: ${opp.riskScore.toFixed(2)}
-   - Gas Cost: $${opp.estimatedGasCost.toFixed(2)}
+${i + 1}. ${opp.token0?.symbol || '???'}/${opp.token1?.symbol || '???'} on ${opp.dex || 'unknown'} (${opp.chain || 'unknown'})
+   - Pool: ${(opp.address || '0x').slice(0, 10)}...
+   - TVL: $${(opp.tvl || 0).toLocaleString()}
+   - Fee APR: ${(opp.feeAPR || 0).toFixed(2)}%
+   - Effective APR: ${(opp.effectiveAPR || 0).toFixed(2)}%
+   - Risk Score: ${(opp.riskScore || 0).toFixed(2)}
+   - Gas Cost: $${(opp.estimatedGasCost || 0).toFixed(2)}
 `).join('')}
 
 CHAIN STATUS:

@@ -31,6 +31,7 @@ export declare class ExecutionEngine {
     private nativeStopOrders;
     private pendingManagedExitSymbols;
     private exitPlanMonitor;
+    private lastPaperExitLogTime;
     private isTestnet;
     private static priceSubscriptionInitialized;
     private marketDataHandler;

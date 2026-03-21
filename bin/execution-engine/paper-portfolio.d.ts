@@ -6,6 +6,7 @@ export interface PaperPosition {
     entryPrice: number;
     entryTime: Date;
     strategyId?: string;
+    leverage: number;
 }
 interface PortfolioSnapshot {
     timestamp: Date;
@@ -44,7 +45,7 @@ export declare class PaperPortfolioManager {
     /**
      * Execute a paper trade
      */
-    executeTrade(symbol: string, side: 'BUY' | 'SELL', size: number, price: number, strategyId?: string): Promise<Trade>;
+    executeTrade(symbol: string, side: 'BUY' | 'SELL', size: number, price: number, strategyId?: string, leverage?: number): Promise<Trade>;
     /**
      * Get current portfolio state
      */

@@ -207,6 +207,7 @@ export class ExecutionEngine {
   private nativeStopOrders: Map<string, NativeStopOrderTracking> = new Map();
   private pendingManagedExitSymbols: Set<string> = new Set();
   private exitPlanMonitor: NodeJS.Timeout | null = null;
+  private lastPaperExitLogTime: number = 0;
   private isTestnet: boolean;
 
   // Message bus price subscription state (singleton guard)
@@ -662,8 +663,10 @@ export class ExecutionEngine {
 
   private async enforceManagedExitPlans(): Promise<void> {
     // Paper trading branch: check paper portfolio positions against exit plans
-    if (!hyperliquidClient.isConfigured() && process.env.PAPER_TRADING === 'true') {
-      if (this.positionExitPlans.size === 0) return;
+    // BUG FIX: Was `!hyperliquidClient.isConfigured() && PAPER_TRADING` which skipped
+    // this branch when HL wallet was configured. Changed to check PAPER_TRADING only.
+    if (process.env.PAPER_TRADING === 'true') {
+      if (this.positionExitPlans.size === 0 && paperPortfolio.getPositions().length === 0) return;
       try {
         const paperPositions = paperPortfolio.getPositions();
         const activeSymbols = new Set<string>();
@@ -672,9 +675,17 @@ export class ExecutionEngine {
           const symbolKey = position.symbol.toUpperCase();
           activeSymbols.add(symbolKey);
 
-          const plan = this.positionExitPlans.get(symbolKey);
-          if (!plan) continue;
           if (this.pendingManagedExitSymbols.has(symbolKey)) continue;
+
+          // Auto-register exit plans for paper positions loaded from DB on restart
+          let plan = this.positionExitPlans.get(symbolKey);
+          if (!plan) {
+            const stopLossPct = 0.02; // default 2% SL
+            const takeProfitPct = 0.06; // default 6% TP
+            this.registerManagedExitPlan(symbolKey, position.side, position.entryPrice, stopLossPct, takeProfitPct);
+            logger.info(`[PaperExit] Auto-registered exit plan for restored position ${symbolKey} ${position.side} @ ${position.entryPrice}`);
+            plan = this.positionExitPlans.get(symbolKey)!;
+          }
 
           // Check if position side matches plan (paper portfolio may track differently)
           const entryPrice = plan.entryPrice;
@@ -755,6 +766,20 @@ export class ExecutionEngine {
           if (!activeSymbols.has(symbolKey)) {
             this.positionExitPlans.delete(symbolKey);
           }
+        }
+
+        // Periodic diagnostic log (every 60s) to confirm paper exit monitor is running
+        const now = Date.now();
+        if (now - this.lastPaperExitLogTime > 60000) {
+          this.lastPaperExitLogTime = now;
+          const priceCoverage = paperPositions.filter(
+            p => (currentPrices.get(p.symbol) || currentPrices.get(p.symbol.toUpperCase()) || 0) > 0
+          ).length;
+          logger.info(
+            `[PaperExit] Monitor active: ${paperPositions.length} positions, ` +
+            `${this.positionExitPlans.size} exit plans, ${priceCoverage}/${paperPositions.length} with live prices, ` +
+            `${currentPrices.size} symbols in price cache`
+          );
         }
       } catch (error) {
         logger.error('[PaperExit] Monitor failed:', error);
@@ -896,7 +921,8 @@ export class ExecutionEngine {
         signal.action as 'BUY' | 'SELL',
         signal.size,
         signal.price || currentPrices.get(signal.symbol) || 0,
-        signal.strategyId
+        signal.strategyId,
+        riskAssessment.leverage || 50
       );
 
       // Register managed exit plan for paper entries (SL/TP monitoring)
@@ -1118,7 +1144,8 @@ export class ExecutionEngine {
 
       let adjustedSize = requestedSize;
       if (!isExitOrder) {
-        const canEnter = circuitBreaker.canEnterNewTrade?.(signal.symbol) ?? true;
+        // SAFETY: Default to FALSE if circuit breaker can't be checked — fail closed
+        const canEnter = circuitBreaker.canEnterNewTrade?.(signal.symbol) ?? false;
         if (!canEnter) {
           throw new Error(`Safety monitor blocked new trade for ${signal.symbol}`);
         }

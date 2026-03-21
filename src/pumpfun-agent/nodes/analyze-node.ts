@@ -34,19 +34,19 @@ const NON_WEBSITE_HOSTS = new Set([
 ]);
 
 // Rate limiter: max AI calls per cycle
-const MAX_AI_CALLS_PER_CYCLE = 5;
+const MAX_AI_CALLS_PER_CYCLE = 10; // was 5
 let aiCallCount = 0;
 
 /**
  * Check if a token passes the pre-filter for AI analysis.
- * Requires at least 2 social links OR a real website.
+ * Relaxed: any single social link OR a website qualifies.
  */
 function passesAIPrefilter(metadata: any, websiteUrl: string): boolean {
   let socialCount = 0;
   if (metadata.twitter) socialCount++;
   if (metadata.telegram) socialCount++;
   if (metadata.discord) socialCount++;
-  if (socialCount >= 2) return true;
+  if (socialCount >= 1) return true; // was >= 2
   if (websiteUrl) return true;
   return false;
 }
@@ -301,16 +301,23 @@ async function runOpenRouterAnalysis(data: {
 } | null> {
   const prompt = buildAnalysisPrompt(data);
 
-  if (!openrouterService.canUseService()) {
-    logger.warn('[AnalyzeNode] OpenRouter API key missing, using heuristic fallback');
-    return null;
-  }
-
   const config = configManager.get();
-  const model = process.env.PUMPFUN_OPENROUTER_MODEL || 'arcee-ai/trinity-large-preview:free';
-  let maxTokens = Number.parseInt(process.env.PUMPFUN_OPENROUTER_MAX_TOKENS || '120', 10);
+  const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.openrouter.labelingModel;
+  let maxTokens = Number.parseInt(process.env.PUMPFUN_MAX_TOKENS || '120', 10);
   if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
     maxTokens = 120;
+  }
+
+  // Check API key from multiple sources (singleton, config, and direct env)
+  const configApiKey = config.openrouter.apiKey;
+  const envApiKey = process.env.OPENROUTER_API_KEY || process.env.ZAI_API_KEY || '';
+  const apiKey = openrouterService.canUseService()
+    ? openrouterService['apiKey'] // Access the singleton's key
+    : (configApiKey || envApiKey);
+
+  if (!apiKey || apiKey.length === 0 || apiKey === 'your-api-key-here') {
+    logger.warn('[AnalyzeNode] OpenRouter API key missing from all sources (singleton, config, env), using heuristic fallback');
+    return null;
   }
 
   const requestBody = (tokenBudget: number) => ({
@@ -331,7 +338,7 @@ async function runOpenRouterAnalysis(data: {
 
   const requestConfig = {
     headers: {
-      Authorization: `Bearer ${config.openrouter.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://perps-trader.ai',
       'X-Title': 'PerpsTrader PumpFun Analyzer',
@@ -339,55 +346,78 @@ async function runOpenRouterAnalysis(data: {
     timeout: config.openrouter.timeout,
   };
 
-  try {
-    const response = await axios.post(
-      `${config.openrouter.baseUrl}/chat/completions`,
-      requestBody(maxTokens),
-      requestConfig
-    );
+  // Retry with backoff (max 5 retries)
+  const MAX_RETRIES = 5;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await axios.post(
+        `${config.openrouter.baseUrl}/chat/completions`,
+        requestBody(maxTokens),
+        requestConfig
+      );
 
-    const content = response.data?.choices?.[0]?.message?.content || '';
-    const parsed = parseAIResponse(content);
-    if (!parsed) {
-      logger.warn('[AnalyzeNode] OpenRouter response was not parseable JSON, using fallback');
+      const content = response.data?.choices?.[0]?.message?.content || '';
+      const parsed = parseAIResponse(content);
+      if (!parsed) {
+        logger.warn('[AnalyzeNode] OpenRouter response was not parseable JSON, using fallback');
+        return null;
+      }
+      return parsed;
+    } catch (error: any) {
+      const status = error?.response?.status;
+      if (status === 429) {
+        const retryAfter = error?.response?.headers?.['retry-after'];
+        let retryAfterMs = 0;
+        if (retryAfter) {
+          const parsed = parseInt(retryAfter, 10);
+          if (!isNaN(parsed)) retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
+        }
+        if (attempt < MAX_RETRIES) {
+          const backoff = retryAfterMs || (1000 * Math.pow(2, attempt - 1) + Math.random() * 500);
+          logger.warn(`[AnalyzeNode] OpenRouter 429 on attempt ${attempt}/${MAX_RETRIES}, retrying in ${Math.round(backoff)}ms`);
+          await new Promise(r => setTimeout(r, Math.min(backoff, 30000)));
+          continue;
+        }
+        logger.warn(`[AnalyzeNode] OpenRouter 429 exhausted all ${MAX_RETRIES} retries, skipping AI for this token`);
+        return null;
+      }
+
+      // Handle 402 with reduced token budget
+      const affordMatch = String(error?.response?.data?.error?.message || '').match(/afford\s+(\d+)/i);
+      const affordableBudget = affordMatch ? Number.parseInt(affordMatch[1], 10) : NaN;
+
+      if (status === 402 && Number.isFinite(affordableBudget) && affordableBudget > 12) {
+        try {
+          const retryBudget = Math.max(12, affordableBudget - 2);
+          logger.warn(`[AnalyzeNode] Retrying OpenRouter analysis with lower token budget: ${retryBudget}`);
+
+          const retryResponse = await axios.post(
+            `${config.openrouter.baseUrl}/chat/completions`,
+            requestBody(retryBudget),
+            requestConfig
+          );
+
+          const retryContent = retryResponse.data?.choices?.[0]?.message?.content || '';
+          const retryParsed = parseAIResponse(retryContent);
+          if (retryParsed) {
+            return retryParsed;
+          }
+        } catch (retryError) {
+          logger.warn(`[AnalyzeNode] OpenRouter retry failed: ${retryError}`);
+        }
+      } else if (attempt === MAX_RETRIES) {
+        logger.warn(`[AnalyzeNode] OpenRouter analysis failed after ${MAX_RETRIES} attempts: ${error}`);
+      } else {
+        // Transient errors: retry with backoff
+        const backoff = 1000 * Math.pow(2, attempt - 1);
+        logger.warn(`[AnalyzeNode] OpenRouter error ${status || error?.code} on attempt ${attempt}/${MAX_RETRIES}, retrying in ${Math.min(backoff, 30000)}ms`);
+        await new Promise(r => setTimeout(r, Math.min(backoff, 30000)));
+        continue;
+      }
       return null;
     }
-    return parsed;
-  } catch (error: any) {
-    const status = error?.response?.status;
-    if (status === 429) {
-      logger.warn(`[AnalyzeNode] OpenRouter 429 rate limited, skipping AI for this token`);
-      return null; // Don't retry on 429
-    }
-
-    // Handle 402 with reduced token budget
-    const affordMatch = String(error?.response?.data?.error?.message || '').match(/afford\s+(\d+)/i);
-    const affordableBudget = affordMatch ? Number.parseInt(affordMatch[1], 10) : NaN;
-
-    if (status === 402 && Number.isFinite(affordableBudget) && affordableBudget > 12) {
-      try {
-        const retryBudget = Math.max(12, affordableBudget - 2);
-        logger.warn(`[AnalyzeNode] Retrying OpenRouter analysis with lower token budget: ${retryBudget}`);
-
-        const retryResponse = await axios.post(
-          `${config.openrouter.baseUrl}/chat/completions`,
-          requestBody(retryBudget),
-          requestConfig
-        );
-
-        const retryContent = retryResponse.data?.choices?.[0]?.message?.content || '';
-        const retryParsed = parseAIResponse(retryContent);
-        if (retryParsed) {
-          return retryParsed;
-        }
-      } catch (retryError) {
-        logger.warn(`[AnalyzeNode] OpenRouter retry failed: ${retryError}`);
-      }
-    } else {
-      logger.warn(`[AnalyzeNode] OpenRouter analysis failed: ${error}`);
-    }
-    return null;
   }
+  return null;
 }
 
 /**

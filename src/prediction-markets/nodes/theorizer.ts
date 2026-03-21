@@ -6,8 +6,8 @@ import { PredictionIdea, NewsItem, PredictionMarketIntel } from '../../shared/ty
 import glmService from '../../shared/glm-service';
 import logger from '../../shared/logger';
 
-const MIN_EDGE = Number.parseFloat(process.env.PREDICTION_MIN_EDGE || '0.04');
-const MIN_SENTIMENT = Number.parseFloat(process.env.PREDICTION_MIN_SENTIMENT || '0.15');
+const MIN_EDGE = Number.parseFloat(process.env.PREDICTION_MIN_EDGE || '0.02');
+const MIN_SENTIMENT = Number.parseFloat(process.env.PREDICTION_MIN_SENTIMENT || '0.01');
 
 const IMPORTANCE_WEIGHT: Record<string, number> = {
   LOW: 0.5,
@@ -87,8 +87,16 @@ function buildFallbackIdea(
 ): PredictionIdea | null {
   if (!Number.isFinite(market.yesPrice)) return null;
   const implied = market.yesPrice as number;
-  const sentimentScore = intel?.sentimentScore ?? scoreNewsSentiment(news);
-  if (Math.abs(sentimentScore) < MIN_SENTIMENT) return null;
+  let sentimentScore = intel?.sentimentScore ?? scoreNewsSentiment(news);
+
+  // If no sentiment from news/intel, derive a weak mean-reversion signal
+  // based on how far the implied probability is from 0.5
+  if (Math.abs(sentimentScore) < MIN_SENTIMENT) {
+    const deviation = implied - 0.5;
+    if (Math.abs(deviation) < 0.05) return null; // Too close to 50/50, no edge
+    // Mean-reversion: bet against extreme probabilities
+    sentimentScore = -Math.sign(deviation) * (0.05 + Math.abs(deviation) * 0.15);
+  }
 
   const heatBoost = Math.min(0.08, (intel?.avgClusterHeat || 0) / 100 * 0.08);
   const delta = Math.min(0.24, 0.05 + Math.abs(sentimentScore) * 0.1 + heatBoost);

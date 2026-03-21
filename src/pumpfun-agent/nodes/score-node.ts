@@ -7,26 +7,29 @@ import { PumpFunAgentState, TokenAnalysis, TokenRecommendation } from '../../sha
 import { updateStats, addThought, updateStep } from '../state';
 
 // ── Scoring Factor Config ──────────────────────────────────────────────────
+// Tuned for aggressiveness: social presence + token quality are the strongest
+// signals for early pump.fun sniping. Freshness still matters but with a
+// wider window. Website quality is a bonus but most .fun sites are garbage.
 
 interface ScoringWeights {
   social: number;      // 0.30
   freshness: number;   // 0.20
-  websiteQuality: number; // 0.15
+  websiteQuality: number; // 0.10
   aiAnalysis: number;  // 0.15
-  tokenQuality: number; // 0.10
+  tokenQuality: number; // 0.15
   redFlagPenalty: number; // -0.10 (deduction)
 }
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
   social: 0.30,
   freshness: 0.20,
-  websiteQuality: 0.15,
+  websiteQuality: 0.10,
   aiAnalysis: 0.15,
-  tokenQuality: 0.10,
+  tokenQuality: 0.15,
   redFlagPenalty: 0.10,
 };
 
-const DEFAULT_MIN_SCORE = 0.4;
+const DEFAULT_MIN_SCORE = 0.35;
 
 // ── Main Entry ─────────────────────────────────────────────────────────────
 
@@ -80,10 +83,17 @@ export async function scoreNode(state: PumpFunAgentState): Promise<Partial<PumpF
   // Get high confidence tokens
   const highConfidenceTokens = scoredTokens.filter(t => t.overallScore >= minScoreThreshold);
 
-  // Log top scores for debugging
+  // Log top scores with factor breakdown for debugging
   const topN = scoredTokens.slice(0, 5);
   for (const t of topN) {
-    logger.info(`[ScoreNode] ${t.token.symbol}: ${t.overallScore.toFixed(3)}`);
+    const factors = computeFactors(t, now);
+    logger.info(
+      `[ScoreNode] ${t.token.symbol}: ${t.overallScore.toFixed(3)} | ` +
+      `soc=${factors.social.toFixed(2)} frsh=${factors.freshness.toFixed(2)} ` +
+      `web=${factors.websiteQuality.toFixed(2)} ai=${factors.aiAnalysis.toFixed(2)} ` +
+      `tok=${factors.tokenQuality.toFixed(2)} red=${factors.redFlagPenalty} | ` +
+      `rec=${t.recommendation}`
+    );
   }
 
   logger.info(
@@ -122,8 +132,9 @@ function computeFactors(token: TokenAnalysis, now: number): ScoreFactors {
 }
 
 /**
- * Factor 1: Social Presence Score (0-1 scale, max raw ~0.55)
+ * Factor 1: Social Presence Score (0-1 scale, max raw 0.55)
  * Normalizes to 0-1 by dividing by max possible (0.55).
+ * Relaxed: any single social link gives meaningful signal.
  */
 function computeSocialScore(token: TokenAnalysis): number {
   let raw = 0;
@@ -149,27 +160,31 @@ function computeSocialScore(token: TokenAnalysis): number {
     }
   }
 
-  // Normalize: max raw is 0.55
-  return Math.min(1, raw / 0.55);
+  // Normalize: max raw is 0.55, but give floor of 0.2 for any social presence
+  // This prevents tokens with just a telegram from getting ~0.36 on this factor
+  const normalized = Math.min(1, raw / 0.55);
+  return Math.max(normalized, raw > 0 ? 0.4 : 0.1);
 }
 
 /**
  * Factor 2: Freshness Score (0-1)
- * Prioritizes very recently launched tokens for sniping.
+ * Prioritizes recently launched tokens for sniping.
+ * Relaxed windows: most pump.fun tokens are viable within the first hour.
  */
 function computeFreshnessScore(token: TokenAnalysis, now: number): number {
-  if (!token.token?.createdAt) return 0.3; // neutral if unknown
+  if (!token.token?.createdAt) return 0.5; // neutral if unknown (was 0.3)
 
   const created = new Date(token.token.createdAt).getTime();
   const ageMs = now - created;
 
   if (ageMs < 0) return 1.0; // clock skew, treat as brand new
   if (ageMs < 2 * 60 * 1000) return 1.0;       // < 2 min
-  if (ageMs < 5 * 60 * 1000) return 0.8;       // < 5 min
-  if (ageMs < 15 * 60 * 1000) return 0.5;      // < 15 min
-  if (ageMs < 30 * 60 * 1000) return 0.3;      // < 30 min
-  if (ageMs < 60 * 60 * 1000) return 0.1;      // < 1 hour
-  return 0.0;
+  if (ageMs < 5 * 60 * 1000) return 0.9;       // < 5 min (was 0.8)
+  if (ageMs < 15 * 60 * 1000) return 0.7;      // < 15 min (was 0.5)
+  if (ageMs < 30 * 60 * 1000) return 0.5;      // < 30 min (was 0.3)
+  if (ageMs < 60 * 60 * 1000) return 0.3;      // < 1 hour
+  if (ageMs < 2 * 60 * 60 * 1000) return 0.15; // < 2 hours
+  return 0.05;                                   // old
 }
 
 /**
@@ -185,7 +200,8 @@ function computeWebsiteQualityScore(token: TokenAnalysis): number {
  * Factor 4: AI Analysis Score (0-1)
  * Uses recommendation mapping but with a smarter fallback:
  * If AI failed (returned STRONG_AVOID) and there's no website,
- * treat as neutral (0.3) instead of terrible (0.05).
+ * treat as neutral (0.4) instead of terrible.
+ * For pump.fun sniping, we should be optimistic on missing data.
  */
 function computeAIAnalysisScore(token: TokenAnalysis): number {
   const rec = token.recommendation;
@@ -193,19 +209,18 @@ function computeAIAnalysisScore(token: TokenAnalysis): number {
   switch (rec) {
     case 'STRONG_BUY': return 0.95;
     case 'BUY':        return 0.85;
-    case 'HOLD':       return 0.50;
-    case 'AVOID':      return 0.25;
+    case 'HOLD':       return 0.55;  // was 0.50 — slight upward bias
+    case 'AVOID':      return 0.35;  // was 0.25 — don't over-penalize
     case 'STRONG_AVOID':
     default: {
-      // If AI failed and there's no website, it's not necessarily bad.
-      // STRONG_AVOID with no evidence is likely a failed LLM call.
+      // If AI failed and there's no website/rationale, treat as neutral-optimistic
       const hasWebsite = token.website?.exists;
       const hasRationale = token.rationale && token.rationale.length > 20;
       if (!hasWebsite && !hasRationale) {
-        return 0.3; // neutral — don't penalize for LLM failures
+        return 0.4; // neutral-optimistic — don't penalize for LLM failures
       }
-      // If there's actual analysis supporting the avoid, respect it
-      return 0.15;
+      // If there's actual analysis supporting the avoid, respect it somewhat
+      return 0.25;
     }
   }
 }
@@ -255,12 +270,20 @@ function computeTokenQualityScore(token: TokenAnalysis): number {
 /**
  * Factor 6: Red Flag Penalty (count of flags)
  * Each red flag from AI analysis contributes -1 to the raw penalty.
- * The weight applied externally controls the magnitude.
+ * Capped at 3 (was 5) to avoid extreme penalties from verbose LLM output.
+ * Most tokens get 1-2 red flags from the fallback ("No website", "No whitepaper")
+ * so we need to limit the damage.
  */
 function computeRedFlagPenalty(token: TokenAnalysis): number {
   if (!token.redFlags || token.redFlags.length === 0) return 0;
-  // Cap at 5 flags to avoid extreme penalties from verbose LLM output
-  return Math.min(token.redFlags.length, 5);
+  // Filter out generic "no website" flags — most pump tokens don't have one
+  const meaningfulFlags = token.redFlags.filter(f =>
+    !f.toLowerCase().includes('no website') &&
+    !f.toLowerCase().includes('no whitepaper') &&
+    !f.toLowerCase().includes('no team')
+  );
+  // Cap at 3 flags
+  return Math.min(meaningfulFlags.length, 3);
 }
 
 // ── Weight Resolution ──────────────────────────────────────────────────────

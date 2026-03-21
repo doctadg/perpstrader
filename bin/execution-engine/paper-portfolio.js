@@ -14,7 +14,7 @@ const logger_1 = __importDefault(require("../shared/logger"));
  */
 class PaperPortfolioManager {
     static instance;
-    initialBalance = 10000; // $10,000 starting balance
+    initialBalance = parseFloat(process.env.PAPER_BALANCE || '30000'); // $30k starting balance (env override)
     cashBalance;
     positions = new Map();
     realizedPnL = 0;
@@ -98,7 +98,7 @@ class PaperPortfolioManager {
     /**
      * Execute a paper trade
      */
-    async executeTrade(symbol, side, size, price, strategyId) {
+    async executeTrade(symbol, side, size, price, strategyId, leverage = 10) {
         const existingPosition = this.positions.get(symbol);
         let pnl = 0;
         let entryExit = 'ENTRY';
@@ -140,7 +140,7 @@ class PaperPortfolioManager {
         else {
             // Opening new position
             const positionSide = side === 'BUY' ? 'LONG' : 'SHORT';
-            const marginRequired = price * size * 0.1; // 10x leverage = 10% margin
+            const marginRequired = price * size / leverage;
             if (marginRequired > this.cashBalance) {
                 throw new Error(`Insufficient balance: need $${marginRequired.toFixed(2)}, have $${this.cashBalance.toFixed(2)}`);
             }
@@ -151,9 +151,10 @@ class PaperPortfolioManager {
                 entryPrice: price,
                 entryTime: new Date(),
                 strategyId,
+                leverage,
             });
             this.cashBalance -= marginRequired;
-            logger_1.default.info(`[PaperPortfolio] Opened ${positionSide} ${symbol} x${size} @ $${price.toFixed(2)}`);
+            logger_1.default.info(`[PaperPortfolio] Opened ${positionSide} ${symbol} x${size} @ $${price.toFixed(2)} (${leverage}x)`);
         }
         // Create trade record
         const trade = {
@@ -198,13 +199,13 @@ class PaperPortfolioManager {
                 entryPrice: pos.entryPrice,
                 markPrice: currentPrice,
                 unrealizedPnL: positionPnL,
-                leverage: 10,
-                marginUsed: pos.entryPrice * pos.size * 0.1,
-                entryTime: pos.entryTime, // NEW: Include entry time for time-based exits
+                leverage: pos.leverage || 10,
+                marginUsed: pos.entryPrice * pos.size / (pos.leverage || 10),
+                entryTime: pos.entryTime,
             });
         }
         const totalValue = this.cashBalance + unrealizedPnL +
-            Array.from(this.positions.values()).reduce((sum, p) => sum + p.entryPrice * p.size * 0.1, 0);
+            Array.from(this.positions.values()).reduce((sum, p) => sum + p.entryPrice * p.size / (p.leverage || 10), 0);
         const dailyPnL = totalValue - this.dailyStartValue;
         return {
             totalValue,

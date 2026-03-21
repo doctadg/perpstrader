@@ -116,6 +116,10 @@ export declare class IdeaQueue {
      */
     getIdeasByStatus(status: IdeaStatus): Promise<StrategyIdea[]>;
     /**
+     * Get market data candles for backtesting (reuses existing DB connection)
+     */
+    getMarketDataForBacktest(symbols: string[], cutoffTime: string): any[];
+    /**
      * Delete old completed ideas
      */
     cleanupOldIdeas(ageDays?: number): Promise<number>;

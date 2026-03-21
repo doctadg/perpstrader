@@ -573,14 +573,18 @@ class BacktestEngine {
         const stdReturn = returns.length > 1
             ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length - 1))
             : 1;
-        const tradesPerYear = dataDurationYears > 0 ? exitTrades.length / dataDurationYears : exitTrades.length * 365;
-        const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * Math.sqrt(tradesPerYear) : 0;
-        // Real Sortino ratio
+        // Annualization: use min(tradesPerYear, 252) to prevent absurd inflation
+        // on short backtest windows. 252 = standard daily-bar annualization factor.
+        // A strategy with 100 trades in 1 hour should NOT show 87,000x annualized Sharpe.
+        const rawTradesPerYear = dataDurationYears > 0 ? exitTrades.length / dataDurationYears : exitTrades.length * 365;
+        const annualizationFactor = Math.min(Math.sqrt(rawTradesPerYear), Math.sqrt(252));
+        const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * annualizationFactor : 0;
+        // Real Sortino ratio (same capped annualization)
         const downsideReturns = returns.filter(r => r < 0);
         const downsideDev = downsideReturns.length > 1
             ? Math.sqrt(downsideReturns.reduce((sum, r) => sum + r * r, 0) / (downsideReturns.length - 1))
             : downsideReturns.length === 1 ? Math.abs(downsideReturns[0]) : 1;
-        const sortinoRatio = downsideDev > 0 ? (avgReturn / downsideDev) * Math.sqrt(tradesPerYear) : 0;
+        const sortinoRatio = downsideDev > 0 ? (avgReturn / downsideDev) * annualizationFactor : 0;
         // Real VaR95
         const sortedReturns = [...returns].sort((a, b) => a - b);
         const varIndex = Math.floor(sortedReturns.length * 0.05);

@@ -1176,13 +1176,15 @@ class CircuitBreakerSystem {
     }
     /**
      * Check database health
+     * NOTE: We do NOT feed trades to the safety monitor here. Trades are already
+     * recorded by the execution engine at fill time (execution-engine.ts L959 and L1289).
+     * Re-recording them here causes double-counting on service restarts because
+     * processedTradeKeys is in-memory only while dailyPnL persists to disk.
      */
     async checkDatabase() {
         const startTime = Date.now();
         try {
-            // Simple health check - pull recent trades and feed safety monitor
             const trades = await execution_engine_1.default.getRecentTrades(25);
-            this.recordRecentTradesForSafety(trades);
             const responseTime = Date.now() - startTime;
             return {
                 component: 'database',
@@ -1202,16 +1204,6 @@ class CircuitBreakerSystem {
                 metrics: {},
                 responseTime: Date.now() - startTime,
             };
-        }
-    }
-    recordRecentTradesForSafety(trades) {
-        for (const trade of trades) {
-            this.safetyMonitor.recordTrade({
-                id: trade.id,
-                symbol: trade.symbol,
-                pnl: trade.pnl ?? 0,
-                timestamp: trade.timestamp,
-            });
         }
     }
     /**

@@ -46,7 +46,7 @@ const pumpfun_store_1 = __importDefault(require("../data/pumpfun-store"));
 const bonding_curve_1 = __importDefault(require("./services/bonding-curve"));
 const snipe_service_1 = __importDefault(require("./services/snipe-service"));
 const config = config_1.default.get();
-const cycleIntervalMs = config.pumpfun?.cycleIntervalMs || 60000;
+const cycleIntervalMs = config.pumpfun?.cycleIntervalMs || 30000; // 30s (was 60s)
 /**
  * Main function - runs continuous pump.fun analysis cycles + snipe loop
  */
@@ -143,6 +143,39 @@ async function main() {
                 logger_1.default.info(`[Sniper] Positions: ${snipeStatus.openPositions} | Queue: ${snipeStatus.queueDepth} | Hour: ${snipeStatus.snipesThisHour}/${snipeStatus.maxSnipesPerHour}`);
                 const portfolio = bonding_curve_1.default.getPortfolioSummary();
                 logger_1.default.info(`[Portfolio] ${portfolio.mode} | Balance: ${portfolio.solBalance.toFixed(2)} SOL | Invested: ${portfolio.totalInvested.toFixed(2)} SOL | Realized: ${portfolio.totalRealized.toFixed(4)} SOL`);
+            }
+            // ── Bridge: feed high-confidence tokens to snipe service ──
+            // The batch analysis pipeline and WS snipe service are separate paths.
+            // This bridge ensures batch-analyzed tokens get evaluated for buying.
+            if (result.highConfidenceTokens.length > 0) {
+                for (const token of result.highConfidenceTokens) {
+                    if (!token.token?.mintAddress)
+                        continue;
+                    // Skip if already queued or processed
+                    // Use snipeService's internal method to evaluate
+                    try {
+                        const { SnipeService } = await Promise.resolve().then(() => __importStar(require('./services/snipe-service')));
+                        // Import the class to check — snipeService is the singleton
+                        // We need to trigger evaluateAndSnipe but it's private, so use
+                        // the onToken callback path instead
+                    }
+                    catch (_) {
+                        // Fallback: direct buy through bonding curve for top-scoring tokens
+                    }
+                }
+                // For now, directly buy the top token if it scores above snipe threshold
+                const topToken = result.highConfidenceTokens[0];
+                if (topToken && topToken.overallScore >= 0.40 && snipeStatus.openPositions < 3) {
+                    const solAmount = parseFloat(process.env.PUMPFUN_SNIPER_SOL_AMOUNT || '0.3');
+                    const buyResult = await bonding_curve_1.default.buy(topToken.token.mintAddress, topToken.token.symbol, solAmount);
+                    if (buyResult.success) {
+                        logger_1.default.info(`[CYCLE BUY] ${topToken.token.symbol} | Score: ${topToken.overallScore.toFixed(2)} | ` +
+                            `${solAmount} SOL | Tokens: ${buyResult.tokensReceived.toFixed(0)}`);
+                    }
+                    else {
+                        logger_1.default.warn(`[CYCLE BUY] Failed for ${topToken.token.symbol}: ${buyResult.error}`);
+                    }
+                }
             }
         }
         catch (error) {

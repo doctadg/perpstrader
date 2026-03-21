@@ -472,9 +472,10 @@ function calculateMetrics(strategyId, trades, initialCapital, finalCapital, cand
     const stdReturn = returns.length > 1
         ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length - 1))
         : 1;
-    // Estimate trades per year for annualization
-    const tradesPerYear = dataDurationYears > 0 ? exitTrades.length / dataDurationYears : exitTrades.length * 365;
-    const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * Math.sqrt(tradesPerYear) : 0;
+    // Estimate trades per year for annualization, cap at sqrt(252) (standard daily annualization)
+    const rawTradesPerYear = dataDurationYears > 0 ? exitTrades.length / dataDurationYears : exitTrades.length * 365;
+    const annualizationFactor = Math.min(Math.sqrt(rawTradesPerYear), Math.sqrt(252));
+    const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * annualizationFactor : 0;
     // Real Sortino ratio (downside deviation only)
     const downsideReturns = returns.filter(r => r < 0);
     const downsideDev = downsideReturns.length > 1
@@ -482,7 +483,7 @@ function calculateMetrics(strategyId, trades, initialCapital, finalCapital, cand
         : downsideReturns.length === 1
             ? Math.abs(downsideReturns[0])
             : 1;
-    const sortinoRatio = downsideDev > 0 ? (avgReturn / downsideDev) * Math.sqrt(tradesPerYear) : 0;
+    const sortinoRatio = downsideDev > 0 ? (avgReturn / downsideDev) * annualizationFactor : 0;
     // Real VaR95 (5th percentile of returns, as loss)
     const sortedReturns = [...returns].sort((a, b) => a - b);
     const varIndex = Math.floor(sortedReturns.length * 0.05);

@@ -25,6 +25,7 @@ class SafekeepingFundAgent {
     cycleInterval;
     cycleCount = 0;
     timer = null;
+    lastTotalValue = null;
     constructor(config, cycleInterval) {
         this.config = config;
         this.cycleInterval = cycleInterval || constants_1.DEFAULT_CYCLE_INTERVAL;
@@ -117,6 +118,12 @@ class SafekeepingFundAgent {
             throw new Error('Orchestrator not initialized');
         }
         const startTime = Date.now();
+        // Skip cycle early when no funds are available (after first cycle has run)
+        if (this.lastTotalValue !== null && this.lastTotalValue <= 0) {
+            logger_1.default.info('[SafekeepingAgent] Skipping cycle - no funds (totalValue is 0)');
+            this.cycleCount++;
+            return;
+        }
         try {
             logger_1.default.info(`[SafekeepingAgent] Starting cycle ${this.cycleCount + 1}`);
             const result = await this.orchestrator.invoke();
@@ -186,6 +193,8 @@ class SafekeepingFundAgent {
                 `APR: ${result.totalEffectiveAPR.toFixed(2)}%, ` +
                 `Rebalances: ${result.executionResults.length}`);
             this.cycleCount++;
+            // Track totalValue for early return optimization
+            this.lastTotalValue = result.totalValue || 0;
         }
         catch (error) {
             logger_1.default.error(`[SafekeepingAgent] Cycle ${this.cycleCount + 1} failed: ${error}`);

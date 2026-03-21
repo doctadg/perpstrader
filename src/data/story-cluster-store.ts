@@ -4,7 +4,7 @@
 import BetterSqlite3 from 'better-sqlite3';
 import logger from '../shared/logger';
 import crypto from 'crypto';
-import { NewsItem, NewsCategory } from '../shared/types';
+import { NewsItem, NewsCategory, NewsSentiment, NewsImportance } from '../shared/types';
 
 export interface StoryCluster {
     id: string;
@@ -624,6 +624,64 @@ class StoryClusterStore {
         } catch (error) {
             logger.error('[StoryClusterStore] Failed to find clusters by article ids:', error);
             return new Map();
+        }
+    }
+
+    /**
+     * Fetch recent articles from news_articles that have NOT been assigned to any cluster.
+     * Used by the clustering node when the pipeline delivers zero new articles (e.g., all
+     * duplicates from the store node).
+     */
+    async getUnclusteredArticles(limit: number = 20): Promise<NewsItem[]> {
+        await this.initialize();
+        if (!this.db) return [];
+
+        try {
+            const rows = this.db.prepare(`
+                SELECT na.id, na.title, na.content, na.summary, na.source, na.url,
+                       na.published_at, na.categories, na.tags, na.sentiment, na.importance,
+                       na.snippet, na.scraped_at, na.created_at, na.market_links, na.metadata
+                FROM news_articles na
+                WHERE na.id NOT IN (SELECT article_id FROM cluster_articles)
+                ORDER BY na.published_at DESC
+                LIMIT ?
+            `).all(limit) as any[];
+
+            return rows.map(row => {
+                let categories: NewsCategory[] = [];
+                let tags: string[] = [];
+                let marketLinks: any[] = [];
+                let metadata: Record<string, any> | undefined;
+
+                try { categories = JSON.parse(row.categories) || []; } catch { /* empty */ }
+                try { tags = JSON.parse(row.tags) || []; } catch { /* empty */ }
+                try { marketLinks = JSON.parse(row.market_links) || []; } catch { /* empty */ }
+                if (row.metadata) {
+                    try { metadata = JSON.parse(row.metadata); } catch { /* empty */ }
+                }
+
+                return {
+                    id: row.id,
+                    title: row.title,
+                    content: row.content || undefined,
+                    summary: row.summary || undefined,
+                    source: row.source,
+                    url: row.url,
+                    publishedAt: row.published_at ? new Date(row.published_at) : undefined,
+                    categories,
+                    tags,
+                    sentiment: (row.sentiment || 'NEUTRAL') as NewsSentiment,
+                    importance: (row.importance || 'MEDIUM') as NewsImportance,
+                    snippet: row.snippet || row.title,
+                    scrapedAt: new Date(row.scraped_at),
+                    createdAt: new Date(row.created_at),
+                    marketLinks,
+                    metadata,
+                } as NewsItem;
+            });
+        } catch (error) {
+            logger.error('[StoryClusterStore] Failed to fetch unclustered articles:', error);
+            return [];
         }
     }
 }

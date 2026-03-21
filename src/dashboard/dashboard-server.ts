@@ -1439,7 +1439,11 @@ class DashboardServer {
         const minScore = parseFloat(req.query.minScore as string) || 0;
         await pumpfunStore.initialize();
         const tokens = await pumpfunStore.getRecentTokens(limit, minScore);
-        res.json({ tokens });
+        logger.info(`[PumpFun DEBUG] getRecentTokens returned ${tokens.length} tokens (limit=${limit}, minScore=${minScore})`);
+        // Serialize with BigInt protection
+        const safeTokens = JSON.parse(JSON.stringify(tokens, (_, v) => typeof v === 'bigint' ? v.toString() : v));
+        logger.info(`[PumpFun DEBUG] safeTokens length: ${safeTokens.length}`);
+        res.json({ tokens: safeTokens });
       } catch (error) {
         logger.error('[PumpFun] Tokens endpoint error:', error);
         res.json({ tokens: [] });
@@ -1455,7 +1459,7 @@ class DashboardServer {
           res.status(404).json({ error: 'Token not found' });
           return;
         }
-        res.json({ token });
+        res.json({ token: JSON.parse(JSON.stringify(token, (_, v) => typeof v === 'bigint' ? v.toString() : v)) });
       } catch (error) {
         logger.error(`[PumpFun] Error fetching token ${req.params.mint}:`, error);
         res.status(500).json({ error: 'Internal server error' });
@@ -1497,7 +1501,7 @@ class DashboardServer {
         const limit = parseInt(req.query.limit as string) || 100;
         await pumpfunStore.initialize();
         const tokens = await pumpfunStore.getHighConfidenceTokens(minScore, limit);
-        res.json({ tokens });
+        res.json({ tokens: JSON.parse(JSON.stringify(tokens, (_, v) => typeof v === "bigint" ? v.toString() : v)) });
       } catch (error) {
         logger.error('[PumpFun] High confidence endpoint error:', error);
         res.json({ tokens: [] });
@@ -1516,7 +1520,7 @@ class DashboardServer {
         const limit = parseInt(req.query.limit as string) || 50;
         await pumpfunStore.initialize();
         const tokens = await pumpfunStore.getByRecommendation(rec as any, limit);
-        res.json({ tokens });
+        res.json({ tokens: JSON.parse(JSON.stringify(tokens, (_, v) => typeof v === "bigint" ? v.toString() : v)) });
       } catch (error) {
         logger.error(`[PumpFun] Recommendation endpoint error:`, error);
         res.json({ tokens: [] });

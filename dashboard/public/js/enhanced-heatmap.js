@@ -104,12 +104,12 @@ function renderAlerts(clusters) {
         alert.innerHTML = `
             <div class="alert-header" onclick="toggleAlertDetails('${alertId}')">
                 <div class="alert-title">
-                    <span class="alert-icon">${isCritical ? '🔴' : '🟡'}</span>
+                    <span class="alert-icon">${isCritical ? '<span style="color:#f87171">●</span>' : '<span style="color:#facc15">●</span>'}</span>
                     <span class="alert-severity">${cluster.urgency}</span>
                     <span class="alert-message">${cluster.topic}</span>
                 </div>
                 <div class="alert-actions">
-                    <button class="alert-dismiss" onclick="event.stopPropagation(); dismissAlert('${alertId}')">✕</button>
+                    <button class="alert-dismiss" onclick="event.stopPropagation(); dismissAlert('${alertId}')">x</button>
                 </div>
             </div>
             <div class="alert-details" id="${alertId}-details">
@@ -195,23 +195,23 @@ function getPredictionBadge(cluster) {
 
     if (heat > 80 && (trend === 'UP' || velocity > 50)) {
         prediction = 'SPIKING';
-        emoji = '🚀';
+        emoji = '▲';
         color = '#00ff9d';
     } else if (trend === 'UP' || velocity > 20) {
         prediction = 'GROWING';
-        emoji = '📈';
+        emoji = '△';
         color = '#00f2ff';
     } else if (trend === 'DOWN' && velocity < -50) {
         prediction = 'CRASHING';
-        emoji = '💥';
+        emoji = '▼';
         color = '#ff3e3e';
     } else if (trend === 'DOWN' || velocity < -20) {
         prediction = 'DECAYING';
-        emoji = '📉';
+        emoji = '▽';
         color = '#ffb300';
     } else {
         prediction = 'STABLE';
-        emoji = '➡️';
+        emoji = '—';
         color = '#666';
     }
 
@@ -588,7 +588,7 @@ function renderHeatmap(clusters) {
                 <span class="category-badge">${cluster.category}</span>
                 <div class="card-badges">
                     <span class="urgency-badge ${urgencyClass}">${cluster.urgency || 'MEDIUM'}</span>
-                    ${isCrossCategory ? '<span class="cross-category-badge" onclick="event.stopPropagation(); openCrossCategoryModal(\'' + cluster.id + '\')">🌐</span>' : ''}
+                    ${isCrossCategory ? '<span class="cross-category-badge" onclick="event.stopPropagation(); openCrossCategoryModal(\'' + cluster.id + '\')"><span style="font-size:0.8em">X</span></span>' : ''}
                 </div>
             </div>
             <div class="card-topic">${cluster.topic} ${trendArrow}</div>

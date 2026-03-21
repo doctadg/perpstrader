@@ -5,6 +5,7 @@
 import logger from '../shared/logger';
 import newsVectorStore from '../data/news-vector-store';
 import storyClusterStoreEnhanced from '../data/story-cluster-store-enhanced';
+import storyClusterStore from '../data/story-cluster-store';
 import crypto from 'crypto';
 import glmService from '../../shared/glm-service';
 import openrouterService from '../../shared/openrouter-service';
@@ -31,7 +32,7 @@ const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM === 'true';
 const USE_ENHANCED_CLUSTERING = process.env.USE_ENHANCED_SEMANTIC_CLUSTERING !== 'false'; // Default true
 const CLUSTER_MERGE_HOURS_THRESHOLD = 48;
 const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '20', 10);
-const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.80; // Slightly lowered for better merging
+const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.55; // Lowered for better merging with entity weighting
 
 export interface EnhancedClusteringState {
     currentStep?: string;
@@ -68,10 +69,15 @@ export interface ClusteringResult {
  * Enhanced story clustering with improved title clustering
  */
 export async function enhancedStoryClusterNode(state: any): Promise<Partial<EnhancedClusteringState>> {
-    const articles = state.categorizedNews || [];
+    let articles = state.categorizedNews || [];
 
     if (articles.length === 0) {
-        return { currentStep: 'CLUSTERING_SKIPPED_NO_ARTICLES' };
+        logger.info('[EnhancedClusterNode] No new articles from pipeline, fetching unclustered articles from DB...');
+        articles = await storyClusterStore.getUnclusteredArticles(CLUSTER_BATCH_SIZE) as any;
+        if (articles.length === 0) {
+            return { currentStep: 'CLUSTERING_SKIPPED_NO_ARTICLES' };
+        }
+        logger.info(`[EnhancedClusterNode] Found ${articles.length} unclustered articles from DB`);
     }
 
     // Filter non-market-moving content
@@ -132,6 +138,48 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
         );
         stats.titleClustersCreated = titleClusters.length;
         logger.info(`[EnhancedClusterNode] Created ${titleClusters.length} title-based clusters`);
+
+        // FIX 7: Cross-batch dedup - check recent DB clusters (last 24h) for title matches
+        if (titleClusters.length > 0) {
+            const recentClusters = await storyClusterStoreEnhanced.getHotClusters(200, 24);
+            let crossBatchMerged = 0;
+
+            for (const titleCluster of titleClusters) {
+                const repTitle = titleCluster.representativeTitle;
+                let bestMatchCluster: any | null = null;
+                let bestMatchScore = 0;
+
+                for (const dbCluster of recentClusters) {
+                    // Compare title similarity using the semantic clustering service
+                    const titleSim = await titleSemanticClustering.calculateSimilarity(repTitle, dbCluster.topic);
+                    if (titleSim.similarityScore > bestMatchScore && titleSim.similarityScore > 0.75) {
+                        bestMatchScore = titleSim.similarityScore;
+                        bestMatchCluster = dbCluster;
+                    }
+                }
+
+                if (bestMatchCluster) {
+                    // Pre-assign all articles in this title cluster to the existing DB cluster
+                    // by marking them so processArticleEnhanced will find them via the title reverse index
+                    for (const articleId of titleCluster.articleIds) {
+                        // Store the article-to-cluster mapping so the title reverse index can find it
+                        await storyClusterStoreEnhanced.addArticleToCluster(
+                            bestMatchCluster.id,
+                            articleId,
+                            getTitleFingerprint(repTitle),
+                            0,
+                            'NEUTRAL'
+                        );
+                        crossBatchMerged++;
+                    }
+                    logger.info(`[EnhancedClusterNode] Cross-batch dedup: "${repTitle.slice(0, 50)}..." -> existing cluster "${bestMatchCluster.topic.slice(0, 50)}..." (${bestMatchScore.toFixed(2)})`);
+                }
+            }
+
+            if (crossBatchMerged > 0) {
+                logger.info(`[EnhancedClusterNode] Cross-batch dedup: pre-assigned ${crossBatchMerged} articles to existing clusters`);
+            }
+        }
     }
 
     // ============================================================
@@ -391,6 +439,62 @@ async function processArticleEnhanced(
     let assignedClusterId: string | null = null;
     let semanticMatch = false;
 
+    // ============================================================
+    // FIX 3: Entity-first matching cascade (BEFORE topicKey lookup)
+    // Extract entities from the article and find clusters sharing them
+    // ============================================================
+    if (USE_ENHANCED_CLUSTERING && entities.length > 0) {
+        const articleEntityNames = entities.map(e => e.normalized || e.name.toLowerCase());
+        const entityClusterMap = await storyClusterStoreEnhanced.findClustersByEntities(articleEntityNames);
+
+        if (entityClusterMap.size > 0) {
+            const articleEntitySet = new Set(articleEntityNames);
+            let bestEntityCluster: string | null = null;
+            let bestEntityOverlap = 0;
+
+            for (const [clusterId, matchingEntities] of entityClusterMap) {
+                // Skip known missing clusters
+                if (missingClusterIds.has(clusterId)) continue;
+
+                // Calculate Jaccard overlap: intersection / union
+                const intersection = [...matchingEntities].filter(e => articleEntitySet.has(e)).length;
+                const unionSet = new Set([...articleEntitySet, ...matchingEntities]);
+                const jaccard = intersection / unionSet.size;
+
+                if (jaccard > bestEntityOverlap) {
+                    bestEntityOverlap = jaccard;
+                    bestEntityCluster = clusterId;
+                }
+            }
+
+            // If entity overlap >= 0.4 (40%), assign immediately
+            if (bestEntityCluster && bestEntityOverlap >= 0.4) {
+                // Verify cluster exists and matches category
+                if (knownClusterIds.has(bestEntityCluster)) {
+                    const cluster = await storyClusterStoreEnhanced.getClusterById(bestEntityCluster);
+                    if (cluster?.category === article.categories[0]) {
+                        assignedClusterId = bestEntityCluster;
+                        semanticMatch = true;
+                        logger.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)})`);
+                    }
+                } else if (!missingClusterIds.has(bestEntityCluster)) {
+                    const exists = await storyClusterStoreEnhanced.clusterExists(bestEntityCluster);
+                    if (exists) {
+                        const cluster = await storyClusterStoreEnhanced.getClusterById(bestEntityCluster);
+                        if (cluster?.category === article.categories[0]) {
+                            assignedClusterId = bestEntityCluster;
+                            semanticMatch = true;
+                            knownClusterIds.add(bestEntityCluster);
+                            logger.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)})`);
+                        }
+                    } else {
+                        missingClusterIds.add(bestEntityCluster);
+                    }
+                }
+            }
+        }
+    }
+
     // 1. Topic key match (fastest)
     if (topicKey) {
         const existingByTopic = await storyClusterStoreEnhanced.getClusterIdByTopicKey(topicKey);
@@ -404,13 +508,33 @@ async function processArticleEnhanced(
 
     // 2. NEW: Title cluster match
     if (!assignedClusterId && titleClusterId) {
-        // Find if any article in this title cluster is already assigned
+        // Find if any article in this title cluster is already assigned to a DB cluster
         const titleCluster = titleClusters.find(tc => tc.id === titleClusterId);
         if (titleCluster) {
-            // Check if any article in this cluster already has a cluster assignment
-            for (const otherTitle of titleCluster.titles) {
-                // This would need a lookup from title to cluster - simplified here
-                // In production, maintain a reverse index
+            // FIX 2: Build a reverse index from article IDs in this title cluster to DB cluster IDs
+            // Check each article in the title cluster for an existing cluster assignment
+            for (const articleId of titleCluster.articleIds) {
+                if (articleId === article.id) continue; // Skip the current article
+                const existingClusterId = await storyClusterStoreEnhanced.getClusterIdByArticleId(articleId);
+                if (existingClusterId) {
+                    // Validate the cluster exists and matches category
+                    if (missingClusterIds.has(existingClusterId)) continue;
+                    if (!knownClusterIds.has(existingClusterId)) {
+                        const exists = await storyClusterStoreEnhanced.clusterExists(existingClusterId);
+                        if (exists) {
+                            knownClusterIds.add(existingClusterId);
+                        } else {
+                            missingClusterIds.add(existingClusterId);
+                            continue;
+                        }
+                    }
+                    const cluster = await storyClusterStoreEnhanced.getClusterById(existingClusterId);
+                    if (cluster?.category === article.categories[0]) {
+                        assignedClusterId = existingClusterId;
+                        logger.debug(`[EnhancedClusterNode] Title cluster reverse index match: article ${articleId.slice(0, 8)}... -> cluster ${existingClusterId.slice(0, 8)}...`);
+                        break;
+                    }
+                }
             }
         }
     }
@@ -544,6 +668,56 @@ async function processArticleEnhanced(
 
         finalClusterId = assignedClusterId;
     } else {
+        // FIX 6: Anti-spam dedup - check for recent cluster with same primary entity
+        if (entities.length > 0) {
+            // Find the primary entity (highest confidence TOKEN or ORGANIZATION)
+            const primaryEntities = entities
+                .filter(e => e.type === 'TOKEN' || e.type === 'ORGANIZATION' || e.type === 'GOVERNMENT_BODY')
+                .sort((a, b) => b.confidence - a.confidence);
+
+            if (primaryEntities.length > 0) {
+                const primaryEntity = primaryEntities[0];
+                const recentClusters = await storyClusterStoreEnhanced.findRecentClustersByPrimaryEntity(
+                    primaryEntity.normalized || primaryEntity.name,
+                    2, // last 2 hours
+                    article.categories[0]
+                );
+
+                if (recentClusters.length > 0) {
+                    // Merge into the most recent/highest-heat cluster instead of creating new
+                    const target = recentClusters[0];
+                    logger.info(`[EnhancedClusterNode] Anti-spam: merging into existing cluster "${target.topic.slice(0, 40)}..." (primary entity: ${primaryEntity.name})`);
+
+                    const heatDelta = await storyClusterStoreEnhanced.calculateEnhancedHeat(article, new Date(), 10);
+                    const titleFingerprint = getTitleFingerprint(article.title);
+                    await storyClusterStoreEnhanced.addArticleToCluster(
+                        target.id,
+                        article.id,
+                        titleFingerprint,
+                        heatDelta,
+                        aiLabel.trendDirection
+                    );
+
+                    if (useVectorMode) {
+                        await newsVectorStore.storeArticle(article as any, target.id);
+                    }
+
+                    // Link entities
+                    for (const entity of entities) {
+                        try {
+                            const entityId = await storyClusterStoreEnhanced.findOrCreateEntity(entity.name, entity.type as any);
+                            await storyClusterStoreEnhanced.linkEntityToArticle(entityId, article.id, entity.confidence);
+                            await storyClusterStoreEnhanced.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
+                        } catch (e) {
+                            // Ignore entity linking errors
+                        }
+                    }
+
+                    return { clusterId: target.id, created: false, assigned: true, semanticMatch: false };
+                }
+            }
+        }
+
         // Create new cluster
         const newClusterId = crypto.randomUUID();
         const articleDate = article.publishedAt || new Date();
@@ -679,7 +853,7 @@ async function mergeSimilarClustersEnhanced(useVectorMode: boolean): Promise<{ m
                     continue;
                 }
 
-                const similarity = calculateEnhancedSimilarity(c1, c2);
+                const similarity = await calculateEnhancedSimilarityAsync(c1, c2);
 
                 if (similarity.similarity >= CLUSTER_MERGE_SIMILARITY_THRESHOLD) {
                     const target = c1.heatScore >= c2.heatScore ? c1 : c2;
@@ -710,56 +884,54 @@ async function mergeSimilarClustersEnhanced(useVectorMode: boolean): Promise<{ m
 
 /**
  * Calculate enhanced cluster similarity with entity overlap
+ * FIX 4: Replaced hardcoded entitySimilarity: 0 with actual Jaccard overlap
+ * FIX 5: Reweighted to use entity (0.4), topic (0.3), keywords (0.3)
  */
-function calculateEnhancedSimilarity(c1: any, c2: any): ClusterSimilarityResult {
-    let score = 0;
-    let factors = 0;
+async function calculateEnhancedSimilarityAsync(c1: any, c2: any): Promise<ClusterSimilarityResult> {
+    // FIX 4: Fetch entity sets for both clusters and compute Jaccard overlap
+    const entities1 = await storyClusterStoreEnhanced.getClusterEntities(c1.id);
+    const entities2 = await storyClusterStoreEnhanced.getClusterEntities(c2.id);
 
-    // Topic key match (50% weight)
-    if (c1.topicKey && c2.topicKey && c1.topicKey === c2.topicKey) {
-        score += 0.5;
-        factors += 0.5;
+    let entityJaccard = 0;
+    if (entities1.length > 0 && entities2.length > 0) {
+        const set1 = new Set(entities1);
+        const set2 = new Set(entities2);
+        const intersection = [...set1].filter(e => set2.has(e)).length;
+        const union = new Set([...set1, ...set2]);
+        entityJaccard = intersection / union.size;
     }
 
-    // Topic word overlap (25% weight)
+    // Topic word overlap (Jaccard)
     const t1Words = new Set(c1.topic.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3));
     const t2Words = new Set(c2.topic.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3));
     const topicIntersect = [...t1Words].filter(w => t2Words.has(w));
     const topicUnion = new Set([...t1Words, ...t2Words]);
     const topicSim = topicUnion.size > 0 ? topicIntersect.length / topicUnion.size : 0;
 
-    score += topicSim * 0.25;
-    factors += 0.25;
-
-    // Keyword overlap (15% weight)
+    // Keyword overlap (Jaccard)
     const k1Words = new Set((c1.keywords || []).map((k: string) => k.toLowerCase()));
     const k2Words = new Set((c2.keywords || []).map((k: string) => k.toLowerCase()));
     const kIntersect = [...k1Words].filter(k => k2Words.has(k));
     const kUnion = new Set([...k1Words, ...k2Words]);
     const keywordSim = kUnion.size > 0 ? kIntersect.length / kUnion.size : 0;
 
-    score += keywordSim * 0.15;
-    factors += 0.15;
+    // Sub-event type match (bonus)
+    const subEventBonus = (c1.subEventType && c2.subEventType && c1.subEventType === c2.subEventType) ? 0.05 : 0;
 
-    // Sub-event type match (10% weight)
-    if (c1.subEventType && c2.subEventType && c1.subEventType === c2.subEventType) {
-        score += 0.1;
-        factors += 0.1;
-    }
-
-    const normalizedScore = factors > 0 ? Math.min(score / factors, 1) : 0;
+    // FIX 5: Weighted combination: entities 0.4, topic 0.3, keywords 0.3
+    const similarity = Math.min(1, entityJaccard * 0.4 + topicSim * 0.3 + keywordSim * 0.3 + subEventBonus);
 
     return {
         cluster1Id: c1.id,
         cluster2Id: c2.id,
-        similarity: normalizedScore,
+        similarity,
         topicSimilarity: topicSim,
         keywordSimilarity: keywordSim,
-        entitySimilarity: 0, // TODO: Add entity overlap when entity data is available
+        entitySimilarity: entityJaccard,
         category: c1.category,
-        shouldMerge: normalizedScore >= CLUSTER_MERGE_SIMILARITY_THRESHOLD,
-        mergeReason: normalizedScore >= CLUSTER_MERGE_SIMILARITY_THRESHOLD ?
-            `Similarity ${normalizedScore.toFixed(2)} >= threshold` : ''
+        shouldMerge: similarity >= CLUSTER_MERGE_SIMILARITY_THRESHOLD,
+        mergeReason: similarity >= CLUSTER_MERGE_SIMILARITY_THRESHOLD ?
+            `Weighted similarity ${similarity.toFixed(2)} (entity: ${entityJaccard.toFixed(2)}, topic: ${topicSim.toFixed(2)}, kw: ${keywordSim.toFixed(2)})` : ''
     };
 }
 

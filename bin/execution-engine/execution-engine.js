@@ -164,6 +164,7 @@ class ExecutionEngine {
     nativeStopOrders = new Map();
     pendingManagedExitSymbols = new Set();
     exitPlanMonitor = null;
+    lastPaperExitLogTime = 0;
     isTestnet;
     // Message bus price subscription state (singleton guard)
     static priceSubscriptionInitialized = false;
@@ -519,8 +520,10 @@ class ExecutionEngine {
     }
     async enforceManagedExitPlans() {
         // Paper trading branch: check paper portfolio positions against exit plans
-        if (!hyperliquid_client_1.default.isConfigured() && process.env.PAPER_TRADING === 'true') {
-            if (this.positionExitPlans.size === 0)
+        // BUG FIX: Was `!hyperliquidClient.isConfigured() && PAPER_TRADING` which skipped
+        // this branch when HL wallet was configured. Changed to check PAPER_TRADING only.
+        if (process.env.PAPER_TRADING === 'true') {
+            if (this.positionExitPlans.size === 0 && paperPortfolio.getPositions().length === 0)
                 return;
             try {
                 const paperPositions = paperPortfolio.getPositions();
@@ -528,11 +531,17 @@ class ExecutionEngine {
                 for (const position of paperPositions) {
                     const symbolKey = position.symbol.toUpperCase();
                     activeSymbols.add(symbolKey);
-                    const plan = this.positionExitPlans.get(symbolKey);
-                    if (!plan)
-                        continue;
                     if (this.pendingManagedExitSymbols.has(symbolKey))
                         continue;
+                    // Auto-register exit plans for paper positions loaded from DB on restart
+                    let plan = this.positionExitPlans.get(symbolKey);
+                    if (!plan) {
+                        const stopLossPct = 0.02; // default 2% SL
+                        const takeProfitPct = 0.06; // default 6% TP
+                        this.registerManagedExitPlan(symbolKey, position.side, position.entryPrice, stopLossPct, takeProfitPct);
+                        logger_1.default.info(`[PaperExit] Auto-registered exit plan for restored position ${symbolKey} ${position.side} @ ${position.entryPrice}`);
+                        plan = this.positionExitPlans.get(symbolKey);
+                    }
                     // Check if position side matches plan (paper portfolio may track differently)
                     const entryPrice = plan.entryPrice;
                     if (!Number.isFinite(entryPrice) || entryPrice <= 0)
@@ -607,6 +616,15 @@ class ExecutionEngine {
                     if (!activeSymbols.has(symbolKey)) {
                         this.positionExitPlans.delete(symbolKey);
                     }
+                }
+                // Periodic diagnostic log (every 60s) to confirm paper exit monitor is running
+                const now = Date.now();
+                if (now - this.lastPaperExitLogTime > 60000) {
+                    this.lastPaperExitLogTime = now;
+                    const priceCoverage = paperPositions.filter(p => (currentPrices.get(p.symbol) || currentPrices.get(p.symbol.toUpperCase()) || 0) > 0).length;
+                    logger_1.default.info(`[PaperExit] Monitor active: ${paperPositions.length} positions, ` +
+                        `${this.positionExitPlans.size} exit plans, ${priceCoverage}/${paperPositions.length} with live prices, ` +
+                        `${currentPrices.size} symbols in price cache`);
                 }
             }
             catch (error) {
@@ -723,7 +741,7 @@ class ExecutionEngine {
             if (signal.price) {
                 currentPrices.set(signal.symbol, signal.price);
             }
-            const trade = await paperPortfolio.executeTrade(signal.symbol, signal.action, signal.size, signal.price || currentPrices.get(signal.symbol) || 0, signal.strategyId);
+            const trade = await paperPortfolio.executeTrade(signal.symbol, signal.action, signal.size, signal.price || currentPrices.get(signal.symbol) || 0, signal.strategyId, riskAssessment.leverage || 50);
             // Register managed exit plan for paper entries (SL/TP monitoring)
             if (trade.status === 'FILLED' && trade.entryExit === 'ENTRY') {
                 const entryPrice = trade.price > 0 ? trade.price : (signal.price || 0);
@@ -900,7 +918,8 @@ class ExecutionEngine {
             const circuitBreaker = require('../shared/circuit-breaker').default;
             let adjustedSize = requestedSize;
             if (!isExitOrder) {
-                const canEnter = circuitBreaker.canEnterNewTrade?.(signal.symbol) ?? true;
+                // SAFETY: Default to FALSE if circuit breaker can't be checked — fail closed
+                const canEnter = circuitBreaker.canEnterNewTrade?.(signal.symbol) ?? false;
                 if (!canEnter) {
                     throw new Error(`Safety monitor blocked new trade for ${signal.symbol}`);
                 }

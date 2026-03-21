@@ -145,6 +145,7 @@ class ResearchEngine {
             logger_1.default.info(`[ResearchEngine] Processing ${pendingJobs.length} pending backtest jobs`);
             for (const job of pendingJobs) {
                 await this.ideaQueue.updateBacktestJobStatus(job.id, 'RUNNING');
+                await this.ideaQueue.updateIdeaStatus(job.strategyId, 'RUNNING');
                 try {
                     const result = await this.runRealBacktest(job.strategyId);
                     await this.ideaQueue.completeBacktestJob(job.id, result);
@@ -153,6 +154,7 @@ class ResearchEngine {
                 catch (error) {
                     logger_1.default.error(`[ResearchEngine] Backtest failed for job ${job.id}:`, error);
                     await this.ideaQueue.updateBacktestJobStatus(job.id, 'FAILED');
+                    await this.ideaQueue.updateIdeaStatus(job.strategyId, 'PENDING');
                 }
             }
             // After processing backtests, promote top strategies to the strategies table
@@ -194,67 +196,41 @@ class ResearchEngine {
     async backtestStrategy(idea) {
         try {
             const { BacktestEngine } = await Promise.resolve().then(() => __importStar(require('../backtest/enhanced-backtest')));
-            const DatabaseConstructor = await Promise.resolve().then(() => __importStar(require('better-sqlite3')));
-            const Database = DatabaseConstructor.default || DatabaseConstructor;
-            const config = (await Promise.resolve().then(() => __importStar(require('../shared/config')))).default;
-            const dbConfig = config.getSection('database');
-            const db = new Database(dbConfig.connection);
-            try {
-                // Load recent market data for the strategy's symbols
-                const cutoffTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-                const symbols = idea.symbols.slice(0, 4); // Limit to 4 symbols for performance
-                const marketData = [];
-                for (const symbol of symbols) {
-                    const rows = db.prepare('SELECT symbol, timestamp, open, high, low, close, volume FROM market_data WHERE symbol = ? AND timestamp >= ? ORDER BY timestamp ASC').all(symbol, cutoffTime);
-                    for (const row of rows) {
-                        marketData.push({
-                            symbol: row.symbol,
-                            timestamp: new Date(row.timestamp),
-                            open: row.open,
-                            high: row.high,
-                            low: row.low,
-                            close: row.close,
-                            volume: row.volume,
-                        });
-                    }
-                }
-                db.close();
-                if (marketData.length < 100) {
-                    logger_1.default.warn(`[ResearchEngine] Insufficient market data (${marketData.length} candles), using simulation`);
-                    return this.simulateBacktest(idea.id);
-                }
-                // Build a Strategy object from the idea
-                const strategy = {
-                    id: idea.id,
-                    name: idea.name,
-                    type: idea.type,
-                    symbols: idea.symbols,
-                    timeframe: idea.timeframe,
-                    parameters: idea.parameters,
-                    entryConditions: idea.entryConditions,
-                    exitConditions: idea.exitConditions,
-                    riskParameters: idea.riskParameters,
-                };
-                const engine = new BacktestEngine({
-                    initialCapital: 10000,
-                    commissionRate: 0.0005,
-                    slippageBps: 5,
-                });
-                const result = await engine.runBacktest(strategy, marketData);
-                return {
-                    sharpeRatio: result.sharpeRatio,
-                    winRate: result.winRate / 100, // Convert from % to decimal
-                    pnl: result.finalCapital - result.initialCapital,
-                    maxDrawdown: result.maxDrawdown / 100, // Convert from % to decimal
-                    totalTrades: result.totalTrades,
-                    profitFactor: result.profitFactor ?? 0,
-                    completedAt: new Date().toISOString(),
-                };
+            // Load recent market data using IdeaQueue's DB connection (avoids WAL locking)
+            const cutoffTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            const symbols = idea.symbols.slice(0, 4);
+            const marketData = this.ideaQueue.getMarketDataForBacktest(symbols, cutoffTime);
+            if (marketData.length < 100) {
+                logger_1.default.warn(`[ResearchEngine] Insufficient market data (${marketData.length} candles), using simulation`);
+                return this.simulateBacktest(idea.id);
             }
-            catch (dbError) {
-                db.close();
-                throw dbError;
-            }
+            // Build a Strategy object from the idea
+            const strategy = {
+                id: idea.id,
+                name: idea.name,
+                type: idea.type,
+                symbols: idea.symbols,
+                timeframe: idea.timeframe,
+                parameters: idea.parameters,
+                entryConditions: idea.entryConditions,
+                exitConditions: idea.exitConditions,
+                riskParameters: idea.riskParameters,
+            };
+            const engine = new BacktestEngine({
+                initialCapital: 10000,
+                commissionRate: 0.0005,
+                slippageBps: 5,
+            });
+            const result = await engine.runBacktest(strategy, marketData);
+            return {
+                sharpeRatio: result.sharpeRatio,
+                winRate: result.winRate / 100, // Convert from % to decimal
+                pnl: result.finalCapital - result.initialCapital,
+                maxDrawdown: result.maxDrawdown / 100, // Convert from % to decimal
+                totalTrades: result.totalTrades,
+                profitFactor: result.profitFactor ?? 0,
+                completedAt: new Date().toISOString(),
+            };
         }
         catch (importError) {
             logger_1.default.warn('[ResearchEngine] BacktestEngine not available, using simulation');

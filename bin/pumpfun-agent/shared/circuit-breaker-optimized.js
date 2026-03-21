@@ -101,6 +101,11 @@ class OptimizedCircuitBreakerSystem {
             threshold: 5,
             timeout: 60000,
         });
+        // Safekeeping fund pipeline nodes (non-critical - supplementary analysis)
+        this.registerBreaker('market-monitor', { threshold: 5, timeout: 30000 });
+        this.registerBreaker('apr-calculator', { threshold: 5, timeout: 30000 });
+        this.registerBreaker('ai-analysis', { threshold: 4, timeout: 60000 });
+        this.registerBreaker('rebalance-planner', { threshold: 4, timeout: 45000 });
     }
     /**
      * Register a new circuit breaker

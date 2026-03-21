@@ -5,7 +5,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import configManager from '../shared/config';
 import logger from '../shared/logger';
-import { acquireRateLimitSlot, reportRateLimitHit } from './shared-rate-limiter';
+import { acquireRateLimitSlot, reportRateLimitHit, reportSuccess } from './shared-rate-limiter';
 import { Strategy, ResearchData, PredictionIdea, PredictionMarket, NewsItem } from '../shared/types';
 
 const config = configManager.get();
@@ -27,9 +27,9 @@ export class GLMAIService {
     constructor() {
         this.baseUrl = config.openrouter.baseUrl;
         this.apiKey = config.openrouter.apiKey;
-        // Use config values (cheap fast models) instead of expensive Claude
-        this.model = config.openrouter.labelingModel || 'z-ai/glm-4.7-flash';
-        this.labelingModel = config.openrouter.labelingModel || 'z-ai/glm-4.7-flash';
+        // Use config values (OpenRouter defaults) instead of expensive Claude
+        this.model = config.openrouter.labelingModel || 'z-ai/glm-5-turbo';
+        this.labelingModel = config.openrouter.labelingModel || 'z-ai/glm-5-turbo';
         this.timeout = config.glm.timeout;
     }
 
@@ -106,7 +106,7 @@ export class GLMAIService {
      * @param modelOverride - Optional model override (defaults to this.model)
      * @param temperature - Temperature for generation (default 0.7)
      */
-    private async callAPI(prompt: string, retries: number = 3, modelOverride?: string, temperature: number = 0.7): Promise<string> {
+    private async callAPI(prompt: string, retries: number = 5, modelOverride?: string, temperature: number = 0.7): Promise<string> {
         const modelToUse = modelOverride || this.model;
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
@@ -135,34 +135,44 @@ export class GLMAIService {
                     }
                 );
 
+                reportSuccess(); // Reset rate limiter circuit breaker
                 return response.data.choices[0]?.message?.content || '';
             } catch (error: any) {
                 const status = error?.response?.status;
 
-                // Handle 429 specifically: report to rate limiter for adaptive backoff
+                // Report 429 to shared rate limiter for adaptive backoff
                 if (status === 429) {
                     const retryAfterHeader = error?.response?.headers?.['retry-after'];
                     let retryAfterMs: number | undefined;
                     if (retryAfterHeader) {
                         const parsed = parseInt(retryAfterHeader, 10);
                         if (!isNaN(parsed)) {
-                            // Could be seconds or milliseconds — if < 100, treat as seconds
                             retryAfterMs = parsed < 100 ? parsed * 1000 : parsed;
                         }
                     }
                     reportRateLimitHit('GLM', retryAfterMs);
 
                     if (attempt < retries) {
-                        const backoff = retryAfterMs || Math.min(1000 * Math.pow(3, attempt), 30000);
-                        logger.warn(`[GLM] 429 rate limited on attempt ${attempt}, retrying in ${backoff}ms...`);
+                        const backoff = retryAfterMs || Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+                        logger.warn(`[GLM] 429 rate limited on attempt ${attempt}/${retries}, retrying in ${backoff}ms...`);
                         await new Promise(r => setTimeout(r, backoff));
                         continue;
                     }
+                    logger.warn(`[GLM] 429 exhausted all ${retries} retries`);
+                    throw error;
                 }
 
                 if (attempt === retries) throw error;
 
-                const backoff = Math.min(1000 * Math.pow(3, attempt), 30000); // 3s, 9s, 27s exponential backoff
+                // Transient errors: retry with backoff
+                if (status >= 500 || error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT') {
+                    const backoff = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+                    logger.warn(`[GLM] Attempt ${attempt} failed (${status || error?.code}), retrying in ${backoff}ms...`);
+                    await new Promise(r => setTimeout(r, backoff));
+                    continue;
+                }
+
+                const backoff = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
                 logger.warn(`[GLM] Attempt ${attempt} failed (${status || 'error'}), retrying in ${backoff}ms...`);
                 await new Promise(r => setTimeout(r, backoff));
             }

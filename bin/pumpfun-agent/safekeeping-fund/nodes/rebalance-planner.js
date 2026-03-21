@@ -15,6 +15,18 @@ const constants_1 = require("../constants");
  */
 async function rebalancePlannerNode(state) {
     logger_1.default.info('[RebalancePlanner] Planning rebalance actions');
+    // Early return when no value to rebalance
+    if (!state.totalValue || state.totalValue <= 0) {
+        logger_1.default.info('[RebalancePlanner] Skipping - totalValue is zero or unset');
+        return {
+            currentStep: 'REBALANCE_PLANNER_SKIP',
+            rebalanceTrigger: { shouldRebalance: false, reason: 'Total value is zero', urgency: 'LOW', timestamp: new Date() },
+            thoughts: [
+                ...state.thoughts,
+                'Rebalance planner skipped: totalValue is 0, nothing to rebalance',
+            ],
+        };
+    }
     try {
         // Determine if rebalancing should occur
         const trigger = await evaluateRebalanceTrigger(state);

@@ -31,16 +31,16 @@ class ConfigManager {
         timeout: parseInt(process.env.SEARCH_API_TIMEOUT || '30000')
       },
       glm: {
-        apiKey: process.env.ZAI_API_KEY || '',
-        baseUrl: process.env.ZAI_API_URL || 'https://api.z.ai/api/paas/v4',
-        model: process.env.ZAI_MODEL || 'glm-4.6',
+        apiKey: process.env.OPENROUTER_API_KEY || process.env.ZAI_API_KEY || '',
+        baseUrl: process.env.OPENROUTER_BASE_URL || process.env.ZAI_API_URL || 'https://openrouter.ai/api/v1',
+        model: process.env.ZAI_MODEL || 'z-ai/glm-5-turbo',
         timeout: parseInt(process.env.ZAI_API_TIMEOUT || '30000')
       },
       openrouter: {
         apiKey: process.env.OPENROUTER_API_KEY || '',
         baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-        labelingModel: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
-        embeddingModel: process.env.OPENROUTER_EMBEDDING_MODEL || 'qwen/qwen3-embedding-8b',
+        labelingModel: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-5-turbo',
+        embeddingModel: process.env.OPENROUTER_EMBEDDING_MODEL || 'z-ai/glm-4.7-flash',
         timeout: parseInt(process.env.OPENROUTER_TIMEOUT || '30000')
       },
       database: {
@@ -50,7 +50,7 @@ class ConfigManager {
       risk: {
         maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '0.1'),
         maxDailyLoss: parseFloat(process.env.MAX_DAILY_LOSS || '0.05'),
-        maxLeverage: parseInt(process.env.MAX_LEVERAGE || '40'),
+        maxLeverage: parseInt(process.env.MAX_LEVERAGE || '100'),
         emergencyStop: process.env.EMERGENCY_STOP === 'true'
       },
       safety: {
@@ -74,8 +74,8 @@ class ConfigManager {
       },
       pumpfun: {
         subscribeDurationMs: parseInt(process.env.PUMPFUN_SUBSCRIBE_DURATION_MS || '30000'),
-        minScoreThreshold: parseFloat(process.env.PUMPFUN_MIN_SCORE_THRESHOLD || '0.7'),
-        cycleIntervalMs: parseInt(process.env.PUMPFUN_CYCLE_INTERVAL_MS || '60000'),
+        minScoreThreshold: parseFloat(process.env.PUMPFUN_MIN_SCORE_THRESHOLD || '0.35'),
+        cycleIntervalMs: parseInt(process.env.PUMPFUN_CYCLE_INTERVAL_MS || '30000'),
         weights: {
           website: parseFloat(process.env.PUMPFUN_WEIGHT_WEBSITE || '0.7'),
           social: parseFloat(process.env.PUMPFUN_WEIGHT_SOCIAL || '0'),
