@@ -31,6 +31,7 @@ export interface StrategyIdea {
     };
     confidence: number;
     reasoning: string;
+    strategyId?: string;
 }
 /**
  * Market regime classification

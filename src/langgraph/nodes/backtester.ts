@@ -146,7 +146,7 @@ export async function vectorizedBacktest(
     closes?: Float64Array
 ): Promise<BacktestResult> {
     const cfg = DEFAULT_REALISM;
-    const strategyId = uuidv4();
+    const strategyId = idea.strategyId || uuidv4();
     const initialCapital = 10000;
     let capital = initialCapital;
     const maxCapital = initialCapital * 10; // Cap to prevent unrealistic compounding

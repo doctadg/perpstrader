@@ -80,7 +80,7 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
                 const bestIdea = state.strategyIdeas[0];
 
                 const fallbackStrategy: Strategy = {
-                    id: uuidv4(),
+                    id: bestIdea.strategyId || uuidv4(),
                     name: bestIdea.name,
                     description: bestIdea.description,
                     type: bestIdea.type,
@@ -189,7 +189,7 @@ export async function strategySelectorNode(state: AgentState): Promise<Partial<A
 
         // Convert StrategyIdea to Strategy
         const strategy: Strategy = {
-            id: uuidv4(),
+            id: best.idea.strategyId || uuidv4(),
             name: best.idea.name,
             description: best.idea.description,
             type: best.idea.type,

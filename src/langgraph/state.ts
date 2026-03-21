@@ -36,6 +36,7 @@ export interface StrategyIdea {
     };
     confidence: number;
     reasoning: string;
+    strategyId?: string; // DB strategy ID — preserved from strategies table
 }
 
 /**

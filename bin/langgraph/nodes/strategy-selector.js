@@ -70,7 +70,7 @@ async function strategySelectorNode(state) {
                 logger_1.default.warn('[StrategySelectorNode] No backtest data available, using best strategy idea with caution');
                 const bestIdea = state.strategyIdeas[0];
                 const fallbackStrategy = {
-                    id: (0, uuid_1.v4)(),
+                    id: bestIdea.strategyId || (0, uuid_1.v4)(),
                     name: bestIdea.name,
                     description: bestIdea.description,
                     type: bestIdea.type,
@@ -163,7 +163,7 @@ async function strategySelectorNode(state) {
         });
         // Convert StrategyIdea to Strategy
         const strategy = {
-            id: (0, uuid_1.v4)(),
+            id: best.idea.strategyId || (0, uuid_1.v4)(),
             name: best.idea.name,
             description: best.idea.description,
             type: best.idea.type,

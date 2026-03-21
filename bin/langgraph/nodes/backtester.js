@@ -114,7 +114,7 @@ async function backtesterNode(state) {
  */
 async function vectorizedBacktest(idea, candles, closes) {
     const cfg = DEFAULT_REALISM;
-    const strategyId = (0, uuid_1.v4)();
+    const strategyId = idea.strategyId || (0, uuid_1.v4)();
     const initialCapital = 10000;
     let capital = initialCapital;
     const maxCapital = initialCapital * 10; // Cap to prevent unrealistic compounding

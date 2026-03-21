@@ -123,6 +123,7 @@ function strategyToIdea(strategy, state) {
         riskParameters: strategy.riskParameters,
         confidence,
         reasoning: `Active strategy from training loop (sharpe=${strategy.performance?.sharpeRatio?.toFixed(2) || 'N/A'}, wr=${((strategy.performance?.winRate || 0) * 100).toFixed(0)}%, trades=${strategy.performance?.totalTrades || 0})`,
+        strategyId: strategy.id, // Preserve DB strategy ID
     };
 }
 function derivePatternBias(state) {
