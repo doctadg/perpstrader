@@ -83,13 +83,13 @@ def get_pm2_uptime():
 # Gather data
 ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 total_trades = query_one("SELECT COUNT(*) FROM trades")
-closed_trades = query_one("SELECT COUNT(*) FROM trades WHERE status='CLOSED'")
+closed_trades = query_one("SELECT COUNT(*) FROM trades WHERE entryExit='EXIT' AND status='FILLED'")
 cancelled_trades = query_one("SELECT COUNT(*) FROM trades WHERE status='CANCELLED'")
-open_trades = query_one("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
-total_pnl = query_one("SELECT COALESCE(SUM(pnl), 0) FROM trades WHERE status='CLOSED'")
-avg_pnl = query_one("SELECT COALESCE(AVG(pnl), 0) FROM trades WHERE status='CLOSED'")
-winning = query_one("SELECT COUNT(*) FROM trades WHERE status='CLOSED' AND pnl > 0")
-losing = query_one("SELECT COUNT(*) FROM trades WHERE status='CLOSED' AND pnl < 0")
+open_trades = query_one("SELECT COUNT(*) FROM trades WHERE entryExit='ENTRY' AND status='FILLED'")
+total_pnl = query_one("SELECT COALESCE(SUM(pnl), 0) FROM trades WHERE entryExit='EXIT' AND status='FILLED'")
+avg_pnl = query_one("SELECT COALESCE(AVG(pnl), 0) FROM trades WHERE entryExit='EXIT' AND status='FILLED'")
+winning = query_one("SELECT COUNT(*) FROM trades WHERE entryExit='EXIT' AND status='FILLED' AND pnl > 0")
+losing = query_one("SELECT COUNT(*) FROM trades WHERE entryExit='EXIT' AND status='FILLED' AND pnl < 0")
 win_rate = round(winning * 100 / closed_trades, 2) if closed_trades > 0 else 0
 cancel_rate = round(cancelled_trades * 100 / total_trades, 2) if total_trades > 0 else 0
 
@@ -113,8 +113,8 @@ symbol_breakdown = query_json("""
         symbol, 
         COUNT(*) as total,
         SUM(CASE WHEN status='CANCELLED' THEN 1 ELSE 0 END) as cancelled,
-        SUM(CASE WHEN status='CLOSED' AND pnl > 0 THEN 1 ELSE 0 END) as wins,
-        SUM(CASE WHEN status='CLOSED' AND pnl < 0 THEN 1 ELSE 0 END) as losses,
+        SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' AND pnl > 0 THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' AND pnl < 0 THEN 1 ELSE 0 END) as losses,
         COALESCE(SUM(pnl), 0) as total_pnl
     FROM trades 
     WHERE timestamp > datetime('now', '-7 days')

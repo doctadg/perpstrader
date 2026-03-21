@@ -741,6 +741,34 @@ class ExecutionEngine {
             if (signal.price) {
                 currentPrices.set(signal.symbol, signal.price);
             }
+            // SAFETY GATE for paper trading — mirrors the live path (line ~1138)
+            // Determine if this is an exit order (closing an existing position)
+            const paperPosition = paperPortfolio.getPositions().find((p) => p.symbol.toUpperCase() === symbolKey);
+            const isPaperExit = paperPosition
+                ? (paperPosition.side === 'LONG' && signal.action === 'SELL')
+                    || (paperPosition.side === 'SHORT' && signal.action === 'BUY')
+                : false;
+            const isRecoveryExit = signal.strategyId === 'position-recovery'
+                || signal.strategyId === 'risk-managed-exit';
+            if (!isPaperExit && !isRecoveryExit) {
+                try {
+                    const cb = require('../shared/circuit-breaker').default;
+                    const canEnter = cb.canEnterNewTrade?.(signal.symbol) ?? false;
+                    if (!canEnter) {
+                        logger_1.default.warn(`[PAPER] Safety monitor blocked new trade for ${signal.symbol}`);
+                        throw new Error(`Safety monitor blocked new paper trade for ${signal.symbol}`);
+                    }
+                    const sizeMult = Math.max(0, Math.min(1, cb.getPositionSizeMultiplier?.() ?? 1));
+                    if (sizeMult <= 0) {
+                        throw new Error('Safety monitor blocked new paper trade due volatility stop');
+                    }
+                }
+                catch (e) {
+                    if (e.message?.includes('Safety monitor blocked'))
+                        throw e;
+                    /* non-critical: log and continue if circuit breaker unavailable */
+                }
+            }
             const trade = await paperPortfolio.executeTrade(signal.symbol, signal.action, signal.size, signal.price || currentPrices.get(signal.symbol) || 0, signal.strategyId, riskAssessment.leverage || 50);
             // Register managed exit plan for paper entries (SL/TP monitoring)
             if (trade.status === 'FILLED' && trade.entryExit === 'ENTRY') {

@@ -317,7 +317,7 @@ class OpenRouterService {
           },
           {
             headers: {
-              'Authorization': `Bearer ${this.apiKey}`,
+              'Authorization': `Bearer ${this.apiKey || configManager.get().openrouter.apiKey}`,
               'Content-Type': 'application/json',
               'HTTP-Referer': 'https://perps-trader.ai',
               'X-Title': 'PerpsTrader News System',
@@ -473,7 +473,7 @@ Return JSON ONLY:
           },
           {
             headers: {
-              'Authorization': `Bearer ${this.apiKey}`,
+              'Authorization': `Bearer ${this.apiKey || configManager.get().openrouter.apiKey}`,
               'Content-Type': 'application/json',
               'HTTP-Referer': 'https://perps-trader.ai',
               'X-Title': 'PerpsTrader News System',
@@ -673,7 +673,7 @@ Return JSON ONLY in this format:
           },
           {
             headers: {
-              'Authorization': `Bearer ${this.apiKey}`,
+              'Authorization': `Bearer ${this.apiKey || configManager.get().openrouter.apiKey}`,
               'Content-Type': 'application/json',
               'HTTP-Referer': 'https://perps-trader.ai',
               'X-Title': 'PerpsTrader News System',
@@ -914,7 +914,7 @@ Return JSON in this format:
           },
           {
             headers: {
-              'Authorization': `Bearer ${this.apiKey}`,
+              'Authorization': `Bearer ${this.apiKey || configManager.get().openrouter.apiKey}`,
               'Content-Type': 'application/json',
               'HTTP-Referer': 'https://perps-trader.ai',
               'X-Title': 'PerpsTrader News System',

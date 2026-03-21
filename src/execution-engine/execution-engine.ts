@@ -916,6 +916,39 @@ export class ExecutionEngine {
         currentPrices.set(signal.symbol, signal.price);
       }
 
+      // SAFETY GATE for paper trading — mirrors the live path (line ~1138)
+      // Determine if this is an exit order (closing an existing position)
+      const paperPosition = paperPortfolio.getPositions().find(
+        (p: any) => p.symbol.toUpperCase() === symbolKey
+      );
+      const isPaperExit = paperPosition
+        ? (paperPosition.side === 'LONG' && signal.action === 'SELL')
+          || (paperPosition.side === 'SHORT' && signal.action === 'BUY')
+        : false;
+      const isRecoveryExit = signal.strategyId === 'position-recovery'
+        || signal.strategyId === 'risk-managed-exit';
+
+      if (!isPaperExit && !isRecoveryExit) {
+        try {
+          const cb = require('../shared/circuit-breaker').default as {
+            canEnterNewTrade?: (symbol: string) => boolean;
+            getPositionSizeMultiplier?: () => number;
+          };
+          const canEnter = cb.canEnterNewTrade?.(signal.symbol) ?? false;
+          if (!canEnter) {
+            logger.warn(`[PAPER] Safety monitor blocked new trade for ${signal.symbol}`);
+            throw new Error(`Safety monitor blocked new paper trade for ${signal.symbol}`);
+          }
+          const sizeMult = Math.max(0, Math.min(1, cb.getPositionSizeMultiplier?.() ?? 1));
+          if (sizeMult <= 0) {
+            throw new Error('Safety monitor blocked new paper trade due volatility stop');
+          }
+        } catch (e: any) {
+          if (e.message?.includes('Safety monitor blocked')) throw e;
+          /* non-critical: log and continue if circuit breaker unavailable */
+        }
+      }
+
       const trade = await paperPortfolio.executeTrade(
         signal.symbol,
         signal.action as 'BUY' | 'SELL',
