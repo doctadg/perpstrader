@@ -396,8 +396,15 @@ export class ResearchEngine {
                 totalPnL: perf.pnl,
                 sharpeRatio: perf.sharpe,
                 maxDrawdown: perf.maxDrawdown,
-                averageWin: perf.pnl > 0 ? (perf.pnl * perf.winRate) / Math.max(perf.totalTrades * perf.winRate, 1) : 0,
-                averageLoss: perf.pnl < 0 ? Math.abs(perf.pnl) / Math.max(perf.totalTrades * (1 - perf.winRate), 1) : 0,
+                // Compute averageWin/averageLoss from profit factor and win rate
+                // PF = (avgWin * winningTrades) / (avgLoss * losingTrades)
+                // avgWin = totalPnL * PF / (winningTrades * PF + losingTrades) when PF > 0
+                averageWin: perf.profitFactor > 0 && perf.totalTrades > 0
+                  ? Math.abs(perf.pnl) * perf.profitFactor / (Math.round(perf.totalTrades * perf.winRate) * perf.profitFactor + Math.round(perf.totalTrades * (1 - perf.winRate)))
+                  : Math.abs(perf.pnl) / Math.max(perf.totalTrades, 1),
+                averageLoss: perf.profitFactor > 0 && perf.totalTrades > 0
+                  ? Math.abs(perf.pnl) / (Math.round(perf.totalTrades * perf.winRate) * perf.profitFactor + Math.round(perf.totalTrades * (1 - perf.winRate)))
+                  : 0,
                 profitFactor: perf.profitFactor,
               }),
               new Date().toISOString(),
@@ -434,8 +441,12 @@ export class ResearchEngine {
                 totalPnL: perf.pnl,
                 sharpeRatio: perf.sharpe,
                 maxDrawdown: perf.maxDrawdown,
-                averageWin: 0,
-                averageLoss: 0,
+                averageWin: perf.profitFactor > 0 && perf.totalTrades > 0
+                  ? Math.abs(perf.pnl) * perf.profitFactor / (Math.round(perf.totalTrades * perf.winRate) * perf.profitFactor + Math.round(perf.totalTrades * (1 - perf.winRate)))
+                  : Math.abs(perf.pnl) / Math.max(perf.totalTrades, 1),
+                averageLoss: perf.profitFactor > 0 && perf.totalTrades > 0
+                  ? Math.abs(perf.pnl) / (Math.round(perf.totalTrades * perf.winRate) * perf.profitFactor + Math.round(perf.totalTrades * (1 - perf.winRate)))
+                  : 0,
                 profitFactor: perf.profitFactor,
               }),
               paramsHash,
@@ -560,7 +571,13 @@ export class ResearchEngine {
               JOIN strategy_performance p ON p.strategy_id = i.id
               WHERE i.type = ?
                 AND p.sharpe > 0
-                AND p.max_drawdown <= 0.05
+                AND p.sharpe <= 5.0
+                AND p.win_rate >= 0.45
+                AND p.max_drawdown >= 0.005
+                AND p.max_drawdown <= 0.20
+                AND p.total_trades >= 10
+                AND p.pnl > 0
+                AND p.pnl <= 100000
               ORDER BY p.sharpe DESC
               LIMIT 1
             `).get(missingType) as any;

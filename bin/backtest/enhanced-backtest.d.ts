@@ -36,6 +36,7 @@ export declare class BacktestEngine {
     private nextBarExecution;
     private intrabarStopCheck;
     private hourlyFundingRate;
+    private maxCapital;
     constructor(config?: BacktestEngineConfig);
     /**
      * Run a complete backtest

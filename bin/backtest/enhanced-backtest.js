@@ -33,6 +33,8 @@ class BacktestEngine {
     nextBarExecution;
     intrabarStopCheck;
     hourlyFundingRate;
+    // Capital cap to prevent unrealistic compounding
+    maxCapital;
     constructor(config = {}) {
         this.config = {
             initialCapital: config.initialCapital ?? 10000,
@@ -64,6 +66,8 @@ class BacktestEngine {
         this.nextBarExecution = true;
         this.intrabarStopCheck = true;
         this.hourlyFundingRate = 0.00001; // 0.001% per hour
+        // Cap capital at 10x initial to prevent unrealistic compounding
+        this.maxCapital = this.capital * 10;
         logger_1.default.info('[BacktestEngine] Initialized with config:', this.config);
     }
     /**
@@ -231,27 +235,53 @@ class BacktestEngine {
             return signals;
         }
         const params = strategy.parameters || {};
-        const positionSize = (this.capital * (strategy.riskParameters?.maxPositionSize || 0.05)) / candle.close;
+        // Use capped capital for position sizing to prevent unrealistic compounding
+        const effectiveCapital = Math.min(this.capital, this.maxCapital);
+        const positionSize = (effectiveCapital * (strategy.riskParameters?.maxPositionSize || 0.05)) / candle.close;
         // Build close price history from tracked candles
         if (!state.closes)
             state.closes = [];
         state.closes.push(candle.close);
         const closes = state.closes;
-        // Helper: compute RSI from close series
+        // Helper: compute RSI using Wilder's EMA (industry standard)
         const rsi = (period) => {
-            if (closes.length <= period)
+            if (closes.length <= period + 1)
                 return 50;
-            let gains = 0, losses = 0;
-            for (let i = closes.length - period; i < closes.length; i++) {
-                const change = closes[i] - closes[i - 1];
-                if (change > 0)
-                    gains += change;
-                else
-                    losses -= change;
+            // Cache state for incremental computation
+            if (!state.rsiState) {
+                state.rsiState = { avgGain: 0, avgLoss: 0, initialized: false, period };
             }
-            const avgGain = gains / period;
-            const avgLoss = losses / period;
-            return avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+            const st = state.rsiState;
+            if (st.period !== period) {
+                st.period = period;
+                st.initialized = false;
+                st.avgGain = 0;
+                st.avgLoss = 0;
+            }
+            // Compute all changes up to current bar
+            const startIdx = closes.length - (st.initialized ? 1 : period);
+            for (let i = Math.max(1, startIdx); i < closes.length; i++) {
+                const change = closes[i] - closes[i - 1];
+                if (!st.initialized) {
+                    // First `period` changes: simple average
+                    if (change > 0)
+                        st.avgGain += change;
+                    else
+                        st.avgLoss -= change;
+                    if (i === closes.length - 1 || (i - startIdx + 1) === period) {
+                        st.avgGain /= period;
+                        st.avgLoss /= period;
+                        if ((i - startIdx + 1) >= period)
+                            st.initialized = true;
+                    }
+                }
+                else {
+                    // Wilder's EMA: alpha = 1/period
+                    st.avgGain = (st.avgGain * (period - 1) + (change > 0 ? change : 0)) / period;
+                    st.avgLoss = (st.avgLoss * (period - 1) + (change < 0 ? -change : 0)) / period;
+                }
+            }
+            return st.avgLoss === 0 ? 100 : 100 - (100 / (1 + st.avgGain / st.avgLoss));
         };
         // Helper: compute SMA from close series
         const sma = (period) => {
@@ -384,7 +414,8 @@ class BacktestEngine {
                 entryBar: isExit ? 0 : barIndex,
             });
             // Deduct commission from capital — THIS IS THE KEY FIX
-            this.capital += realizedPnL - fill.commission;
+            // Cap capital at maxCapital to prevent unrealistic compounding
+            this.capital = Math.min(this.capital + realizedPnL - fill.commission, this.maxCapital);
             this.totalFees += fill.commission;
             this.totalSlippageCost += Math.abs(fill.slippage) * fill.quantity;
             // Record trade
@@ -529,7 +560,15 @@ class BacktestEngine {
             maxDrawdown = Math.max(maxDrawdown, drawdown);
         }
         // Sharpe ratio (proper annualization via trades-per-year)
-        const returns = exitTrades.map(t => ((t.pnl || 0) - (t.fee || 0)) / initialCapital);
+        // Use running capital at each trade time, not initial capital, to avoid
+        // distortion from capital compounding
+        let sharpeCapital = initialCapital;
+        const returns = exitTrades.map(t => {
+            const netPnl = (t.pnl || 0) - (t.fee || 0);
+            const r = sharpeCapital > 0 ? netPnl / sharpeCapital : 0;
+            sharpeCapital = Math.min(sharpeCapital + netPnl, initialCapital * 10);
+            return r;
+        });
         const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
         const stdReturn = returns.length > 1
             ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length - 1))
@@ -549,7 +588,7 @@ class BacktestEngine {
         // Profit factor
         const totalWins = winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
         const totalLosses = Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0));
-        const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
+        const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? 999 : 0;
         // Average win/loss
         const avgWin = winningTrades.length > 0
             ? winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0) / winningTrades.length : 0;
@@ -567,16 +606,27 @@ class BacktestEngine {
                 consecutiveLosses = 0;
             }
         }
-        // Average trade duration
+        // Average trade duration (match entries/exits by symbol, not index)
         const entryTrades = this.trades.filter(t => t.entryExit === 'ENTRY');
         let avgTradeDuration = 0;
         if (entryTrades.length > 0 && exitTrades.length > 0) {
             const durations = [];
-            for (let i = 0; i < exitTrades.length && i < entryTrades.length; i++) {
-                const duration = exitTrades[i].timestamp.getTime() - entryTrades[i].timestamp.getTime();
-                durations.push(duration / (1000 * 60 * 60)); // hours
+            // Build a map of symbol -> list of entry timestamps
+            const entryMap = new Map();
+            for (const et of entryTrades) {
+                const list = entryMap.get(et.symbol) || [];
+                list.push(et.timestamp.getTime());
+                entryMap.set(et.symbol, list);
             }
-            avgTradeDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+            // Match each exit to the earliest unmatched entry for same symbol
+            for (const xt of exitTrades) {
+                const entries = entryMap.get(xt.symbol);
+                if (entries && entries.length > 0) {
+                    const entryTime = entries.shift();
+                    durations.push((xt.timestamp.getTime() - entryTime) / (1000 * 60 * 60)); // hours
+                }
+            }
+            avgTradeDuration = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
         }
         // Expectancy
         const expectancy = exitTrades.length > 0

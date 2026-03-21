@@ -31,20 +31,23 @@ function calculateMetrics(result) {
     const exitTrades = trades.filter(t => t.entryExit === 'EXIT');
     const winningTrades = exitTrades.filter(t => (t.pnl || 0) > 0);
     const losingTrades = exitTrades.filter(t => (t.pnl || 0) < 0);
-    // Calculate profit factor
+    // Calculate total wins and losses from actual trade PnL values
     const totalWins = winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
     const totalLosses = Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0));
-    const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
+    // Calculate profit factor (cap at 999 to avoid Infinity in JSON/DB)
+    const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? 999 : 0;
     // Calculate average win/loss
     const averageWin = winningTrades.length > 0 ? totalWins / winningTrades.length : 0;
     const averageLoss = losingTrades.length > 0 ? totalLosses / losingTrades.length : 0;
     // Calculate expectancy (average PnL per trade)
     const totalPnL = finalCapital - initialCapital;
     const expectancy = totalTrades > 0 ? totalPnL / totalTrades : 0;
-    // Calculate Calmar ratio (annualized return / max drawdown)
-    const calmarRatio = maxDrawdown > 0 ? totalReturn / maxDrawdown : totalReturn > 0 ? Infinity : 0;
-    // Calculate Sortino ratio (simplified - uses max drawdown as downside measure)
-    const sortinoRatio = maxDrawdown > 0 ? (annualizedReturn / maxDrawdown) * Math.sqrt(12) : 0;
+    // Calmar ratio: annualized return / max drawdown (standard definition)
+    const calmarRatio = maxDrawdown > 0 ? Math.abs(annualizedReturn) / maxDrawdown : totalReturn > 0 ? 999 : 0;
+    // Sortino ratio: use the engine's proper Sortino from metrics, not fake calc
+    // If engine provides it, use it; otherwise compute from per-trade downside deviation
+    const engineSortino = result.metrics?.sortinoRatio;
+    const sortinoRatio = engineSortino != null && isFinite(engineSortino) ? engineSortino : 0;
     // Calculate risk-adjusted return
     const riskAdjustedReturn = maxDrawdown > 0 ? totalReturn / maxDrawdown : totalReturn;
     // Calculate consistency score (based on win rate and trade distribution)

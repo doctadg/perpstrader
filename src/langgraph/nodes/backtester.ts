@@ -149,6 +149,7 @@ export async function vectorizedBacktest(
     const strategyId = uuidv4();
     const initialCapital = 10000;
     let capital = initialCapital;
+    const maxCapital = initialCapital * 10; // Cap to prevent unrealistic compounding
     let totalFees = 0;
     let totalSlippageCost = 0;
 
@@ -416,7 +417,8 @@ export async function vectorizedBacktest(
 
             // Open long
             const fillPrice = applySlippage(execPrice, 'BUY');
-            const size = (capital * idea.riskParameters.maxPositionSize) / fillPrice;
+            const effectiveCapital = Math.min(capital, maxCapital);
+            const size = (effectiveCapital * idea.riskParameters.maxPositionSize) / fillPrice;
             const fee = calcFee(fillPrice, size);
             capital -= fee;
             totalFees += fee;
@@ -442,7 +444,8 @@ export async function vectorizedBacktest(
 
             // Open short
             const fillPrice = applySlippage(execPrice, 'SELL');
-            const size = (capital * idea.riskParameters.maxPositionSize) / fillPrice;
+            const effectiveCapital = Math.min(capital, maxCapital);
+            const size = (effectiveCapital * idea.riskParameters.maxPositionSize) / fillPrice;
             const fee = calcFee(fillPrice, size);
             capital -= fee;
             totalFees += fee;
@@ -456,6 +459,8 @@ export async function vectorizedBacktest(
         }
 
         if (position !== 0) barsInPosition++;
+        // Cap capital to prevent unrealistic compounding across loop iterations
+        capital = Math.min(capital, maxCapital);
     }
 
     // Close any remaining position at last bar
@@ -542,7 +547,15 @@ function calculateMetrics(
     }
 
     // Calculate Sharpe ratio (per-trade returns, annualized)
-    const returns = exitTrades.map(t => ((t.pnl || 0) - (t.fee || 0)) / initialCapital);
+    // Use running capital at each trade time, not initial capital, to avoid
+    // distortion from capital compounding
+    let sharpeCapital = initialCapital;
+    const returns = exitTrades.map(t => {
+        const netPnl = (t.pnl || 0) - (t.fee || 0);
+        const r = sharpeCapital > 0 ? netPnl / sharpeCapital : 0;
+        sharpeCapital = Math.min(sharpeCapital + netPnl, initialCapital * 10);
+        return r;
+    });
     const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
     const stdReturn = returns.length > 1
         ? Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length - 1))
