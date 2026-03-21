@@ -114,6 +114,14 @@ class PaperPortfolioManager {
                 else {
                     pnl = (existingPosition.entryPrice - price) * closeSize;
                 }
+                // CRITICAL FIX: Clamp PnL to detect numerical corruption
+                // (e.g., uninitialized entryPrice, floating point overflow)
+                if (!Number.isFinite(pnl) || Math.abs(pnl) > 10000) {
+                    logger_1.default.error(`[PaperPortfolio] Absurd PnL detected for ${symbol}: ${pnl}. ` +
+                        `entryPrice=${existingPosition.entryPrice}, price=${price}, size=${closeSize}. ` +
+                        `Clamping to 0 and skipping.`);
+                    pnl = 0;
+                }
                 this.realizedPnL += pnl;
                 this.cashBalance += pnl + (closeSize * existingPosition.entryPrice);
                 entryExit = 'EXIT';

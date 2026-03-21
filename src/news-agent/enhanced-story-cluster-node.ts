@@ -32,7 +32,7 @@ const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM === 'true';
 const USE_ENHANCED_CLUSTERING = process.env.USE_ENHANCED_SEMANTIC_CLUSTERING !== 'false'; // Default true
 const CLUSTER_MERGE_HOURS_THRESHOLD = 48;
 const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '20', 10);
-const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.55; // Lowered for better merging with entity weighting
+const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.40; // Lowered from 0.55 — entity overlap now drives most merges, threshold is secondary
 
 export interface EnhancedClusteringState {
     currentStep?: string;
@@ -244,30 +244,68 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
     for (const article of filteredArticles) {
         const aiLabel = aiLabelsMap.get(article.id);
 
-        if (aiLabel?.topic && aiLabel.topic.length > 5) {
-            const validation = validateTopicQuality(aiLabel.topic, article.title);
-            if (!validation.valid) {
-                logger.debug(`[EnhancedClusterNode] Rejecting low-quality topic: ${validation.reason}`);
-                continue;
-            }
-
-            // NEW: Use enhanced entity extraction
+        // FIX: Always extract entities regardless of AI label quality.
+        // Entity extraction is regex-based (fast) and must run on every article
+        // so that entity_cluster_links gets populated for future matching.
+        let entities: ExtractedEntity[] = [];
+        try {
             const entityResult = await enhancedEntityExtractor.extractHybrid(
                 article.title,
                 article.content || article.snippet || '',
                 article.id
             );
-            stats.entitiesExtracted += entityResult.entities.length;
+            entities = entityResult.entities as ExtractedEntity[];
+            stats.entitiesExtracted += entities.length;
+        } catch (e) {
+            logger.warn(`[EnhancedClusterNode] Entity extraction failed for "${article.title.slice(0, 50)}":`, e);
+        }
 
-            // Find title cluster membership
-            const titleCluster = titleClusters.find(tc =>
-                tc.articleIds.includes(article.id)
-            );
+        // Find title cluster membership
+        const titleCluster = titleClusters.find(tc =>
+            tc.articleIds.includes(article.id)
+        );
+
+        if (aiLabel?.topic && aiLabel.topic.length > 5) {
+            const validation = validateTopicQuality(aiLabel.topic, article.title);
+            if (!validation.valid) {
+                logger.debug(`[EnhancedClusterNode] Rejecting low-quality topic: ${validation.reason}`);
+                // FIX: Still add article with entities even if topic is rejected,
+                // using a fallback label so entity extraction runs
+                processedArticles.push({
+                    article,
+                    aiLabel: {
+                        ...aiLabel,
+                        topic: generateFallbackTopic(article.title, article.categories[0] || 'GENERAL'),
+                        keywords: extractKeyTerms(article.title),
+                        trendDirection: 'NEUTRAL',
+                        urgency: 'MEDIUM',
+                        subEventType: 'other',
+                    },
+                    entities,
+                    titleClusterId: titleCluster?.id
+                });
+                continue;
+            }
 
             processedArticles.push({
                 article,
                 aiLabel,
-                entities: entityResult.entities as any,
+                entities,
+                titleClusterId: titleCluster?.id
+            });
+        } else {
+            // FIX: When OpenRouter labeling fails entirely, use fallback label
+            // but still process the article with extracted entities
+            processedArticles.push({
+                article,
+                aiLabel: {
+                    topic: generateFallbackTopic(article.title, article.categories[0] || 'GENERAL'),
+                    keywords: extractKeyTerms(article.title),
+                    trendDirection: 'NEUTRAL',
+                    urgency: 'MEDIUM',
+                    subEventType: 'other',
+                },
+                entities,
                 titleClusterId: titleCluster?.id
             });
         }
@@ -467,8 +505,8 @@ async function processArticleEnhanced(
                 }
             }
 
-            // If entity overlap >= 0.4 (40%), assign immediately
-            if (bestEntityCluster && bestEntityOverlap >= 0.4) {
+            // If entity overlap >= 0.25 (25%), assign immediately — lowered from 0.4 for better catchment
+            if (bestEntityCluster && bestEntityOverlap >= 0.25) {
                 // Verify cluster exists and matches category
                 if (knownClusterIds.has(bestEntityCluster)) {
                     const cluster = await storyClusterStoreEnhanced.getClusterById(bestEntityCluster);
@@ -662,7 +700,7 @@ async function processArticleEnhanced(
                 await storyClusterStoreEnhanced.linkEntityToArticle(entityId, article.id, entity.confidence);
                 await storyClusterStoreEnhanced.updateEntityClusterHeat(entityId, assignedClusterId, heatDelta * 0.1);
             } catch (e) {
-                // Ignore entity linking errors
+                logger.warn(`[EnhancedClusterNode] Entity linking failed: ${entity.name} -> ${assignedClusterId.slice(0, 8)}`, e);
             }
         }
 
@@ -709,7 +747,7 @@ async function processArticleEnhanced(
                             await storyClusterStoreEnhanced.linkEntityToArticle(entityId, article.id, entity.confidence);
                             await storyClusterStoreEnhanced.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
                         } catch (e) {
-                            // Ignore entity linking errors
+                            logger.warn(`[EnhancedClusterNode] Anti-spam entity linking failed: ${entity.name} -> ${target.id.slice(0, 8)}`, e);
                         }
                     }
 
@@ -761,7 +799,7 @@ async function processArticleEnhanced(
                 await storyClusterStoreEnhanced.linkEntityToArticle(entityId, article.id, entity.confidence);
                 await storyClusterStoreEnhanced.updateEntityClusterHeat(entityId, newClusterId, initialHeat * 0.1);
             } catch (e) {
-                // Ignore entity linking errors
+                logger.warn(`[EnhancedClusterNode] New cluster entity linking failed: ${entity.name} -> ${newClusterId.slice(0, 8)}`, e);
             }
         }
 
@@ -1084,6 +1122,24 @@ async function createFallbackClustersForCategory(articles: NewsItem[], category:
             for (const art of similarArticles) {
                 const titleFingerprint = getTitleFingerprint(art.title);
                 await storyClusterStoreEnhanced.addArticleToCluster(newClusterId, art.id, titleFingerprint, 0, 'NEUTRAL');
+            }
+
+            // FIX: Extract and persist entities even in fallback path
+            for (const art of similarArticles) {
+                try {
+                    const entityResult = await enhancedEntityExtractor.extractHybrid(
+                        art.title,
+                        art.content || art.snippet || '',
+                        art.id
+                    );
+                    for (const entity of entityResult.entities) {
+                        const entityId = await storyClusterStoreEnhanced.findOrCreateEntity(entity.name, entity.type as any);
+                        await storyClusterStoreEnhanced.linkEntityToArticle(entityId, art.id, entity.confidence);
+                        await storyClusterStoreEnhanced.updateEntityClusterHeat(entityId, newClusterId, 1.0);
+                    }
+                } catch (e) {
+                    logger.warn(`[EnhancedClusterNode] Fallback entity extraction failed for ${art.id.slice(0, 8)}`, e);
+                }
             }
 
             newClusters++;
