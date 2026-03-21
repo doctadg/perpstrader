@@ -162,7 +162,18 @@ export class SafetyMonitor {
         const now = new Date();
         const tradeTime = this.parseDate(trade.timestamp);
         const symbol = trade.symbol.toUpperCase();
-        const pnl = Number.isFinite(trade.pnl) ? trade.pnl : 0;
+        // CRITICAL FIX: Clamp PnL to prevent corrupted values (e.g. integer overflow, NaN)
+        // from poisoning the daily PnL accumulator and triggering false breakers.
+        // Max reasonable PnL per trade is 10x the daily loss limit ($500).
+        const MAX_REASONABLE_PNL = this.config.dailyLossLimit * 10;
+        let pnl = Number.isFinite(trade.pnl) ? trade.pnl : 0;
+        if (Math.abs(pnl) > MAX_REASONABLE_PNL) {
+            logger.warn(
+                `[SafetyMonitor] Clamping absurd PnL for ${symbol}: ${pnl.toFixed(2)} -> ` +
+                `${(Math.sign(pnl) * MAX_REASONABLE_PNL).toFixed(2)} (max reasonable: ${MAX_REASONABLE_PNL})`
+            );
+            pnl = Math.sign(pnl) * MAX_REASONABLE_PNL;
+        }
         const tradeKey = this.buildTradeKey(trade, symbol, tradeTime, pnl);
 
         this.refreshState(now, false);
