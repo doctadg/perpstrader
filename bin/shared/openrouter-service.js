@@ -202,57 +202,16 @@ class OpenRouterService {
         };
     }
     /**
-     * Generate embeddings for text using OpenRouter with Redis cache
+     * Generate embeddings for text.
+     * DISABLED: z.ai API has no embeddings endpoint, and the old code sent a chat
+     * completion request while parsing it as an embedding response — fundamentally broken.
+     * All callers already fall back to local SHA256 feature hashing (local-embeddings.ts).
+     * Returning null immediately avoids the rate-limit storm (680+ waits/cycle).
      */
     async generateEmbedding(text) {
-        if (!this.canUseService()) {
-            logger_1.default.debug('[OpenRouter] API key not configured for embeddings');
-            return null;
-        }
-        // Check cache first
-        const cached = await redis_cache_1.default.getEmbedding(text);
-        if (cached) {
-            this.cacheHits++;
-            logger_1.default.debug('[OpenRouter] Embedding cache hit');
-            return cached;
-        }
-        this.cacheMisses++;
-        try {
-            const safeText = text.substring(0, 8000);
-            const response = await this.callWithRetry('generateEmbedding', 'OpenRouter-embedding', () => axiosInstance.post(`${this.baseUrl}/chat/completions`, {
-                model: this.embeddingModel,
-                messages: [
-                    {
-                        role: 'user',
-                        content: `Generate an embedding vector for this text: ${safeText}`,
-                    },
-                ],
-            }, {
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey || config_1.default.get().openrouter.apiKey}`,
-                    'Content-Type': 'application/json',
-                    'HTTP-Referer': 'https://perps-trader.ai',
-                    'X-Title': 'PerpsTrader News System',
-                },
-                timeout: this.timeout,
-            }));
-            if (!response)
-                return null;
-            // Try to extract embedding from response
-            const data = response.data;
-            if (data?.data?.[0]?.embedding) {
-                const embedding = data.data[0].embedding;
-                // Cache the result
-                await redis_cache_1.default.setEmbedding(text, embedding);
-                return embedding;
-            }
-            logger_1.default.warn('[OpenRouter] Unexpected embedding response format');
-            return null;
-        }
-        catch (error) {
-            logger_1.default.debug(`[OpenRouter] Embedding generation failed: ${this.safeErrorMessage(error)}`);
-            return null;
-        }
+        // z.ai has no embedding endpoint — skip the API call entirely.
+        // Callers (news-vector-store, semantic-similarity) already fall back to embedText().
+        return null;
     }
     /**
      * Generate event label for a single news article with cache

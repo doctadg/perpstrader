@@ -204,6 +204,12 @@ class SafetyMonitor {
         this.refreshConfig();
         const now = new Date();
         const normalizedSymbol = symbol.toUpperCase();
+        // Hard blacklist — symbols with consistent losses that should never be traded
+        const BLACKLISTED_SYMBOLS = (process.env.BLOCKED_SYMBOLS || 'PAXG,LIT,VVV,WLD,SUI,ENA,ZRO,NEAR,ASTER,XPL,AVAX').split(',').map(s => s.trim().toUpperCase());
+        if (BLACKLISTED_SYMBOLS.includes(normalizedSymbol)) {
+            logger_1.default.debug(`[SafetyMonitor] Blocked trade for ${normalizedSymbol}: symbol is blacklisted`);
+            return false;
+        }
         this.refreshState(now, false);
         const changed = this.updateFrequencyBreaker(normalizedSymbol, now, true);
         const reasons = this.getBlockingReasons(normalizedSymbol, now);

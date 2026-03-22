@@ -55,6 +55,7 @@ async function qualityFilterNode(state) {
     let filteredLanguage = 0;
     let filteredQuality = 0;
     let filteredCategory = 0;
+    let filteredNonRelevant = 0;
     for (const article of state.rawArticles) {
         try {
             // Step 1: Language detection (fast fail)
@@ -69,6 +70,14 @@ async function qualityFilterNode(state) {
             if (qualityScore < 0.3) {
                 filteredQuality++;
                 logger_1.default.debug(`[QualityFilterNode] Filtered low-quality article: ${article.title} (score: ${qualityScore.toFixed(2)})`);
+                continue;
+            }
+            // Step 2b: Crypto/financial relevance pre-filter (fast, no API call)
+            // This catches obvious non-market content (sports, entertainment, etc.) even when the LLM gate is down
+            const relevance = checkMarketRelevance(article.title, article.content || article.snippet || '');
+            if (!relevance) {
+                filteredNonRelevant++;
+                logger_1.default.debug(`[QualityFilterNode] Filtered non-market article: ${article.title}`);
                 continue;
             }
             // Step 3: LLM quality gate for market relevance
@@ -107,7 +116,7 @@ async function qualityFilterNode(state) {
     const elapsed = Date.now() - startTime;
     logger_1.default.info(`[QualityFilterNode] Completed in ${elapsed}ms. ` +
         `Passed: ${filteredArticles.length}/${state.rawArticles.length}, ` +
-        `Filtered: ${filteredLanguage} language, ${filteredQuality} quality, ${filteredCategory} category`);
+        `Filtered: ${filteredLanguage} language, ${filteredQuality} quality, ${filteredCategory} category, ${filteredNonRelevant} non-relevant`);
     return {
         currentStep: 'QUALITY_FILTER_COMPLETE',
         filteredArticles,
@@ -265,4 +274,73 @@ FAIL if:
 - Non-English content
 
 Respond with valid JSON only.`;
+/**
+ * Fast keyword-based market relevance check.
+ * Catches obvious non-market content (sports, entertainment, lifestyle, etc.)
+ * without requiring any API call. Acts as a safety net when the LLM gate is down.
+ *
+ * Returns true if the article title/content contains at least one
+ * crypto, financial, or market-relevant term.
+ */
+function checkMarketRelevance(title, content) {
+    const text = (title + ' ' + content).toLowerCase();
+    // Hard blocks: topics that are NEVER relevant for a perps trading platform
+    const HARD_BLOCK = [
+        /\bbasketball\b/, /\bfootball\b/, /\bsoccer\b/, /\bbaseball\b/, /\bcricket\b/,
+        /\bgolf\b/, /\btennis\b/, /\bnfl\b/, /\bnba\b/, /\bmlb\b/, /\bfifa\b/,
+        /\bpremier.?league\b/, /\buefa\b/, /\bchampions.?league\b/,
+        /\btransfer\b.*\bclub\b/, /\bmatch\b.*\bresult\b/,
+        /\bcoach\b.*\bfired\b/, /\bcoach\b.*\bhired\b/,
+        /\broster\b.*\bdebut\b/, /\bseason\b.*\bopener\b/,
+        /\bcelebrity\b/, /\bkardashian\b/, /\bceleb\b/,
+        /\brecipe\b/, /\bcook(ing|s)\b/,
+        /\btravel\b.*\bguide\b/, /\bvacation\b.*\btips\b/,
+        /\bhoroscope\b/, /\bastrology\b/,
+        /\btrue.?crime\b/, /\bmissing\b.*\bperson\b/,
+        /\bafcon\b/, /\bafrican cup\b/,
+        /\bbay fc\b/, /\bnwsl\b/, /\bwnba\b/,
+    ];
+    for (const pattern of HARD_BLOCK) {
+        if (pattern.test(text))
+            return false;
+    }
+    // Soft requirement: at least one crypto/financial/market term must be present
+    const MARKET_TERMS = [
+        // Crypto
+        /\b(bitcoin|btc|ethereum|eth|solana|sol)\b/,
+        /\bbitcoin\b/, /\bbtc\b/, /\bethereum\b/, /\beth\b/, /\bsolana\b/, /\bsol\b/,
+        /\bxrp\b/, /\bada\b/, /\bdoge\b/, /\bbnb\b/, /\bavax\b/, /\bton\b/,
+        /\bcrypto\b/, /\bblockchain\b/, /\bdefi\b/, /\bnft\b/, /\btoken\b/,
+        /\bcoin\b/, /\bmining\b/, /\bwallet\b/, /\bexchange\b/, /\bbinance\b/,
+        /\bcoinbase\b/, /\bkraken\b/, /\bbybit\b/, /\bokx\b/,
+        /\baltcoin\b/, /\bstablecoin\b/, /\busdt\b/, /\busdc\b/,
+        /\bmemecoin\b/, /\bweb3\b/, /\bdapp\b/, /\bdex\b/, /\bce[xo]\b/,
+        /\bsmart.?contract\b/, /\bsolidity\b/, /\bgas.?fee/,
+        /\bwhale\b/, /\bhodl\b/, /\bpump\b.*\bdump\b/, /\brug.?pull\b/,
+        /\bico\b/, /\bieo\b/, /\bairdrop\b/, /\bstaking\b/, /\byield\b/,
+        /\bdao\b/, /\bgovernance\b/, /\bprotocol\b/, /\blayer.?2\b/, /\bl2\b/,
+        /\bmainnet\b/, /\btestnet\b/, /\bhard.?fork\b/, /\bhalving\b/,
+        // Finance
+        /\bstock\b/, /\bshare\b/, /\bequity\b/, /\bbond\b/, /\btreasury\b/,
+        /\bfed\b/, /\binterest.?rate\b/, /\binflation\b/, /\bgdp\b/,
+        /\bearnings\b/, /\brevenue\b/, /\bprofit\b/, /\bloss\b/,
+        /\bipo\b/, /\bs[p]?[&]?\s*500\b/, /\bnasdaq\b/, /\bnyse\b/, /\bdow\b/,
+        /\bdividend\b/, /\bmarket.?cap\b/, /\bbull\b.*\bmarket\b/, /\bbear\b.*\bmarket\b/,
+        /\bvolatility\b/, /\bhedg(e|ing)\b/, /\bportfolio\b/, /\barbitrage\b/,
+        // Economy
+        /\brecession\b/, /\bunemployment\b/, /\btrade.?war\b/, /\btariff\b/,
+        /\bsanctions?\b/, /\bopec\b/, /\boil\b.*\bprice\b/, /\bgold\b.*\bprice\b/,
+        /\beconomy\b/, /\beconomic\b/, /\bfiscal\b/, /\bmonetary\b/,
+        /\bcentral.?bank\b/, /\bfomc\b/, /\bg7\b/, /\bg20\b/,
+        // Market
+        /\bprice\b/, /\btrading\b/, /\btrader\b/, /\binvestor\b/, /\banalyst\b/,
+        /\bregulation\b/, /\bregulat\w*\b/, /\bsec\b/, /\bcftc\b/,
+        /\bfundraising\b/, /\bstartup\b/, /\bvaluation\b/,
+    ];
+    for (const pattern of MARKET_TERMS) {
+        if (pattern.test(text))
+            return true;
+    }
+    return false;
+}
 //# sourceMappingURL=quality-filter-node.js.map

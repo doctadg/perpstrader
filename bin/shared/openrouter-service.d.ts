@@ -51,7 +51,11 @@ declare class OpenRouterService {
         hitRate: number;
     };
     /**
-     * Generate embeddings for text using OpenRouter with Redis cache
+     * Generate embeddings for text.
+     * DISABLED: z.ai API has no embeddings endpoint, and the old code sent a chat
+     * completion request while parsing it as an embedding response — fundamentally broken.
+     * All callers already fall back to local SHA256 feature hashing (local-embeddings.ts).
+     * Returning null immediately avoids the rate-limit storm (680+ waits/cycle).
      */
     generateEmbedding(text: string): Promise<number[] | null>;
     /**

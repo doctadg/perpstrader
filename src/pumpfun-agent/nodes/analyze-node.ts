@@ -382,6 +382,12 @@ async function runOpenRouterAnalysis(data: {
         return null;
       }
 
+      // 400 = bad request (wrong model, invalid params) — NOT transient, don't retry
+      if (status === 400) {
+        logger.warn(`[AnalyzeNode] OpenRouter 400 (bad request) — model ${model} likely unsupported on ${config.openrouter.baseUrl}, skipping AI for this token`);
+        return null;
+      }
+
       // Handle 402 with reduced token budget
       const affordMatch = String(error?.response?.data?.error?.message || '').match(/afford\s+(\d+)/i);
       const affordableBudget = affordMatch ? Number.parseInt(affordMatch[1], 10) : NaN;

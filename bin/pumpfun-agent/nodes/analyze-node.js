@@ -366,6 +366,11 @@ async function runOpenRouterAnalysis(data) {
                 logger_1.default.warn(`[AnalyzeNode] OpenRouter 429 exhausted all ${MAX_RETRIES} retries, skipping AI for this token`);
                 return null;
             }
+            // 400 = bad request (wrong model, invalid params) — NOT transient, don't retry
+            if (status === 400) {
+                logger_1.default.warn(`[AnalyzeNode] OpenRouter 400 (bad request) — model ${model} likely unsupported on ${config.openrouter.baseUrl}, skipping AI for this token`);
+                return null;
+            }
             // Handle 402 with reduced token budget
             const affordMatch = String(error?.response?.data?.error?.message || '').match(/afford\s+(\d+)/i);
             const affordableBudget = affordMatch ? Number.parseInt(affordMatch[1], 10) : NaN;

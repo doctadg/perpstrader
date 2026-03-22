@@ -33,6 +33,8 @@ const CLUSTER_MERGE_HOURS_THRESHOLD = 48;
 const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '50', 10); // Increased from 20 to process more articles per cycle
 const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.40; // Lowered from 0.55 — entity overlap now drives most merges, threshold is secondary
 const ANTI_SPAM_HOURS = 48; // Extended from 2 hours to match merge window for better cross-run dedup
+const MAX_ENTITY_CLUSTER_LINKS = 200; // Cap entity links per cluster to prevent gravity wells
+const ENTITY_RELEVANCE_MIN_MATCH = 3; // Min chars of entity name that must appear in topic/keywords to be linked
 /**
  * Enhanced story clustering with improved title clustering
  */
@@ -539,12 +541,18 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
         if (useVectorMode) {
             await news_vector_store_1.default.storeArticle(article, assignedClusterId);
         }
-        // Link entities to cluster
+        // Link entities to cluster (FIX 8: filtered by relevance to prevent gravity wells)
+        const existingCluster = await story_cluster_store_enhanced_1.default.getClusterById(assignedClusterId);
+        const clusterTopic = existingCluster?.topic || '';
+        const clusterKeywords = existingCluster?.keywords || [];
         for (const entity of entities) {
             try {
                 const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
                 await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
-                await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, assignedClusterId, heatDelta * 0.1);
+                // Only link entity to cluster if it's relevant to the cluster topic/keywords
+                if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), clusterTopic, clusterKeywords)) {
+                    await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, assignedClusterId, heatDelta * 0.1);
+                }
             }
             catch (e) {
                 logger_1.default.warn(`[EnhancedClusterNode] Entity linking failed: ${entity.name} -> ${assignedClusterId.slice(0, 8)}`, e);
@@ -573,12 +581,14 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                     if (useVectorMode) {
                         await news_vector_store_1.default.storeArticle(article, target.id);
                     }
-                    // Link entities
+                    // Link entities (FIX 8: filtered by relevance)
                     for (const entity of entities) {
                         try {
                             const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
                             await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
-                            await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
+                            if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), target.topic, target.keywords || [])) {
+                                await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
+                            }
                         }
                         catch (e) {
                             logger_1.default.warn(`[EnhancedClusterNode] Anti-spam entity linking failed: ${entity.name} -> ${target.id.slice(0, 8)}`, e);
@@ -613,12 +623,17 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
         if (useVectorMode) {
             await news_vector_store_1.default.storeArticle(article, newClusterId);
         }
-        // Link entities to cluster
+        // Link entities to cluster (FIX 8: filtered by relevance — for new clusters, all entities from the article ARE relevant since topic was generated from the article)
         for (const entity of entities) {
             try {
                 const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
                 await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
-                await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, newClusterId, initialHeat * 0.1);
+                // For NEW clusters, entity relevance is implicit (topic derived from article)
+                // but still apply the filter to prevent noise entities (LOCATION, DATE) from accumulating
+                if (entity.type === 'TOKEN' || entity.type === 'ORGANIZATION' || entity.type === 'GOVERNMENT_BODY' ||
+                    entity.type === 'PROTOCOL' || entity.type === 'PERSON') {
+                    await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, newClusterId, initialHeat * 0.1);
+                }
             }
             catch (e) {
                 logger_1.default.warn(`[EnhancedClusterNode] New cluster entity linking failed: ${entity.name} -> ${newClusterId.slice(0, 8)}`, e);
@@ -739,6 +754,20 @@ async function mergeSingletonClusters() {
         for (const target of mergeTargets) {
             if (singleton.id === target.id)
                 continue;
+            // FAST-PATH: If clusters share a keyword that looks like a named entity (4+ chars, uppercase),
+            // skip the expensive similarity calc and assign a baseline score
+            const kw1Set = new Set((singleton.keywords || []).map((k) => k.toLowerCase()));
+            const kw2Set = new Set((target.keywords || []).map((k) => k.toLowerCase()));
+            const sharedKw = [...kw1Set].filter((k) => kw2Set.has(k) && k.length >= 4);
+            if (sharedKw.length >= 2) {
+                // Strong keyword overlap — likely same story. Skip full similarity.
+                const fastScore = 0.45; // Above singleton merge threshold
+                if (fastScore > bestScore) {
+                    bestScore = fastScore;
+                    bestTarget = target;
+                }
+                continue;
+            }
             // Quick pre-filter: must be same category or have matching topic words
             if (singleton.category !== target.category) {
                 // Still allow cross-category if topics share a key token (e.g. BTC)
@@ -781,11 +810,85 @@ async function mergeSingletonClusters() {
  * Calculate enhanced cluster similarity with entity overlap
  * FIX 4: Replaced hardcoded entitySimilarity: 0 with actual Jaccard overlap
  * FIX 5: Reweighted to use entity (0.4), topic (0.3), keywords (0.3)
+ * FIX 7: Fallback entity extraction from topic/keywords when DB entity_cluster_links is empty
+ *        (only 86/3075 clusters have entity links — 97% were scoring 0 on the entity dimension)
  */
+/**
+ * FIX 8: Entity Relevance Filter — prevents gravity well super-clusters.
+ * Only link entities to a cluster if the entity name appears in the cluster's
+ * topic or keywords. This stops clusters from accumulating every common entity
+ * (Bitcoin, Nvidia, Interest Rate) and then matching everything new.
+ */
+function isEntityRelevantToCluster(entityName, normalizedEntity, clusterTopic, clusterKeywords) {
+    if (!clusterTopic && (!clusterKeywords || clusterKeywords.length === 0))
+        return true; // No topic = no filter
+    const topicLower = (clusterTopic || '').toLowerCase();
+    const entityLower = normalizedEntity || entityName.toLowerCase();
+    // Check if entity name appears in topic
+    if (entityLower.length >= ENTITY_RELEVANCE_MIN_MATCH && topicLower.includes(entityLower)) {
+        return true;
+    }
+    // Check if entity name appears in any keyword
+    if (clusterKeywords && clusterKeywords.length > 0) {
+        for (const kw of clusterKeywords) {
+            if (kw.toLowerCase().includes(entityLower) || entityLower.includes(kw.toLowerCase())) {
+                return true;
+            }
+        }
+    }
+    // Check if any significant word of the entity name (4+ chars) appears in the topic
+    const entityWords = entityLower.split(/[\s_\-]+/).filter(w => w.length >= 4);
+    for (const word of entityWords) {
+        if (topicLower.includes(word))
+            return true;
+    }
+    // TOKEN entities with short names (BTC, ETH, SOL etc) — always allow for CRYPTO clusters
+    // since these are the primary identifiers of crypto news
+    if (entityLower.length <= 4 && /^[a-z]+$/.test(entityLower)) {
+        if (topicLower.includes('crypto') || topicLower.includes('bitcoin') ||
+            topicLower.includes('ethereum') || topicLower.includes('token') ||
+            topicLower.includes('defi') || topicLower.includes('nft') ||
+            topicLower.includes('blockchain')) {
+            return true;
+        }
+    }
+    return false;
+}
+function extractEntitiesFromTopicAndKeywords(topic, keywords) {
+    const text = `${topic} ${(keywords || []).join(' ')}`.toLowerCase();
+    const entities = [];
+    // Match known crypto tokens, protocols, orgs — 2+ chars, alphanumeric
+    const tokenPattern = /\b([a-z]{2,}(?:coin|swap|dex|fi|token|chain|net|ai|dao)|btc|eth|sol|bnb|xrp|ada|doge|shib|pepe|pepeto|avax|matic|dot|link|uni|aave|crv|ldo|op|arb|ftm|avax|near|apt|sui|sei|ton|trx|xlm|algo|atom|egld|ftm|inj|tia|jup|pendle|ondo|render|worldcoin|wld|hlord|trump|maga)\b/gi;
+    const orgPattern = /\b((?:jpmorgan|goldman|morgan stanley|blackrock|fidelity|binance|coinbase|kraken|openai|google|meta|apple|microsoft|amazon|nvidia|tesla|fed|sec|cftc|imf|world bank|ecb|boj|pboc|trump administration|white house|congress|senate|supreme court|venice biennale|telesat))\b/gi;
+    const knownTokens = new Set(['bitcoin', 'ethereum', 'solana', 'cardano', 'polkadot', 'avalanche', 'polygon', 'chainlink', 'uniswap', 'aave', 'curve', 'arbitrum', 'optimism', 'fantom', 'near', 'aptos', 'sui', 'sei', 'ton', 'tron', 'stellar', 'algorand', 'cosmos', 'injective', 'celestia', 'jupiter', 'pepeto', 'pepe', 'dogecoin', 'shiba inu', 'xrp', 'bnb', 'ada', 'trx', 'xlm', 'algo', 'atom', 'ftm', 'op', 'arb', 'matic', 'dot', 'link', 'uni', 'crv', 'ldo', 'tvl']);
+    // Extract proper nouns from topic (capitalized words, 2+ chars)
+    const properNouns = topic.match(/\b([A-Z][a-z]{1,}(?:\s[A-Z][a-z]+)*)\b/g) || [];
+    for (const pn of properNouns) {
+        const lower = pn.toLowerCase();
+        if (lower.length > 2 && !['the', 'this', 'that', 'with', 'from', 'after', 'while', 'when', 'where', 'what', 'which', 'their', 'there', 'they', 'these', 'those', 'than', 'into', 'over', 'under', 'before', 'about', 'between', 'during', 'without', 'within', 'through', 'against', 'first', 'last', 'next', 'best', 'worst', 'some', 'many', 'much', 'more', 'most', 'less', 'very', 'just', 'also', 'even', 'still', 'only', 'then', 'each', 'every', 'both', 'other', 'such', 'being', 'have', 'will', 'would', 'could', 'should', 'might', 'shall', 'can', 'need', 'must'].includes(lower)) {
+            entities.push(lower);
+        }
+    }
+    // Extract keywords as entities (they're already uppercase topic words)
+    for (const kw of (keywords || [])) {
+        const lower = kw.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (lower.length > 2) {
+            entities.push(lower);
+        }
+    }
+    // Deduplicate
+    return [...new Set(entities)];
+}
 async function calculateEnhancedSimilarityAsync(c1, c2) {
     // FIX 4: Fetch entity sets for both clusters and compute Jaccard overlap
-    const entities1 = await story_cluster_store_enhanced_1.default.getClusterEntities(c1.id);
-    const entities2 = await story_cluster_store_enhanced_1.default.getClusterEntities(c2.id);
+    let entities1 = await story_cluster_store_enhanced_1.default.getClusterEntities(c1.id);
+    let entities2 = await story_cluster_store_enhanced_1.default.getClusterEntities(c2.id);
+    // FIX 7: If DB entities are empty (97% of clusters!), extract from topic/keywords
+    const hasDbEntities = entities1.length > 0 || entities2.length > 0;
+    if (!hasDbEntities) {
+        entities1 = extractEntitiesFromTopicAndKeywords(c1.topic || '', c1.keywords || []);
+        entities2 = extractEntitiesFromTopicAndKeywords(c2.topic || '', c2.keywords || []);
+    }
     let entityJaccard = 0;
     if (entities1.length > 0 && entities2.length > 0) {
         const set1 = new Set(entities1);
@@ -808,8 +911,19 @@ async function calculateEnhancedSimilarityAsync(c1, c2) {
     const keywordSim = kUnion.size > 0 ? kIntersect.length / kUnion.size : 0;
     // Sub-event type match (bonus)
     const subEventBonus = (c1.subEventType && c2.subEventType && c1.subEventType === c2.subEventType) ? 0.05 : 0;
-    // FIX 5: Weighted combination: entities 0.4, topic 0.3, keywords 0.3
-    const similarity = Math.min(1, entityJaccard * 0.4 + topicSim * 0.3 + keywordSim * 0.3 + subEventBonus);
+    // FIX 5+7: Weighted combination with dynamic weight redistribution
+    // When DB entities are missing, fallback entities fill the gap, so keep entity weight.
+    // But if entities are still empty after fallback, redistribute to topic+keyword.
+    let entityWeight = 0.4;
+    let topicWeight = 0.3;
+    let keywordWeight = 0.3;
+    if (entityJaccard === 0) {
+        // No entities available — shift weight to topic and keywords
+        entityWeight = 0;
+        topicWeight = 0.5;
+        keywordWeight = 0.5;
+    }
+    const similarity = Math.min(1, entityJaccard * entityWeight + topicSim * topicWeight + keywordSim * keywordWeight + subEventBonus);
     return {
         cluster1Id: c1.id,
         cluster2Id: c2.id,

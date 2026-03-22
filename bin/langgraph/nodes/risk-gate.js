@@ -182,20 +182,26 @@ async function riskGateNode(state) {
         const recentTrades = await data_manager_1.default.getTrades(undefined, state.symbol, 1);
         const lastTrade = recentTrades[0] || null;
         const positionStrategy = lastTrade?.strategyId ? await data_manager_1.default.getStrategy(lastTrade.strategyId) : null;
-        // P0 FIX: Prefer active strategies from DB (training loop output).
-        // Fallback chain: position's strategy > best active DB strategy > state.selectedStrategy
-        let activeStrategy = positionStrategy;
-        if (!activeStrategy) {
-            try {
-                activeStrategy = await data_manager_1.default.getBestActiveStrategyForSymbol(state.symbol);
-                if (activeStrategy) {
-                    logger_1.default.info(`[RiskGateNode] Using active DB strategy: ${activeStrategy.name} (${activeStrategy.type}) for ${state.symbol}`);
-                }
-            }
-            catch (dbError) {
-                logger_1.default.warn('[RiskGateNode] Failed to load active strategies from DB:', dbError);
+        // FIX: Active DB strategies take priority (training loop output).
+        // positionStrategy only used if it's still isActive — prevents self-reinforcing
+        // loop where inactive strategies get recycled forever via last trade's ID.
+        let activeStrategy = null;
+        // Tier 1: Best active DB strategy (highest priority — training loop output)
+        try {
+            activeStrategy = await data_manager_1.default.getBestActiveStrategyForSymbol(state.symbol);
+            if (activeStrategy) {
+                logger_1.default.info(`[RiskGateNode] Using active DB strategy: ${activeStrategy.name} (${activeStrategy.id}) for ${state.symbol}`);
             }
         }
+        catch (dbError) {
+            logger_1.default.warn('[RiskGateNode] Failed to load active strategies from DB:', dbError);
+        }
+        // Tier 2: Position's strategy ONLY if it's still active
+        if (!activeStrategy && positionStrategy?.isActive) {
+            activeStrategy = positionStrategy;
+            logger_1.default.info(`[RiskGateNode] Using position strategy (still active): ${activeStrategy.name} (${activeStrategy.id})`);
+        }
+        // Tier 3: Pipeline's selected strategy
         if (!activeStrategy) {
             activeStrategy = state.selectedStrategy;
         }
