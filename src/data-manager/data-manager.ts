@@ -686,6 +686,12 @@ export class DataManager {
     logger.info('Database connection closed');
   }
 
+  // Helper: safely parse JSON columns, defaulting on empty/corrupt data
+  private _safeJson(str: string | null | undefined, fallback: any): any {
+    if (!str || typeof str !== 'string' || str.trim() === '') return fallback;
+    try { return JSON.parse(str); } catch (_) { return fallback; }
+  }
+
   // Helper methods for mapping rows to objects
   private mapRowToStrategy(row: any): Strategy {
     return {
@@ -693,14 +699,14 @@ export class DataManager {
       name: row.name,
       description: row.description,
       type: row.type,
-      symbols: JSON.parse(row.symbols),
+      symbols: this._safeJson(row.symbols, []),
       timeframe: row.timeframe,
-      parameters: JSON.parse(row.parameters),
-      entryConditions: JSON.parse(row.entryConditions),
-      exitConditions: JSON.parse(row.exitConditions),
-      riskParameters: JSON.parse(row.riskParameters),
+      parameters: this._safeJson(row.parameters, {}),
+      entryConditions: this._safeJson(row.entryConditions, []),
+      exitConditions: this._safeJson(row.exitConditions, []),
+      riskParameters: this._safeJson(row.riskParameters, {}),
       isActive: row.isActive === 1,
-      performance: JSON.parse(row.performance),
+      performance: this._safeJson(row.performance, {}),
       createdAt: new Date(row.createdAt),
       updatedAt: new Date(row.updatedAt)
     };
