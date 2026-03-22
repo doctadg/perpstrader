@@ -15,9 +15,9 @@ class SemanticSimilarityService {
     embeddingDim = 128;
     useLLM = process.env.USE_LLM_SIMILARITY === 'true';
     // Similarity thresholds
-    HIGH_SIMILARITY = 0.85;
-    MEDIUM_SIMILARITY = 0.70;
-    LOW_SIMILARITY = 0.55;
+    HIGH_SIMILARITY = 0.80;
+    MEDIUM_SIMILARITY = 0.60;
+    LOW_SIMILARITY = 0.40;
     // Cache for embeddings
     embeddingCache = new Map();
     cacheMaxSize = 1000;

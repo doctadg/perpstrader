@@ -65,6 +65,12 @@ class StoryClusterStoreEnhanced {
         try {
             this.db = new BetterSqlite3(this.dbPath);
             this.db.pragma('journal_mode = WAL');
+            // FIX: Increase busy timeout to handle concurrent writes from multiple
+            // category rotation processes. Default is 5s; 30s prevents SQLITE_BUSY.
+            this.db.pragma('busy_timeout = 30000');
+            // FIX: Ensure read_uncommitted is off for strict WAL consistency.
+            // This guarantees each read sees the latest committed state.
+            this.db.pragma('read_uncommitted = false');
 
             // Run migration if needed
             await this.ensureEnhancedSchema();
@@ -946,12 +952,15 @@ class StoryClusterStoreEnhanced {
 
     /**
      * Get cluster ID by topic key
+     * FIX: Added fallback LIKE search for robustness against WAL snapshot isolation
+     * issues between concurrent processes sharing the same SQLite database.
      */
     async getClusterIdByTopicKey(topicKey: string): Promise<string | null> {
         await this.initialize();
         if (!this.db) return null;
 
         try {
+            // Primary: exact match
             const row = this.db.prepare(`
                 SELECT id FROM story_clusters
                 WHERE topic_key = ?
@@ -959,7 +968,29 @@ class StoryClusterStoreEnhanced {
                 LIMIT 1
             `).get(topicKey) as { id: string } | undefined;
 
-            return row?.id || null;
+            if (row?.id) {
+                return row.id;
+            }
+
+            // FIX: Fallback — prefix search for first 50 chars of topicKey.
+            // Handles cases where OpenRouter truncates topics differently,
+            // or where WAL snapshot isolation delays visibility of new rows.
+            const prefix = topicKey.slice(0, 50);
+            if (prefix.length >= 20) {
+                const fallbackRow = this.db.prepare(`
+                    SELECT id FROM story_clusters
+                    WHERE topic_key LIKE ? || '%'
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                `).get(prefix) as { id: string } | undefined;
+
+                if (fallbackRow?.id) {
+                    logger.info(`[StoryClusterStoreEnhanced] TopicKey fallback matched: "${topicKey.slice(0, 50)}..." -> ${fallbackRow.id.slice(0, 8)}`);
+                    return fallbackRow.id;
+                }
+            }
+
+            return null;
         } catch (error) {
             logger.error('[StoryClusterStoreEnhanced] Failed to get cluster by topic key:', error);
             return null;

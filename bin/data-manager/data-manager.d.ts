@@ -31,6 +31,7 @@ export declare class DataManager {
     getPortfolioPerformance(timeframe?: string): Promise<any>;
     cleanupOldData(daysToKeep?: number): Promise<void>;
     close(): void;
+    private _safeJson;
     private mapRowToStrategy;
     private mapRowToTrade;
     private mapRowToMarketData;

@@ -7,12 +7,13 @@ import { v4 as uuidv4 } from 'uuid';
 import dataManager from '../../data-manager/data-manager';
 import logger from '../../shared/logger';
 
-// MINIMUM QUALITY THRESHOLDS (previously ultra-aggressive, now with basic sanity checks)
-const MIN_SHARPE_RATIO = -0.3; // Reduced from aggressive -0.5, but still allows some exploration
-const MIN_WIN_RATE = 0.15; // Minimum 15% win rate (up from 10%)
-const MAX_DRAWDOWN = 0.80; // Maximum 80% drawdown (down from 70% tolerance)
-const MIN_TRADES = 3; // Minimum trades for statistical significance
-const MIN_TOTAL_RETURN = -10; // Allow strategies that don't lose more than 10%
+// MINIMUM QUALITY THRESHOLDS (tightened 2026-03-22 — drawdown was at 14.95%)
+// Previous thresholds (-0.3 Sharpe, 15% WR, 80% DD) allowed garbage strategies through.
+const MIN_SHARPE_RATIO = 0.0; // Must have non-negative Sharpe — no value in negative-Sharpe strategies
+const MIN_WIN_RATE = 0.30; // Minimum 30% win rate — 15% was way too permissive
+const MAX_DRAWDOWN = 0.30; // Maximum 30% drawdown — 80% was insane
+const MIN_TRADES = 5; // Minimum trades for statistical significance (up from 3)
+const MIN_TOTAL_RETURN = -5; // Allow strategies that don't lose more than 5% (was -10)
 
 /**
  * Strategy Selector Node

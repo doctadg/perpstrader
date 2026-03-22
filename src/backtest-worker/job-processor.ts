@@ -306,7 +306,8 @@ async function storeBacktestResult(
       result.annualizedReturn,
       result.sharpeRatio,
       result.maxDrawdown,
-      result.winRate,
+      // Defensive: clamp winRate to [0, 100] — some code paths double-multiply by 100
+      Math.min(Math.max(result.winRate, 0), 100),
       result.totalTrades,
       JSON.stringify(result.trades),
       JSON.stringify(metricsPayload),

@@ -512,11 +512,15 @@ export class IdeaQueue {
     if (!this.db) return [];
 
     const placeholders = symbols.map(() => '?').join(', ');
+    // LIMIT to ~5000 rows max to prevent timeout (35.7M row table).
+    // 30d of 15m candles per symbol = ~2880. Cap at 5000 total.
+    const maxRows = Math.min(5000, symbols.length * 2000);
     const rows = this.db.prepare(
       `SELECT symbol, timestamp, open, high, low, close, volume
        FROM market_data
        WHERE symbol IN (${placeholders}) AND timestamp >= ?
-       ORDER BY symbol, timestamp ASC`
+       ORDER BY symbol, timestamp ASC
+       LIMIT ${maxRows}`
     ).all(...symbols, cutoffTime) as any[];
 
     return rows.map(row => ({

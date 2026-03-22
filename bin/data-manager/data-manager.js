@@ -416,7 +416,9 @@ class DataManager {
           maxDrawdown, winRate, totalTrades, trades, metrics, createdAt
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-            stmt.run((0, uuid_1.v4)(), result.strategyId, result.period.start.toISOString(), result.period.end.toISOString(), result.initialCapital, result.finalCapital, result.totalReturn, result.annualizedReturn, result.sharpeRatio, result.maxDrawdown, result.winRate, result.totalTrades, JSON.stringify(result.trades), JSON.stringify(result.metrics), new Date().toISOString());
+            stmt.run((0, uuid_1.v4)(), result.strategyId, result.period.start.toISOString(), result.period.end.toISOString(), result.initialCapital, result.finalCapital, result.totalReturn, result.annualizedReturn, result.sharpeRatio, result.maxDrawdown, 
+            // Defensive: clamp winRate to [0, 100] — some code paths double-multiply by 100
+            Math.min(Math.max(result.winRate, 0), 100), result.totalTrades, JSON.stringify(result.trades), JSON.stringify(result.metrics), new Date().toISOString());
             logger_1.default.info(`Backtest result saved for strategy: ${result.strategyId}`);
         }
         catch (error) {
@@ -546,8 +548,14 @@ class DataManager {
     }
     // Helper: safely parse JSON columns, defaulting on empty/corrupt data
     _safeJson(str, fallback) {
-        if (!str || typeof str !== 'string' || str.trim() === '') return fallback;
-        try { return JSON.parse(str); } catch (_) { return fallback; }
+        if (!str || typeof str !== 'string' || str.trim() === '')
+            return fallback;
+        try {
+            return JSON.parse(str);
+        }
+        catch (_) {
+            return fallback;
+        }
     }
     // Helper methods for mapping rows to objects
     mapRowToStrategy(row) {

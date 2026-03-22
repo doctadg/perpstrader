@@ -54,6 +54,8 @@ export declare class BacktestEngine {
      * Initialize strategy state
      */
     private initializeStrategyState;
+    /** Get or create per-symbol state for indicator calculations */
+    private getSymbolState;
     /**
      * Charge funding rate for open positions
      */

@@ -32,9 +32,9 @@ class SemanticSimilarityService {
   private useLLM = process.env.USE_LLM_SIMILARITY === 'true';
 
   // Similarity thresholds
-  private readonly HIGH_SIMILARITY = 0.85;
-  private readonly MEDIUM_SIMILARITY = 0.70;
-  private readonly LOW_SIMILARITY = 0.55;
+  private readonly HIGH_SIMILARITY = 0.80;
+  private readonly MEDIUM_SIMILARITY = 0.60;
+  private readonly LOW_SIMILARITY = 0.40;
 
   // Cache for embeddings
   private embeddingCache = new Map<string, number[]>();

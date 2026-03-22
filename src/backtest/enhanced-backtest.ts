@@ -209,8 +209,21 @@ export class BacktestEngine {
             indicators: {},
             lastSignal: null,
             lastSignalTime: 0,
-            lastEntryBar: -this.minBarsBetweenEntries,
+            // Per-symbol state to prevent indicator corruption across symbols
+            symbolState: {},
         };
+    }
+
+    /** Get or create per-symbol state for indicator calculations */
+    private getSymbolState(state: any, symbol: string, barIndex: number): any {
+        if (!state.symbolState[symbol]) {
+            state.symbolState[symbol] = {
+                closes: [],
+                lastEntryBar: -this.minBarsBetweenEntries,
+                rsiState: null,
+            };
+        }
+        return state.symbolState[symbol];
     }
 
     /**
@@ -291,8 +304,11 @@ export class BacktestEngine {
     ): SimulatedOrder[] {
         const signals: SimulatedOrder[] = [];
 
-        // Check cooldown
-        if (barIndex - state.lastEntryBar < this.minBarsBetweenEntries) {
+        // Use per-symbol state to prevent indicator corruption across symbols
+        const symState = this.getSymbolState(state, candle.symbol, barIndex);
+
+        // Check cooldown per-symbol
+        if (barIndex - symState.lastEntryBar < this.minBarsBetweenEntries) {
             return signals;
         }
 
@@ -301,10 +317,9 @@ export class BacktestEngine {
         const effectiveCapital = Math.min(this.capital, this.maxCapital);
         const positionSize = (effectiveCapital * (strategy.riskParameters?.maxPositionSize || 0.05)) / candle.close;
 
-        // Build close price history from tracked candles
-        if (!state.closes) state.closes = [];
-        state.closes.push(candle.close);
-        const closes = state.closes;
+        // Build close price history PER SYMBOL
+        symState.closes.push(candle.close);
+        const closes = symState.closes;
 
         // Helper: compute RSI using Wilder's EMA (industry standard)
         const rsi = (period: number): number => {
@@ -377,10 +392,10 @@ export class BacktestEngine {
 
                     if (fastNow > slowNow && fastPrev <= slowPrev) {
                         signals.push(this.createBuySignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     } else if (fastNow < slowNow && fastPrev >= slowPrev) {
                         signals.push(this.createSellSignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                 }
                 break;
@@ -400,10 +415,10 @@ export class BacktestEngine {
 
                     if (price < bb.lower && currentRSI < oversold) {
                         signals.push(this.createBuySignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     } else if (price > bb.upper && currentRSI > overbought) {
                         signals.push(this.createSellSignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                 }
                 break;
@@ -419,10 +434,10 @@ export class BacktestEngine {
                     const currentRSI = rsi(rsiPeriod);
                     if (currentRSI < oversold) {
                         signals.push(this.createBuySignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     } else if (currentRSI > overbought) {
                         signals.push(this.createSellSignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                 }
                 break;

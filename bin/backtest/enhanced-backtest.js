@@ -164,8 +164,20 @@ class BacktestEngine {
             indicators: {},
             lastSignal: null,
             lastSignalTime: 0,
-            lastEntryBar: -this.minBarsBetweenEntries,
+            // Per-symbol state to prevent indicator corruption across symbols
+            symbolState: {},
         };
+    }
+    /** Get or create per-symbol state for indicator calculations */
+    getSymbolState(state, symbol, barIndex) {
+        if (!state.symbolState[symbol]) {
+            state.symbolState[symbol] = {
+                closes: [],
+                lastEntryBar: -this.minBarsBetweenEntries,
+                rsiState: null,
+            };
+        }
+        return state.symbolState[symbol];
     }
     /**
      * Charge funding rate for open positions
@@ -230,19 +242,19 @@ class BacktestEngine {
      */
     generateSignals(strategy, candle, state, barIndex) {
         const signals = [];
-        // Check cooldown
-        if (barIndex - state.lastEntryBar < this.minBarsBetweenEntries) {
+        // Use per-symbol state to prevent indicator corruption across symbols
+        const symState = this.getSymbolState(state, candle.symbol, barIndex);
+        // Check cooldown per-symbol
+        if (barIndex - symState.lastEntryBar < this.minBarsBetweenEntries) {
             return signals;
         }
         const params = strategy.parameters || {};
         // Use capped capital for position sizing to prevent unrealistic compounding
         const effectiveCapital = Math.min(this.capital, this.maxCapital);
         const positionSize = (effectiveCapital * (strategy.riskParameters?.maxPositionSize || 0.05)) / candle.close;
-        // Build close price history from tracked candles
-        if (!state.closes)
-            state.closes = [];
-        state.closes.push(candle.close);
-        const closes = state.closes;
+        // Build close price history PER SYMBOL
+        symState.closes.push(candle.close);
+        const closes = symState.closes;
         // Helper: compute RSI using Wilder's EMA (industry standard)
         const rsi = (period) => {
             if (closes.length <= period + 1)
@@ -319,11 +331,11 @@ class BacktestEngine {
                         : slowNow;
                     if (fastNow > slowNow && fastPrev <= slowPrev) {
                         signals.push(this.createBuySignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                     else if (fastNow < slowNow && fastPrev >= slowPrev) {
                         signals.push(this.createSellSignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                 }
                 break;
@@ -340,11 +352,11 @@ class BacktestEngine {
                     const price = candle.close;
                     if (price < bb.lower && currentRSI < oversold) {
                         signals.push(this.createBuySignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                     else if (price > bb.upper && currentRSI > overbought) {
                         signals.push(this.createSellSignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                 }
                 break;
@@ -358,11 +370,11 @@ class BacktestEngine {
                     const currentRSI = rsi(rsiPeriod);
                     if (currentRSI < oversold) {
                         signals.push(this.createBuySignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                     else if (currentRSI > overbought) {
                         signals.push(this.createSellSignal(candle, positionSize));
-                        state.lastEntryBar = barIndex;
+                        symState.lastEntryBar = barIndex;
                     }
                 }
                 break;

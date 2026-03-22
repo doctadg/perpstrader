@@ -23,15 +23,16 @@ const title_semantic_clustering_1 = __importDefault(require("../../shared/title-
 const semantic_similarity_1 = __importDefault(require("./semantic-similarity"));
 const enhanced_entity_extraction_1 = __importDefault(require("./enhanced-entity-extraction"));
 // Configuration - Optimized thresholds based on testing
-const VECTOR_SIMILARITY_THRESHOLD = Number.parseFloat(process.env.NEWS_VECTOR_DISTANCE_THRESHOLD || '0.65'); // Lowered for better recall
-const KEYWORD_SIMILARITY_THRESHOLD = 0.55; // Slightly lowered
-const TITLE_SIMILARITY_THRESHOLD = 0.70; // NEW: Dedicated title similarity threshold
+const VECTOR_SIMILARITY_THRESHOLD = Number.parseFloat(process.env.NEWS_VECTOR_DISTANCE_THRESHOLD || '0.50'); // Aggressively lowered for recall
+const KEYWORD_SIMILARITY_THRESHOLD = 0.40; // Lowered from 0.55 — entity overlap validates merges
+const TITLE_SIMILARITY_THRESHOLD = 0.55; // Lowered from 0.70 — more title-based grouping
 const FILTER_VECTOR_BY_CATEGORY = process.env.NEWS_VECTOR_FILTER_BY_CATEGORY === 'true';
 const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM === 'true';
 const USE_ENHANCED_CLUSTERING = process.env.USE_ENHANCED_SEMANTIC_CLUSTERING !== 'false'; // Default true
 const CLUSTER_MERGE_HOURS_THRESHOLD = 48;
-const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '20', 10);
+const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '50', 10); // Increased from 20 to process more articles per cycle
 const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.40; // Lowered from 0.55 — entity overlap now drives most merges, threshold is secondary
+const ANTI_SPAM_HOURS = 48; // Extended from 2 hours to match merge window for better cross-run dedup
 /**
  * Enhanced story clustering with improved title clustering
  */
@@ -263,10 +264,18 @@ async function enhancedStoryClusterNode(state) {
     await createCrossCategoryLinks(processedArticles);
     // ============================================================
     // PHASE 5: Enhanced Cluster Merging
+    // FIX: Increased from 50 to 500 clusters to catch more singleton merges
     // ============================================================
     logger_1.default.info('[EnhancedClusterNode] PHASE 5: Merging similar clusters...');
     const mergeResult = await mergeSimilarClustersEnhanced(useVectorMode);
     stats.mergedClusters = mergeResult.mergedCount;
+    // ============================================================
+    // PHASE 5b: NEW — Singleton Re-clustering Pass
+    // Explicitly target singleton clusters and try harder to merge them
+    // ============================================================
+    logger_1.default.info('[EnhancedClusterNode] PHASE 5b: Singleton re-clustering pass...');
+    const singletonMergeResult = await mergeSingletonClusters();
+    stats.mergedClusters += singletonMergeResult.mergedCount;
     // ============================================================
     // PHASE 6-9: Heat History, Predictions, Entities, Events (unchanged)
     // ============================================================
@@ -345,6 +354,7 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
     // ============================================================
     // FIX 3: Entity-first matching cascade (BEFORE topicKey lookup)
     // Extract entities from the article and find clusters sharing them
+    // FIX: Relaxed category requirement — entity match is strong signal, don't require exact category
     // ============================================================
     if (USE_ENHANCED_CLUSTERING && entities.length > 0) {
         const articleEntityNames = entities.map(e => e.normalized || e.name.toLowerCase());
@@ -366,26 +376,27 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                     bestEntityCluster = clusterId;
                 }
             }
-            // If entity overlap >= 0.25 (25%), assign immediately — lowered from 0.4 for better catchment
-            if (bestEntityCluster && bestEntityOverlap >= 0.25) {
-                // Verify cluster exists and matches category
+            // If entity overlap >= 0.20 (lowered from 0.25), assign immediately
+            if (bestEntityCluster && bestEntityOverlap >= 0.20) {
+                // Verify cluster exists — category check relaxed for entity matches
                 if (knownClusterIds.has(bestEntityCluster)) {
                     const cluster = await story_cluster_store_enhanced_1.default.getClusterById(bestEntityCluster);
-                    if (cluster?.category === article.categories[0]) {
+                    // FIX: Allow entity matches across compatible categories (e.g. CRYPTO↔STOCKS for BTC)
+                    if (cluster && (cluster.category === article.categories[0] || bestEntityOverlap >= 0.40)) {
                         assignedClusterId = bestEntityCluster;
                         semanticMatch = true;
-                        logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)})`);
+                        logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)}, cat: ${cluster.category})`);
                     }
                 }
                 else if (!missingClusterIds.has(bestEntityCluster)) {
                     const exists = await story_cluster_store_enhanced_1.default.clusterExists(bestEntityCluster);
                     if (exists) {
                         const cluster = await story_cluster_store_enhanced_1.default.getClusterById(bestEntityCluster);
-                        if (cluster?.category === article.categories[0]) {
+                        if (cluster && (cluster.category === article.categories[0] || bestEntityOverlap >= 0.40)) {
                             assignedClusterId = bestEntityCluster;
                             semanticMatch = true;
                             knownClusterIds.add(bestEntityCluster);
-                            logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)})`);
+                            logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)}, cat: ${cluster.category})`);
                         }
                     }
                     else {
@@ -396,13 +407,13 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
         }
     }
     // 1. Topic key match (fastest)
+    // FIX: Removed category gate — topicKey is a strong dedup signal.
+    // Different categories assigning the same topicKey is a categorization error,
+    // not a reason to create duplicate clusters. Cross-category dedup is handled later.
     if (topicKey) {
         const existingByTopic = await story_cluster_store_enhanced_1.default.getClusterIdByTopicKey(topicKey);
         if (existingByTopic) {
-            const cluster = await story_cluster_store_enhanced_1.default.getClusterById(existingByTopic);
-            if (cluster?.category === article.categories[0]) {
-                assignedClusterId = existingByTopic;
-            }
+            assignedClusterId = existingByTopic;
         }
     }
     // 2. NEW: Title cluster match
@@ -550,7 +561,7 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                 .sort((a, b) => b.confidence - a.confidence);
             if (primaryEntities.length > 0) {
                 const primaryEntity = primaryEntities[0];
-                const recentClusters = await story_cluster_store_enhanced_1.default.findRecentClustersByPrimaryEntity(primaryEntity.normalized || primaryEntity.name, 2, // last 2 hours
+                const recentClusters = await story_cluster_store_enhanced_1.default.findRecentClustersByPrimaryEntity(primaryEntity.normalized || primaryEntity.name, ANTI_SPAM_HOURS, // Extended from 2 hours to 48 for better cross-run dedup
                 article.categories[0]);
                 if (recentClusters.length > 0) {
                     // Merge into the most recent/highest-heat cluster instead of creating new
@@ -655,7 +666,7 @@ async function createCrossCategoryLinks(processedArticles) {
  * Enhanced cluster merging with entity similarity
  */
 async function mergeSimilarClustersEnhanced(useVectorMode) {
-    const hotClusters = await story_cluster_store_enhanced_1.default.getHotClusters(50, CLUSTER_MERGE_HOURS_THRESHOLD);
+    const hotClusters = await story_cluster_store_enhanced_1.default.getHotClusters(500, CLUSTER_MERGE_HOURS_THRESHOLD);
     if (hotClusters.length < 2) {
         return { mergedCount: 0, targetCount: 0 };
     }
@@ -699,6 +710,72 @@ async function mergeSimilarClustersEnhanced(useVectorMode) {
         }
     }
     return { mergedCount, targetCount };
+}
+/**
+ * PHASE 5b: Singleton Re-clustering
+ * Fetches recent singleton clusters and tries to merge them into larger clusters.
+ * Uses a more aggressive threshold and checks against all clusters (not just top-N).
+ */
+async function mergeSingletonClusters() {
+    // Get up to 200 recent singleton clusters
+    const recentClusters = await story_cluster_store_enhanced_1.default.getHotClusters(200, CLUSTER_MERGE_HOURS_THRESHOLD);
+    const singletons = recentClusters.filter(c => c.articleCount <= 1);
+    if (singletons.length === 0) {
+        return { mergedCount: 0 };
+    }
+    logger_1.default.info(`[EnhancedClusterNode] PHASE 5b: Found ${singletons.length} singleton clusters to re-evaluate`);
+    // Get larger clusters (2+ articles) as merge targets
+    const allClusters = await story_cluster_store_enhanced_1.default.getHotClusters(500, CLUSTER_MERGE_HOURS_THRESHOLD);
+    const mergeTargets = allClusters.filter(c => c.articleCount >= 2);
+    if (mergeTargets.length === 0) {
+        logger_1.default.info('[EnhancedClusterNode] PHASE 5b: No multi-article clusters to merge into');
+        return { mergedCount: 0 };
+    }
+    let mergedCount = 0;
+    for (const singleton of singletons) {
+        // Find the best match among multi-article clusters
+        let bestTarget = null;
+        let bestScore = 0;
+        for (const target of mergeTargets) {
+            if (singleton.id === target.id)
+                continue;
+            // Quick pre-filter: must be same category or have matching topic words
+            if (singleton.category !== target.category) {
+                // Still allow cross-category if topics share a key token (e.g. BTC)
+                const singletonWords = new Set(singleton.topic.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
+                const targetWords = new Set(target.topic.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
+                const hasSharedToken = [...singletonWords].some(w => targetWords.has(w));
+                if (!hasSharedToken)
+                    continue;
+            }
+            // Calculate similarity (reusing the enhanced similarity function)
+            const similarity = await calculateEnhancedSimilarityAsync(singleton, target);
+            if (similarity.similarity > bestScore) {
+                bestScore = similarity.similarity;
+                bestTarget = target;
+            }
+        }
+        // Use a lower threshold for singletons (0.25 vs 0.40) — they're low-risk to merge
+        if (bestTarget && bestScore >= 0.25) {
+            // Verify both still exist
+            if (!(await story_cluster_store_enhanced_1.default.clusterExists(singleton.id)) ||
+                !(await story_cluster_store_enhanced_1.default.clusterExists(bestTarget.id))) {
+                continue;
+            }
+            logger_1.default.info(`[EnhancedClusterNode] PHASE 5b: Merging singleton "${singleton.topic.slice(0, 40)}..." -> "${bestTarget.topic.slice(0, 40)}..." (score: ${bestScore.toFixed(2)})`);
+            const result = await story_cluster_store_enhanced_1.default.mergeClusters(bestTarget.id, singleton.id);
+            if (result.moved > 0) {
+                mergedCount++;
+                await story_cluster_store_enhanced_1.default.createHierarchy(bestTarget.id, singleton.id, 'MERGED_INTO');
+                // Remove from merge targets to avoid double-merging
+                mergeTargets.splice(mergeTargets.indexOf(bestTarget), 1);
+            }
+        }
+    }
+    if (mergedCount > 0) {
+        logger_1.default.info(`[EnhancedClusterNode] PHASE 5b: Merged ${mergedCount} singleton clusters`);
+    }
+    return { mergedCount };
 }
 /**
  * Calculate enhanced cluster similarity with entity overlap
@@ -949,6 +1026,6 @@ function generateFallbackTopic(title, category) {
     return clean || `${category} Market Event`;
 }
 // NEW: Semantic similarity threshold
-const SEMANTIC_SIMILARITY_THRESHOLD = 0.65;
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.45; // Lowered from 0.65 — more aggressive semantic merging
 exports.default = enhancedStoryClusterNode;
 //# sourceMappingURL=enhanced-story-cluster-node.js.map

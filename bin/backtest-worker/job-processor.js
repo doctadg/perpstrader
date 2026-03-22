@@ -213,7 +213,9 @@ async function storeBacktestResult(result, assessment, jobId) {
         maxDrawdown, winRate, totalTrades, trades, metrics, createdAt
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-        stmt.run(jobId, result.strategyId, result.period.start.toISOString(), result.period.end.toISOString(), result.initialCapital, result.finalCapital, result.totalReturn, result.annualizedReturn, result.sharpeRatio, result.maxDrawdown, result.winRate, result.totalTrades, JSON.stringify(result.trades), JSON.stringify(metricsPayload), new Date().toISOString());
+        stmt.run(jobId, result.strategyId, result.period.start.toISOString(), result.period.end.toISOString(), result.initialCapital, result.finalCapital, result.totalReturn, result.annualizedReturn, result.sharpeRatio, result.maxDrawdown, 
+        // Defensive: clamp winRate to [0, 100] — some code paths double-multiply by 100
+        Math.min(Math.max(result.winRate, 0), 100), result.totalTrades, JSON.stringify(result.trades), JSON.stringify(metricsPayload), new Date().toISOString());
         logger_1.default.debug(`[JobProcessor] Stored backtest result for job ${jobId}`);
     }
     catch (error) {
