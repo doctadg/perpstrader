@@ -168,4 +168,21 @@ try:
 except:
     pass
 
+# ── Market data retention cleanup ──
+# Keep market_data for last 48h only (strategies need recent data, old data just bloats the DB)
+# Run only once per hour to avoid contention with the running process
+try:
+    retention_hours = int(os.environ.get("MARKET_DATA_RETENTION_HOURS", "48"))
+    conn = sqlite3.connect(DB_PATH, timeout=5)
+    before = conn.execute("SELECT COUNT(*) FROM market_data").fetchone()[0]
+    conn.execute(f"DELETE FROM market_data WHERE timestamp < datetime('now', '-{retention_hours} hours')")
+    conn.commit()
+    deleted = before - conn.execute("SELECT COUNT(*) FROM market_data").fetchone()[0]
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.close()
+    if deleted > 0:
+        print(f"[{ts}] RETENTION deleted {deleted:,} old market_data rows (kept last {retention_hours}h)")
+except Exception as e:
+    print(f"[{ts}] RETENTION skipped: {e}")
+
 print(f"[{ts}] OK trades={total_trades} closed={closed_trades} cancel_rate={cancel_rate}% strategies={active_count} coverage={coverage}%")

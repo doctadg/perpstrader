@@ -35,4 +35,3 @@ export declare function isExactDuplicate(title1: string, title2: string): boolea
  * Returns true for content that adds noise without trading value.
  */
 export declare function isNonMarketMoving(title: string): boolean;
-//# sourceMappingURL=title-cleaner.d.ts.map

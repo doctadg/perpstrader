@@ -33,4 +33,3 @@ export declare function formatPercentage(percentage: NumericalEntity): string;
  * Format a volume or amount for display in titles
  */
 export declare function formatLargeAmount(entity: NumericalEntity): string;
-//# sourceMappingURL=numerical-extractor.d.ts.map

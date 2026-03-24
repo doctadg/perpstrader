@@ -28,6 +28,12 @@ declare class EntityExtractor {
      * Calculate confidence score for extracted entity
      */
     private static calculateConfidence;
+    private static readonly ENTITY_BLACKLIST;
+    private static readonly GARBAGE_PATTERNS;
+    /**
+     * Check if entity should be filtered out
+     */
+    private static isGarbageEntity;
     /**
      * Deduplicate entities, keeping highest confidence
      */

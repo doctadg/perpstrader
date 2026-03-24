@@ -47,4 +47,3 @@ export declare function getNegativeMovementTemplate(): TitleTemplate;
  * Get a generic news template (fallback)
  */
 export declare function getGenericNewsTemplate(): TitleTemplate;
-//# sourceMappingURL=title-templates.d.ts.map

@@ -14,6 +14,7 @@ Object.defineProperty(exports, "createInitialState", { enumerable: true, get: fu
 const nodes_1 = require("./nodes");
 const logger_1 = __importDefault(require("../shared/logger"));
 const circuit_breaker_1 = __importDefault(require("../shared/circuit-breaker"));
+const training_capture_1 = require("../data/training-capture");
 /**
  * Trading Graph Orchestrator
  * Runs all nodes in sequence with conditional branching
@@ -193,6 +194,13 @@ async function runTradingCycle(symbol, timeframe) {
         for (const error of result.errors.slice(-3)) {
             logger_1.default.warn(`  ✗ ${error}`);
         }
+    }
+    // Capture training data (never let capture failures affect trading)
+    try {
+        await (0, training_capture_1.captureTrainingData)(result);
+    }
+    catch (e) {
+        logger_1.default.warn('[Orchestrator] Training capture failed:', e);
     }
     return result;
 }

@@ -15,6 +15,7 @@ import {
 } from './nodes';
 import logger from '../shared/logger';
 import circuitBreaker from '../shared/circuit-breaker';
+import { captureTrainingData } from '../data/training-capture';
 
 // Re-export types for convenience
 export { AgentState, createInitialState, PatternMatch, StrategyIdea, MarketRegime };
@@ -243,6 +244,13 @@ export async function runTradingCycle(symbol: string, timeframe: string): Promis
         for (const error of result.errors.slice(-3)) {
             logger.warn(`  ✗ ${error}`);
         }
+    }
+
+    // Capture training data (never let capture failures affect trading)
+    try {
+        await captureTrainingData(result);
+    } catch (e) {
+        logger.warn('[Orchestrator] Training capture failed:', e);
     }
 
     return result;

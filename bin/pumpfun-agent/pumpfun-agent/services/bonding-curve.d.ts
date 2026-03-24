@@ -69,10 +69,16 @@ declare class BondingCurveService {
     private paperPositions;
     private paperSolBalance;
     private initialized;
+    private entryScores;
+    private maxMultipliers;
     constructor();
     initialize(): Promise<void>;
     isPaperMode(): boolean;
     isInitialized(): boolean;
+    /**
+     * Lazy-import pumpfunStore (may not be available if module loaded standalone)
+     */
+    private getStore;
     /**
      * Derive the bonding curve PDA for a token
      */
@@ -96,7 +102,7 @@ declare class BondingCurveService {
     /**
      * Execute a buy on the bonding curve
      */
-    buy(tokenMint: string, tokenSymbol: string, solAmount: number, tpLevels?: TpLevel[]): Promise<SnipeResult>;
+    buy(tokenMint: string, tokenSymbol: string, solAmount: number, tpLevels?: TpLevel[], entryScore?: number): Promise<SnipeResult>;
     /**
      * Paper mode buy
      */
@@ -125,9 +131,18 @@ declare class BondingCurveService {
         totalRealized: number;
         unrealizedPnl: number;
     };
+    /**
+     * Sample real on-chain bonding curve prices for all open positions.
+     * Updates maxMultipliers, persists price samples to DB, and returns
+     * a map of tokenMint -> currentMultiplier for use by TP/SL logic.
+     */
+    sampleAndUpdatePositions(): Promise<Map<string, number>>;
+    private persistBuyToDb;
+    private persistSellToDb;
+    private persistPositionUpdate;
+    private persistOutcomeToDb;
 }
 declare const DEFAULT_TP_LEVELS: TpLevel[];
 export { DEFAULT_TP_LEVELS };
 export declare const bondingCurveService: BondingCurveService;
 export default bondingCurveService;
-//# sourceMappingURL=bonding-curve.d.ts.map

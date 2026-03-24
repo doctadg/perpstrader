@@ -66,4 +66,3 @@ export declare function detectTrendDirection(title: string): 'UP' | 'DOWN' | 'NE
  * Detect sub-event type from title text
  */
 export declare function detectEventType(title: string): SubEventType;
-//# sourceMappingURL=title-formatter.d.ts.map

@@ -221,25 +221,47 @@ class MessageBus extends events_1.EventEmitter {
      * Publish a message to a channel
      */
     async publish(channel, data, correlationId) {
-        if (!this.publisher) {
-            logger_1.default.warn('[MessageBus] Cannot publish: not connected');
-            return false;
-        }
         try {
+            const channelStr = channel;
             const message = {
-                type: channel,
+                type: channelStr,
                 timestamp: new Date(),
                 source: this.serviceId,
                 data,
                 id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
                 correlationId,
             };
-            await this.publisher.publish(channel, JSON.stringify(message));
+            // Always deliver locally first (handles same-process subscribers that
+            // would otherwise be dropped by the source === serviceId filter in
+            // handleMessage, which only runs for Redis-delivered messages).
+            this.deliverLocal(channelStr, message);
+            // Also publish to Redis for other processes
+            if (this.publisher && this.isConnected) {
+                await this.publisher.publish(channel, JSON.stringify(message));
+            }
             return true;
         }
         catch (error) {
             logger_1.default.error(`[MessageBus] Failed to publish to ${channel}:`, error);
             return false;
+        }
+    }
+    /**
+     * Deliver a message directly to local subscribers (bypasses Redis).
+     * Used internally by publish() so same-process subscribers receive messages
+     * immediately without the source self-filter.
+     */
+    deliverLocal(channel, message) {
+        const callbacks = this.subscriptions.get(channel);
+        if (callbacks) {
+            for (const callback of callbacks) {
+                const result = callback(message);
+                if (result instanceof Promise) {
+                    result.catch((error) => {
+                        logger_1.default.error(`[MessageBus] Local callback error for ${channel}:`, error);
+                    });
+                }
+            }
         }
     }
     /**

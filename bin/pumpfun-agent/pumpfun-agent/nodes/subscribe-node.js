@@ -52,23 +52,23 @@ async function subscribeNode(state) {
     };
 }
 /**
- * Fetch recent tokens from pump.fun
- * Uses multiple strategies to find tokens
+ * Fetch recent NEW token launches from pump.fun
+ * Prioritizes newest coins, falls back to bonding curve / trending
  */
 async function fetchTokensFromPumpFun(limit = 20) {
     const tokens = [];
-    // Strategy 1: Use frontend-api-v3 endpoints used by pump.fun web app.
+    // Strategy 1 (PRIMARY): New launches via frontend-api-v3 /coins/new
     try {
-        const frontendTokens = await fetchFrontendCoins(limit);
-        tokens.push(...frontendTokens);
-        logger_1.default.info(`[SubscribeNode] Frontend API: ${frontendTokens.length} tokens`);
+        const newTokens = await fetchNewLaunchCoins(limit);
+        tokens.push(...newTokens);
+        logger_1.default.info(`[SubscribeNode] New launches (primary): ${newTokens.length} tokens`);
     }
     catch (error) {
-        logger_1.default.debug('[SubscribeNode] Frontend API endpoints failed');
+        logger_1.default.debug('[SubscribeNode] New launches endpoint failed');
     }
-    // Strategy 2: Try legacy api.pump.fun endpoints.
+    // Strategy 2: Legacy api.pump.fun new/recent coin endpoints
     try {
-        const recentTokens = await fetchNewCoins(limit);
+        const recentTokens = await fetchLegacyNewCoins(limit);
         for (const token of recentTokens) {
             if (!tokens.find((t) => t.mintAddress === token.mintAddress)) {
                 tokens.push(token);
@@ -77,25 +77,54 @@ async function fetchTokensFromPumpFun(limit = 20) {
         logger_1.default.info(`[SubscribeNode] Legacy new coins: ${recentTokens.length} tokens`);
     }
     catch (error) {
-        logger_1.default.debug('[SubscribeNode] New coins endpoint failed');
+        logger_1.default.debug('[SubscribeNode] Legacy new coins endpoint failed');
     }
-    // Strategy 3: Try legacy trending endpoints.
+    // Strategy 3: Bonding curve tokens sorted newest-first
     if (tokens.length < limit) {
         try {
-            const trendingTokens = await fetchBondingCurveCoins(limit);
-            // Merge without duplicates
+            const bondingTokens = await fetchBondingCurveCoinsSorted(limit);
+            for (const token of bondingTokens) {
+                if (!tokens.find((t) => t.mintAddress === token.mintAddress)) {
+                    tokens.push(token);
+                }
+            }
+            logger_1.default.info(`[SubscribeNode] Bonding curve (sorted newest): additional tokens`);
+        }
+        catch (error) {
+            logger_1.default.debug('[SubscribeNode] Bonding curve sorted endpoint failed');
+        }
+    }
+    // Strategy 4: Collections endpoint sorted by newest
+    if (tokens.length < limit) {
+        try {
+            const collectionTokens = await fetchCollectionsSorted(limit);
+            for (const token of collectionTokens) {
+                if (!tokens.find((t) => t.mintAddress === token.mintAddress)) {
+                    tokens.push(token);
+                }
+            }
+            logger_1.default.info(`[SubscribeNode] Collections (sorted newest): additional tokens`);
+        }
+        catch (error) {
+            logger_1.default.debug('[SubscribeNode] Collections endpoint failed');
+        }
+    }
+    // Strategy 5 (FALLBACK): Trending / recommended endpoints (last resort)
+    if (tokens.length < limit) {
+        try {
+            const trendingTokens = await fetchTrendingFallback(limit);
             for (const token of trendingTokens) {
                 if (!tokens.find((t) => t.mintAddress === token.mintAddress)) {
                     tokens.push(token);
                 }
             }
-            logger_1.default.info(`[SubscribeNode] Bonding curve: ${trendingTokens.length} additional tokens`);
+            logger_1.default.info(`[SubscribeNode] Trending fallback: additional tokens`);
         }
         catch (error) {
-            logger_1.default.debug('[SubscribeNode] Bonding curve endpoint failed');
+            logger_1.default.debug('[SubscribeNode] Trending fallback endpoint failed');
         }
     }
-    // Strategy 4: Optional sample fallback for development.
+    // Strategy 6: Optional sample fallback for development.
     if (tokens.length === 0) {
         const allowSampleTokens = process.env.PUMPFUN_ALLOW_SAMPLE_TOKENS === 'true';
         if (allowSampleTokens) {
@@ -109,9 +138,152 @@ async function fetchTokensFromPumpFun(limit = 20) {
     return tokens.slice(0, limit);
 }
 /**
- * Fetch coins from current pump.fun frontend API (v3).
+ * PRIMARY: Fetch brand new token launches from frontend-api-v3
+ * Uses /coins/new which returns the newest created tokens
  */
-async function fetchFrontendCoins(limit = 20) {
+async function fetchNewLaunchCoins(limit = 20) {
+    const endpoints = [
+        // Best endpoint for newest launches
+        `${PUMPFUN_FRONTEND_API_BASE}/coins/new?offset=0&limit=${limit}`,
+        // Bonding curve tokens sorted by creation time (newest first)
+        `${PUMPFUN_FRONTEND_API_BASE}/coins/with-bonding-curve?sort=created_at&order=desc&offset=0&limit=${limit}`,
+    ];
+    const merged = [];
+    const seenMints = new Set();
+    for (const endpoint of endpoints) {
+        try {
+            const response = await axios_1.default.get(endpoint, {
+                timeout: 10000,
+                headers: PUMPFUN_HEADERS,
+            });
+            const payload = normalizeFrontendPayload(response.data);
+            if (payload.length > 0) {
+                const parsed = payload
+                    .map((item) => unwrapFrontendToken(item))
+                    .slice(0, limit)
+                    .map((item) => parsePumpFunToken(item))
+                    .filter((t) => t !== null);
+                for (const token of parsed) {
+                    if (!seenMints.has(token.mintAddress)) {
+                        seenMints.add(token.mintAddress);
+                        merged.push(token);
+                    }
+                }
+                logger_1.default.info(`[SubscribeNode] /coins/new endpoint returned ${parsed.length} tokens`);
+                // If first endpoint returned results, prefer those and skip second
+                if (merged.length >= limit)
+                    break;
+            }
+        }
+        catch (error) {
+            logger_1.default.debug(`[SubscribeNode] New launch endpoint ${endpoint} failed: ${error.message}`);
+        }
+    }
+    return merged.slice(0, limit);
+}
+/**
+ * Legacy api.pump.fun new/recent coin endpoints
+ */
+async function fetchLegacyNewCoins(limit = 20) {
+    const endpoints = [
+        `${PUMPFUN_API_BASE}/new`,
+        `${PUMPFUN_API_BASE}/coins/new`,
+        `${PUMPFUN_API_BASE}/coins/created`,
+        `${PUMPFUN_API_BASE}/recent`,
+    ];
+    for (const endpoint of endpoints) {
+        try {
+            logger_1.default.debug(`[SubscribeNode] Trying legacy endpoint: ${endpoint}`);
+            const response = await axios_1.default.get(endpoint, {
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; PerpsTrader/1.0)',
+                    'Accept': 'application/json',
+                },
+            });
+            if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+                const parsed = response.data
+                    .slice(0, limit)
+                    .map((item) => parsePumpFunToken(item))
+                    .filter((t) => t !== null);
+                if (parsed.length > 0) {
+                    logger_1.default.info(`[SubscribeNode] Legacy endpoint ${endpoint} returned ${parsed.length} tokens`);
+                    return parsed;
+                }
+            }
+        }
+        catch (error) {
+            logger_1.default.debug(`[SubscribeNode] Legacy endpoint ${endpoint} failed: ${error.message}`);
+        }
+    }
+    return [];
+}
+/**
+ * Fetch bonding curve tokens sorted by creation time (newest first)
+ */
+async function fetchBondingCurveCoinsSorted(limit = 20) {
+    const endpoints = [
+        `${PUMPFUN_API_BASE}/coins/with-bonding-curve?sort=created_at&order=desc&offset=0&limit=${limit}`,
+        `${PUMPFUN_API_BASE}/coins/bonding-curve?sort=created_at&order=desc&offset=0&limit=${limit}`,
+        `${PUMPFUN_API_BASE}/coins/active?sort=created_at&order=desc&offset=0&limit=${limit}`,
+    ];
+    for (const endpoint of endpoints) {
+        try {
+            const response = await axios_1.default.get(endpoint, {
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; PerpsTrader/1.0)',
+                    'Accept': 'application/json',
+                },
+            });
+            if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+                const parsed = response.data
+                    .slice(0, limit)
+                    .map((item) => parsePumpFunToken(item))
+                    .filter((t) => t !== null);
+                if (parsed.length > 0) {
+                    return parsed;
+                }
+            }
+        }
+        catch (error) {
+            logger_1.default.debug(`[SubscribeNode] Bonding curve sorted endpoint ${endpoint} failed: ${error.message}`);
+        }
+    }
+    return [];
+}
+/**
+ * Fetch from collections endpoint sorted by newest
+ */
+async function fetchCollectionsSorted(limit = 20) {
+    try {
+        const response = await axios_1.default.get(`${PUMPFUN_API_BASE}/collections?sort=created_at&order=desc&limit=${limit}`, {
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; PerpsTrader/1.0)',
+                'Accept': 'application/json',
+            },
+        });
+        const payload = normalizeFrontendPayload(response.data);
+        if (payload.length > 0) {
+            const parsed = payload
+                .slice(0, limit)
+                .map((item) => parsePumpFunToken(item))
+                .filter((t) => t !== null);
+            if (parsed.length > 0) {
+                return parsed;
+            }
+        }
+    }
+    catch (error) {
+        logger_1.default.debug(`[SubscribeNode] Collections endpoint failed: ${error.message}`);
+    }
+    return [];
+}
+/**
+ * FALLBACK: Trending / recommended endpoints (last resort only)
+ */
+async function fetchTrendingFallback(limit = 20) {
     const endpoints = [
         `${PUMPFUN_FRONTEND_API_BASE}/coins?offset=0&limit=${limit}`,
         `${PUMPFUN_FRONTEND_API_BASE}/coins/recommended?limit=${limit}`,
@@ -142,7 +314,7 @@ async function fetchFrontendCoins(limit = 20) {
             }
         }
         catch (error) {
-            logger_1.default.debug(`[SubscribeNode] Frontend endpoint ${endpoint} failed: ${error.message}`);
+            logger_1.default.debug(`[SubscribeNode] Trending fallback endpoint ${endpoint} failed: ${error.message}`);
         }
     }
     return merged.slice(0, limit);
@@ -172,90 +344,6 @@ function unwrapFrontendToken(item) {
         };
     }
     return item;
-}
-/**
- * Fetch new coins from pump.fun
- */
-async function fetchNewCoins(limit = 20) {
-    try {
-        // Try different possible endpoints for new/recent coins
-        const endpoints = [
-            `${PUMPFUN_API_BASE}/new`,
-            `${PUMPFUN_API_BASE}/coins/new`,
-            `${PUMPFUN_API_BASE}/coins/created`,
-            `${PUMPFUN_API_BASE}/recent`,
-        ];
-        for (const endpoint of endpoints) {
-            try {
-                logger_1.default.debug(`[SubscribeNode] Trying endpoint: ${endpoint}`);
-                const response = await axios_1.default.get(endpoint, {
-                    timeout: 10000,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (compatible; PerpsTrader/1.0)',
-                        'Accept': 'application/json',
-                    },
-                });
-                if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-                    const parsed = response.data
-                        .slice(0, limit)
-                        .map((item) => parsePumpFunToken(item))
-                        .filter((t) => t !== null);
-                    if (parsed.length > 0) {
-                        logger_1.default.info(`[SubscribeNode] Got ${parsed.length} tokens from ${endpoint}`);
-                        return parsed;
-                    }
-                }
-            }
-            catch (error) {
-                logger_1.default.debug(`[SubscribeNode] Endpoint ${endpoint} failed: ${error.message}`);
-            }
-        }
-        return [];
-    }
-    catch (error) {
-        logger_1.default.debug(`[SubscribeNode] New coins error: ${error.message}`);
-        return [];
-    }
-}
-/**
- * Fetch coins with bonding curve (trending)
- */
-async function fetchBondingCurveCoins(limit = 15) {
-    try {
-        const endpoints = [
-            `${PUMPFUN_API_BASE}/coins/with-bonding-curve`,
-            `${PUMPFUN_API_BASE}/coins/bonding-curve`,
-            `${PUMPFUN_API_BASE}/coins/active`,
-        ];
-        for (const endpoint of endpoints) {
-            try {
-                const response = await axios_1.default.get(endpoint, {
-                    timeout: 10000,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (compatible; PerpsTrader/1.0)',
-                        'Accept': 'application/json',
-                    },
-                });
-                if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-                    const parsed = response.data
-                        .slice(0, limit)
-                        .map((item) => parsePumpFunToken(item))
-                        .filter((t) => t !== null);
-                    if (parsed.length > 0) {
-                        return parsed;
-                    }
-                }
-            }
-            catch (error) {
-                logger_1.default.debug(`[SubscribeNode] Endpoint ${endpoint} failed: ${error.message}`);
-            }
-        }
-        return [];
-    }
-    catch (error) {
-        logger_1.default.debug(`[SubscribeNode] Bonding curve error: ${error.message}`);
-        return [];
-    }
 }
 /**
  * Parse pump.fun API response to our token format

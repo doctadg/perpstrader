@@ -43,10 +43,10 @@ const config_1 = __importDefault(require("../shared/config"));
 const logger_1 = __importDefault(require("../shared/logger"));
 const graph_1 = require("./graph");
 const pumpfun_store_1 = __importDefault(require("../data/pumpfun-store"));
-const bonding_curve_1 = __importDefault(require("./services/bonding-curve"));
+const bonding_curve_1 = __importStar(require("./services/bonding-curve"));
 const snipe_service_1 = __importDefault(require("./services/snipe-service"));
 const config = config_1.default.get();
-const cycleIntervalMs = config.pumpfun?.cycleIntervalMs || 60000;
+const cycleIntervalMs = config.pumpfun?.cycleIntervalMs || 30000; // 30s (was 60s)
 /**
  * Main function - runs continuous pump.fun analysis cycles + snipe loop
  */
@@ -143,6 +143,75 @@ async function main() {
                 logger_1.default.info(`[Sniper] Positions: ${snipeStatus.openPositions} | Queue: ${snipeStatus.queueDepth} | Hour: ${snipeStatus.snipesThisHour}/${snipeStatus.maxSnipesPerHour}`);
                 const portfolio = bonding_curve_1.default.getPortfolioSummary();
                 logger_1.default.info(`[Portfolio] ${portfolio.mode} | Balance: ${portfolio.solBalance.toFixed(2)} SOL | Invested: ${portfolio.totalInvested.toFixed(2)} SOL | Realized: ${portfolio.totalRealized.toFixed(4)} SOL`);
+            }
+            // ── Fix 1: Sample real prices and trigger TP sells for all open positions ──
+            try {
+                const multipliers = await bonding_curve_1.default.sampleAndUpdatePositions();
+                for (const [tokenMint, multiplier] of multipliers) {
+                    // Check and execute TP levels
+                    await bonding_curve_1.default.checkAndSell(tokenMint, multiplier);
+                }
+                // ── Fix 3: Time-based stop-loss for stale positions ──
+                const positions = bonding_curve_1.default.getPositions();
+                const now = Date.now();
+                for (const pos of positions) {
+                    const ageMs = now - new Date(pos.buyTimestamp).getTime();
+                    const mult = multipliers.get(pos.tokenMint) || 1.0;
+                    // ── Fix 4: Handle graduated/complete bonding curves ──
+                    const state = await bonding_curve_1.default.readBondingCurveState(pos.tokenMint);
+                    if (state?.complete) {
+                        // Bonding curve graduated - force exit at current multiplier
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, Math.max(mult, 1.0));
+                        logger_1.default.info(`[GRADUATED] ${pos.tokenSymbol}: bonding curve complete, exiting at ${mult.toFixed(2)}x`);
+                        continue;
+                    }
+                    if (ageMs > 60 * 60 * 1000) {
+                        // Force exit anything over 1 hour
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
+                        logger_1.default.info(`[STOP-LOSS] ${pos.tokenSymbol}: forced exit (age ${(ageMs / 60000).toFixed(0)}min)`);
+                    }
+                    else if (ageMs > 30 * 60 * 1000 && mult < 1.5) {
+                        // Exit underperformers after 30 min
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
+                        logger_1.default.info(`[STOP-LOSS] ${pos.tokenSymbol}: stale exit (age ${(ageMs / 60000).toFixed(0)}min, ${mult.toFixed(2)}x)`);
+                    }
+                }
+            }
+            catch (error) {
+                logger_1.default.warn('[Main] Position sampling/sell check failed:', error);
+            }
+            // ── Bridge: feed high-confidence tokens to snipe service ──
+            // The batch analysis pipeline and WS snipe service are separate paths.
+            // This bridge ensures batch-analyzed tokens get evaluated for buying.
+            if (result.highConfidenceTokens.length > 0) {
+                for (const token of result.highConfidenceTokens) {
+                    if (!token.token?.mintAddress)
+                        continue;
+                    // Skip if already queued or processed
+                    // Use snipeService's internal method to evaluate
+                    try {
+                        const { SnipeService } = await Promise.resolve().then(() => __importStar(require('./services/snipe-service')));
+                        // Import the class to check — snipeService is the singleton
+                        // We need to trigger evaluateAndSnipe but it's private, so use
+                        // the onToken callback path instead
+                    }
+                    catch (_) {
+                        // Fallback: direct buy through bonding curve for top-scoring tokens
+                    }
+                }
+                // For now, directly buy the top token if it scores above snipe threshold
+                const topToken = result.highConfidenceTokens[0];
+                if (topToken && topToken.overallScore >= 0.40 && snipeStatus.openPositions < 3) {
+                    const solAmount = parseFloat(process.env.PUMPFUN_SNIPER_SOL_AMOUNT || '0.3');
+                    const buyResult = await bonding_curve_1.default.buy(topToken.token.mintAddress, topToken.token.symbol, solAmount, bonding_curve_1.DEFAULT_TP_LEVELS, topToken.overallScore);
+                    if (buyResult.success) {
+                        logger_1.default.info(`[CYCLE BUY] ${topToken.token.symbol} | Score: ${topToken.overallScore.toFixed(2)} | ` +
+                            `${solAmount} SOL | Tokens: ${buyResult.tokensReceived.toFixed(0)}`);
+                    }
+                    else {
+                        logger_1.default.warn(`[CYCLE BUY] Failed for ${topToken.token.symbol}: ${buyResult.error}`);
+                    }
+                }
             }
         }
         catch (error) {

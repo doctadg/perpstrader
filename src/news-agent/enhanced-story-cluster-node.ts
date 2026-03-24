@@ -948,22 +948,19 @@ async function mergeSimilarClustersEnhanced(useVectorMode: boolean): Promise<{ m
 }
 
 /**
- * PHASE 5b: Singleton Re-clustering
- * Fetches recent singleton clusters and tries to merge them into larger clusters.
- * Uses a more aggressive threshold and checks against all clusters (not just top-N).
+ * PHASE 5b: Singleton Re-clustering (Inverted Index)
+ * Uses keyword and entity inverted indexes for O(n) lookup instead of O(n*m) brute force.
+ * Processes ALL singletons within the merge window, not just top-200 by heat.
  */
 async function mergeSingletonClusters(): Promise<{ mergedCount: number }> {
-    // Get up to 200 recent singleton clusters
-    const recentClusters = await storyClusterStoreEnhanced.getHotClusters(200, CLUSTER_MERGE_HOURS_THRESHOLD);
-    const singletons = recentClusters.filter(c => c.articleCount <= 1);
+    // Fetch ALL recent singletons — not heat-ranked, just all of them
+    const singletons = await storyClusterStoreEnhanced.getRecentSingletons(CLUSTER_MERGE_HOURS_THRESHOLD, 1000);
 
     if (singletons.length === 0) {
         return { mergedCount: 0 };
     }
 
-    logger.info(`[EnhancedClusterNode] PHASE 5b: Found ${singletons.length} singleton clusters to re-evaluate`);
-
-    // Get larger clusters (2+ articles) as merge targets
+    // Get all multi-article clusters as merge targets
     const allClusters = await storyClusterStoreEnhanced.getHotClusters(500, CLUSTER_MERGE_HOURS_THRESHOLD);
     const mergeTargets = allClusters.filter(c => c.articleCount >= 2);
 
@@ -972,72 +969,168 @@ async function mergeSingletonClusters(): Promise<{ mergedCount: number }> {
         return { mergedCount: 0 };
     }
 
+    logger.info(`[EnhancedClusterNode] PHASE 5b: Found ${singletons.length} singletons, ${mergeTargets.length} merge targets (inverted index mode)`);
+
+    // Crypto token alias map for better matching
+    const TOKEN_ALIASES = new Map<string, string>([
+        ['btc', 'bitcoin'], ['eth', 'ethereum'], ['sol', 'solana'], ['bnb', 'binance'],
+        ['xrp', 'ripple'], ['ada', 'cardano'], ['doge', 'dogecoin'], ['shib', 'shiba inu'],
+        ['avax', 'avalanche'], ['matic', 'polygon'], ['dot', 'polkadot'], ['link', 'chainlink'],
+        ['uni', 'uniswap'], ['ftm', 'fantom'], ['arb', 'arbitrum'], ['op', 'optimism'],
+        ['near', 'near protocol'], ['atom', 'cosmos'], ['trx', 'tron'], ['xlm', 'stellar'],
+        ['algo', 'algorand'], ['inj', 'injective'], ['tia', 'celestia'], ['jup', 'jupiter'],
+        ['sui', 'sui'], ['sei', 'sei'], ['ton', 'ton'], ['apt', 'aptos'],
+        ['pepe', 'pepeto'], ['pepeto', 'pepe'], ['far', 'fartcoin'], ['fartcoin', 'far'],
+        ['wif', 'dogwifhat'], ['pengu', 'pudgy penguins'], ['trump', 'maga'],
+    ]);
+
+    const resolveToken = (s: string) => TOKEN_ALIASES.get(s.toLowerCase()) || s.toLowerCase();
+
+    // === BUILD INVERTED INDEXES for merge targets ===
+    // keyword → set of target cluster indices
+    const kwIndex = new Map<string, Set<number>>();
+    // entity → set of target cluster indices  
+    const entityIndex = new Map<string, Set<number>>();
+    // category → set of target cluster indices
+    const catIndex = new Map<string, Set<number>>();
+    // topic words (4+ chars) → set of target cluster indices
+    const topicWordIndex = new Map<string, Set<number>>();
+
+    const targetData = mergeTargets.map((t, idx) => {
+        const entities = extractEntitiesFromTopicAndKeywords(t.topic || '', t.keywords || []);
+        const entitySet = new Set(entities.map(resolveToken));
+
+        const kws: string[] = (t.keywords || []).map((k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, ''));
+        const kwSet = new Set(kws.filter((k: string) => k.length >= 3));
+
+        const cat = t.category || 'UNKNOWN';
+        const words = (t.topic || '').toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+
+        for (const kw of kwSet) {
+            if (!kwIndex.has(kw)) kwIndex.set(kw, new Set());
+            kwIndex.get(kw)!.add(idx);
+        }
+        for (const e of entitySet) {
+            if (!entityIndex.has(e)) entityIndex.set(e, new Set());
+            entityIndex.get(e)!.add(idx);
+        }
+        if (!catIndex.has(cat)) catIndex.set(cat, new Set());
+        catIndex.get(cat)!.add(idx);
+        for (const w of words) {
+            if (!topicWordIndex.has(w)) topicWordIndex.set(w, new Set());
+            topicWordIndex.get(w)!.add(idx);
+        }
+
+        return { cluster: t, entitySet, kwSet, words: new Set(words) };
+    });
+
+    // Pre-compute which targets have been merged away
+    const mergedAway = new Set<string>();
     let mergedCount = 0;
 
     for (const singleton of singletons) {
-        // Find the best match among multi-article clusters
-        let bestTarget: any = null;
-        let bestScore = 0;
+        if (mergedAway.has(singleton.id)) continue;
 
-        for (const target of mergeTargets) {
-            if (singleton.id === target.id) continue;
+        // Extract singleton entities and keywords
+        const sEntities = extractEntitiesFromTopicAndKeywords(singleton.topic || '', singleton.keywords || []);
+        const sEntitySet = new Set(sEntities.map(resolveToken));
+        const sKws = new Set(((singleton.keywords || []) as string[]).map((k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((k: string) => k.length >= 3));
+        const sCat = singleton.category || 'UNKNOWN';
+        const sWords = new Set<string>((singleton.topic || '').toLowerCase().split(/\s+/).filter((w: string) => w.length > 3));
 
-            // FAST-PATH: If clusters share a keyword that looks like a named entity (4+ chars, uppercase),
-            // skip the expensive similarity calc and assign a baseline score
-            const kw1Set = new Set((singleton.keywords || []).map((k: string) => k.toLowerCase()));
-            const kw2Set = new Set((target.keywords || []).map((k: string) => k.toLowerCase()));
-            const sharedKw = [...kw1Set].filter((k: string) => kw2Set.has(k) && k.length >= 4);
-            if (sharedKw.length >= 2) {
-                // Strong keyword overlap — likely same story. Skip full similarity.
-                const fastScore = 0.45; // Above singleton merge threshold
-                if (fastScore > bestScore) {
-                    bestScore = fastScore;
-                    bestTarget = target;
-                }
-                continue;
-            }
+        // === Inverted index lookup: find candidate targets efficiently ===
+        const candidateIdx = new Set<number>();
 
-            // Quick pre-filter: must be same category or have matching topic words
-            if (singleton.category !== target.category) {
-                // Still allow cross-category if topics share a key token (e.g. BTC)
-                const singletonWords = new Set(singleton.topic.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3));
-                const targetWords = new Set(target.topic.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3));
-                const hasSharedToken = [...singletonWords].some(w => targetWords.has(w));
-                if (!hasSharedToken) continue;
-            }
+        // Entity matches (strongest signal)
+        for (const e of sEntitySet) {
+            const idxs = entityIndex.get(e);
+            if (idxs) for (const i of idxs) candidateIdx.add(i);
+        }
 
-            // Calculate similarity (reusing the enhanced similarity function)
-            const similarity = await calculateEnhancedSimilarityAsync(singleton, target);
+        // Keyword matches
+        for (const kw of sKws) {
+            const idxs = kwIndex.get(kw);
+            if (idxs) for (const i of idxs) candidateIdx.add(i);
+        }
 
-            if (similarity.similarity > bestScore) {
-                bestScore = similarity.similarity;
-                bestTarget = target;
+        // If no candidates from entities/keywords, try topic word overlap
+        if (candidateIdx.size === 0) {
+            for (const w of sWords) {
+                const idxs = topicWordIndex.get(w);
+                if (idxs) for (const i of idxs) candidateIdx.add(i);
             }
         }
 
-        // Use a lower threshold for singletons (0.25 vs 0.40) — they're low-risk to merge
-        if (bestTarget && bestScore >= 0.25) {
-            // Verify both still exist
+        if (candidateIdx.size === 0) continue;
+
+        // Score candidates
+        let bestTarget: any = null;
+        let bestScore = 0;
+
+        for (const idx of candidateIdx) {
+            const td = targetData[idx];
+            if (td.cluster.id === singleton.id) continue;
+            if (mergedAway.has(td.cluster.id)) continue;
+
+            // Entity overlap score
+            const sharedEntities = [...sEntitySet].filter(e => td.entitySet.has(e) && e.length >= 2);
+            let score = 0;
+
+            if (sharedEntities.length >= 1) {
+                score = Math.min(0.55, 0.30 + sharedEntities.length * 0.10);
+                if (sCat === td.cluster.category) score += 0.05;
+            } else {
+                // Keyword overlap
+                const sharedKw = [...sKws].filter(k => td.kwSet.has(k));
+                if (sharedKw.length >= 2) {
+                    score = 0.32 + sharedKw.length * 0.04;
+                    if (sCat === td.cluster.category) score += 0.05;
+                } else if (sharedKw.length === 1) {
+                    score = 0.25;
+                    if (sCat === td.cluster.category) score += 0.05;
+                } else {
+                    // Topic word overlap only
+                    const sharedWords = [...sWords].filter(w => td.words.has(w));
+                    if (sharedWords.length >= 3) {
+                        score = 0.20;
+                    } else if (sharedWords.length >= 2 && sCat === td.cluster.category) {
+                        score = 0.19;
+                    } else {
+                        continue; // Not enough signal
+                    }
+                }
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestTarget = td.cluster;
+            }
+        }
+
+        // Threshold: 0.18 for entity matches, 0.22 for keyword-only (stricter to avoid false merges)
+        const entityThreshold = 0.18;
+        const kwThreshold = 0.22;
+        const threshold = bestScore >= 0.30 ? entityThreshold : kwThreshold;
+
+        if (bestTarget && bestScore >= threshold) {
             if (!(await storyClusterStoreEnhanced.clusterExists(singleton.id)) ||
                 !(await storyClusterStoreEnhanced.clusterExists(bestTarget.id))) {
                 continue;
             }
 
-            logger.info(`[EnhancedClusterNode] PHASE 5b: Merging singleton "${singleton.topic.slice(0, 40)}..." -> "${bestTarget.topic.slice(0, 40)}..." (score: ${bestScore.toFixed(2)})`);
-
             const result = await storyClusterStoreEnhanced.mergeClusters(bestTarget.id, singleton.id);
 
             if (result.moved > 0) {
                 mergedCount++;
+                mergedAway.add(singleton.id);
                 await storyClusterStoreEnhanced.createHierarchy(bestTarget.id, singleton.id, 'MERGED_INTO');
-                // Remove from merge targets to avoid double-merging
-                mergeTargets.splice(mergeTargets.indexOf(bestTarget), 1);
+                // Don't remove target — multiple singletons can merge into the same target
             }
         }
     }
 
     if (mergedCount > 0) {
-        logger.info(`[EnhancedClusterNode] PHASE 5b: Merged ${mergedCount} singleton clusters`);
+        logger.info(`[EnhancedClusterNode] PHASE 5b: Merged ${mergedCount}/${singletons.length} singleton clusters (inverted index)`);
     }
 
     return { mergedCount };
@@ -1109,10 +1202,14 @@ function extractEntitiesFromTopicAndKeywords(topic: string, keywords: string[]):
     const orgPattern = /\b((?:jpmorgan|goldman|morgan stanley|blackrock|fidelity|binance|coinbase|kraken|openai|google|meta|apple|microsoft|amazon|nvidia|tesla|fed|sec|cftc|imf|world bank|ecb|boj|pboc|trump administration|white house|congress|senate|supreme court|venice biennale|telesat))\b/gi;
     const knownTokens = new Set(['bitcoin','ethereum','solana','cardano','polkadot','avalanche','polygon','chainlink','uniswap','aave','curve','arbitrum','optimism','fantom','near','aptos','sui','sei','ton','tron','stellar','algorand','cosmos','injective','celestia','jupiter','pepeto','pepe','dogecoin','shiba inu','xrp','bnb','ada','trx','xlm','algo','atom','ftm','op','arb','matic','dot','link','uni','crv','ldo','tvl']);
     // Extract proper nouns from topic (capitalized words, 2+ chars)
-    const properNouns = topic.match(/\b([A-Z][a-z]{1,}(?:\s[A-Z][a-z]+)*)\b/g) || [];
+    // FIX: Use non-greedy single-word match — previous regex matched entire phrases like
+    // "Pepeto Updates Defi Exchange Bridge Solving Ethereum Blockchain" as one entity
+    // Now extracts individual entities: "Pepeto", "Ethereum", "Bitcoin" separately
+    const properNouns = topic.match(/\b[A-Z][a-z]{2,}\b/g) || [];
+    const stopwords = new Set(['this','that','with','from','after','while','when','where','what','which','their','there','they','these','those','than','into','over','under','before','about','between','during','without','within','through','against','first','last','next','best','worst','some','many','much','more','most','less','very','just','also','even','still','only','then','each','every','both','other','such','being','have','will','would','could','should','might','shall','can','need','must','news','crypto','update','updates','new','latest','daily','weekly']);
     for (const pn of properNouns) {
         const lower = pn.toLowerCase();
-        if (lower.length > 2 && !['the','this','that','with','from','after','while','when','where','what','which','their','there','they','these','those','than','into','over','under','before','about','between','during','without','within','through','against','first','last','next','best','worst','some','many','much','more','most','less','very','just','also','even','still','only','then','each','every','both','other','such','being','have','will','would','could','should','might','shall','can','need','must'].includes(lower)) {
+        if (!stopwords.has(lower)) {
             entities.push(lower);
         }
     }

@@ -60,6 +60,8 @@ declare class OpenRouterService {
     generateEmbedding(text: string): Promise<number[] | null>;
     /**
      * Generate event label for a single news article with cache
+     * DISABLED: OpenRouter API key is dead (401 User not found).
+     * Returns null immediately to avoid retry storms.
      */
     generateEventLabel(input: {
         title: string;
@@ -67,10 +69,6 @@ declare class OpenRouterService {
         category?: string;
         tags?: string[];
     }): Promise<EventLabelResult | null>;
-    /**
-     * Process a single batch for event labeling
-     */
-    private processEventLabelBatch;
     /**
      * Generate event labels for multiple articles with PARALLEL batch processing and Redis cache
      */
@@ -97,11 +95,6 @@ declare class OpenRouterService {
     }>): Promise<Map<string, CategorizationResult>>;
     private validateSubEventType;
     private validateUrgency;
-    /**
-     * Emergency fallback: Extract labels from malformed JSON using regex patterns
-     * Attempts to salvage partial data when JSON parsing completely fails
-     */
-    private emergencyExtractLabels;
 }
 declare const openrouterService: OpenRouterService;
 export default openrouterService;

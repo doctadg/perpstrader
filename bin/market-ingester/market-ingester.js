@@ -134,6 +134,10 @@ class MarketIngester {
         this.primaryTimeframe = tradingConfig.timeframes?.[0] || '1s';
         const dbConfig = config_1.default.getSection('database');
         this.db = new better_sqlite3_1.default(dbConfig.connection);
+        // Aggressive WAL checkpoint to prevent unbounded WAL growth (was 9+ GB)
+        const walCheckpoint = Number.parseInt(process.env.SQLITE_WAL_AUTOCHECKPOINT || '500', 10) || 500;
+        this.db.pragma(`wal_autocheckpoint = ${walCheckpoint}`);
+        this.db.pragma('synchronous = NORMAL');
         this.initializeDatabase();
         this.prepareStatements();
         this.isPaperTrading = process.env.PAPER_TRADING === 'true';

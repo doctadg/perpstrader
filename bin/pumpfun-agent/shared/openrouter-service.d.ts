@@ -22,8 +22,25 @@ declare class OpenRouterService {
     private timeout;
     private cacheHits;
     private cacheMisses;
+    private circuitBreaker;
+    private static readonly MAX_RETRIES;
+    private static readonly RETRY_BASE_DELAY_MS;
+    private static readonly RETRY_MAX_DELAY_MS;
     constructor();
     canUseService(): boolean;
+    /**
+     * Get circuit breaker state for observability
+     */
+    getCircuitBreakerState(): {
+        state: string;
+        failures: number;
+    };
+    /**
+     * Execute an API call with circuit breaker check, retry with exponential backoff,
+     * and proper 429 handling using Retry-After header.
+     * Returns null if circuit breaker is open or all retries exhausted.
+     */
+    private callWithRetry;
     private safeErrorMessage;
     /**
      * Get cache statistics
@@ -34,11 +51,17 @@ declare class OpenRouterService {
         hitRate: number;
     };
     /**
-     * Generate embeddings for text using OpenRouter with Redis cache
+     * Generate embeddings for text.
+     * DISABLED: z.ai API has no embeddings endpoint, and the old code sent a chat
+     * completion request while parsing it as an embedding response — fundamentally broken.
+     * All callers already fall back to local SHA256 feature hashing (local-embeddings.ts).
+     * Returning null immediately avoids the rate-limit storm (680+ waits/cycle).
      */
     generateEmbedding(text: string): Promise<number[] | null>;
     /**
      * Generate event label for a single news article with cache
+     * DISABLED: OpenRouter API key is dead (401 User not found).
+     * Returns null immediately to avoid retry storms.
      */
     generateEventLabel(input: {
         title: string;
@@ -84,4 +107,3 @@ declare class OpenRouterService {
 }
 declare const openrouterService: OpenRouterService;
 export default openrouterService;
-//# sourceMappingURL=openrouter-service.d.ts.map

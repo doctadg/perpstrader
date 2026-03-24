@@ -79,8 +79,8 @@ declare class SnipeService {
      */
     private processSnipeQueue;
     /**
-     * Paper mode: simulate price movements for open positions
-     * Random walk with drift, checking TP levels
+     * Paper mode: monitor real on-chain price movements for open positions.
+     * Falls back to random-walk simulation if RPC connection fails.
      */
     private startPriceSimulation;
     private resetHourlyCountIfNeeded;
@@ -98,4 +98,3 @@ declare class SnipeService {
 }
 declare const snipeService: SnipeService;
 export default snipeService;
-//# sourceMappingURL=snipe-service.d.ts.map

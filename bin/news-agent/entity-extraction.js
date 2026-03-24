@@ -163,12 +163,56 @@ class EntityExtractor {
         }
         return Math.min(1, confidence);
     }
+    // Entities to exclude - too generic or garbage
+    static ENTITY_BLACKLIST = new Set([
+        // Generic abbreviations
+        'us', 'pm', 'am', 'ai', 'tv', 'rss', 'api', 'ceo', 'cfo', 'cto',
+        // Timezone/time expressions
+        'utc', 'est', 'pst', 'gmt', 'et', 'pt',
+        // Generic terms
+        'inc', 'llc', 'ltd', 'corp', 'co',
+        // Date patterns
+        'january', 'february', 'march', 'april', 'may', 'june',
+        'july', 'august', 'september', 'october', 'november', 'december',
+    ]);
+    // Patterns for garbage entities (dollar amounts, timestamps, etc.)
+    static GARBAGE_PATTERNS = [
+        /^\$[\d,\.]+$/, // Dollar amounts like $0.0000001
+        /^\d+$/, // Pure numbers
+        /^\d{4}$/, // Years like 2024
+        /^\d{1,2}:\d{2}/, // Time expressions
+        /^https?:\/\//, // URLs
+        /^[a-f0-9]{20,}$/i, // Hash strings
+        /^\d+\s*(am|pm)$/i, // Time with am/pm
+        /^March\s+\d+,?\s+\d{4}$/, // Full dates like "March 13, 2026"
+    ];
+    /**
+     * Check if entity should be filtered out
+     */
+    static isGarbageEntity(name) {
+        const normalized = name.toLowerCase().trim();
+        // Check blacklist
+        if (EntityExtractor.ENTITY_BLACKLIST.has(normalized)) {
+            return true;
+        }
+        // Check garbage patterns
+        for (const pattern of EntityExtractor.GARBAGE_PATTERNS) {
+            if (pattern.test(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
     /**
      * Deduplicate entities, keeping highest confidence
      */
     static deduplicateEntities(entities) {
         const entityMap = new Map();
         for (const entity of entities) {
+            // Filter out garbage entities
+            if (EntityExtractor.isGarbageEntity(entity.name)) {
+                continue;
+            }
             const existing = entityMap.get(entity.normalized);
             if (!existing || entity.confidence > existing.confidence) {
                 entityMap.set(entity.normalized, entity);

@@ -20,4 +20,3 @@ export declare function generateTitleWithMarketContext(title: string, price: num
  * Score title quality (1-5)
  */
 export declare function scoreTitleQuality(title: string): number;
-//# sourceMappingURL=market-title-generator.d.ts.map

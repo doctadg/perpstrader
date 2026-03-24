@@ -1346,6 +1346,47 @@ class StoryClusterStoreEnhanced {
     }
 
     /**
+     * Get recent singleton clusters — no heat_score ordering, fetches ALL within window.
+     * Used for bulk singleton re-clustering where we need complete coverage.
+     */
+    async getRecentSingletons(sinceHours: number = 48, limit: number = 1000): Promise<any[]> {
+        await this.initialize();
+        if (!this.db) return [];
+
+        try {
+            const cutoff = new Date(Date.now() - (sinceHours * 60 * 60 * 1000)).toISOString();
+
+            const rows = this.db.prepare(`
+                SELECT * FROM story_clusters 
+                WHERE updated_at > ? AND article_count <= 1
+                ORDER BY updated_at DESC
+                LIMIT ?
+            `).all(cutoff, limit) as any[];
+
+            return rows.map(row => ({
+                id: row.id,
+                topic: row.topic,
+                topicKey: row.topic_key || undefined,
+                summary: row.summary,
+                category: row.category,
+                keywords: JSON.parse(row.keywords || '[]'),
+                heatScore: row.heat_score,
+                articleCount: row.article_count,
+                uniqueTitleCount: row.unique_title_count || row.article_count,
+                trendDirection: (row.trend_direction as 'UP' | 'DOWN' | 'NEUTRAL') || 'NEUTRAL',
+                urgency: (row.urgency as 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW') || 'MEDIUM',
+                subEventType: row.sub_event_type || undefined,
+                firstSeen: row.first_seen ? new Date(row.first_seen) : undefined,
+                createdAt: new Date(row.created_at),
+                updatedAt: new Date(row.updated_at)
+            }));
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to get recent singletons:', error);
+            return [];
+        }
+    }
+
+    /**
      * Get cluster ID by article ID
      */
     async getClusterIdByArticleId(articleId: string): Promise<string | null> {

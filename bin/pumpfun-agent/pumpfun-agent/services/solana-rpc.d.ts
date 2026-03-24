@@ -66,4 +66,3 @@ declare class SolanaRPCService {
 }
 declare const solanaRPCService: SolanaRPCService;
 export default solanaRPCService;
-//# sourceMappingURL=solana-rpc.d.ts.map

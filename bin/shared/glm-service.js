@@ -22,10 +22,10 @@ class GLMAIService {
     labelingModel;
     timeout;
     constructor() {
-        this.baseUrl = config.openrouter.baseUrl;
-        this.apiKey = config.openrouter.apiKey;
-        // Use config values (OpenRouter defaults) instead of expensive Claude
-        this.model = config.openrouter.labelingModel || 'z-ai/glm-5-turbo';
+        this.baseUrl = config.glm.baseUrl;
+        this.apiKey = config.glm.apiKey;
+        // Use GLM config values
+        this.model = config.glm.model || 'z-ai/glm-5';
         this.labelingModel = config.openrouter.labelingModel || 'z-ai/glm-5-turbo';
         this.timeout = config.glm.timeout;
     }

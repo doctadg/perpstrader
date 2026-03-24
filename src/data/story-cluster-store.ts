@@ -372,7 +372,7 @@ class StoryClusterStore {
                 this.db!.prepare(`
                     UPDATE story_clusters
                     SET article_count = (SELECT COUNT(*) FROM cluster_articles WHERE cluster_id = ?),
-                        unique_title_count = (SELECT COUNT(DISTINCT title_fingerprint) FROM cluster_articles ca
+                        unique_title_count = (SELECT COUNT(DISTINCT ctf.title_fingerprint) FROM cluster_articles ca
                             JOIN cluster_title_fingerprints ctf ON ca.cluster_id = ctf.cluster_id
                             WHERE ca.cluster_id = ?),
                         updated_at = ?,

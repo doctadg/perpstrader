@@ -58,4 +58,3 @@ declare class WebScraperService {
 }
 declare const webScraperService: WebScraperService;
 export default webScraperService;
-//# sourceMappingURL=web-scraper.d.ts.map

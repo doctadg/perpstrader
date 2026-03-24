@@ -89,6 +89,12 @@ declare class MessageBus extends EventEmitter {
      */
     publish<T>(channel: string | Channel, data: T, correlationId?: string): Promise<boolean>;
     /**
+     * Deliver a message directly to local subscribers (bypasses Redis).
+     * Used internally by publish() so same-process subscribers receive messages
+     * immediately without the source self-filter.
+     */
+    private deliverLocal;
+    /**
      * Subscribe to a channel
      */
     subscribe<T>(channel: string | Channel, callback: SubscriptionCallback<T>): Promise<void>;
@@ -116,4 +122,3 @@ declare class MessageBus extends EventEmitter {
 }
 export declare const messageBus: MessageBus;
 export default messageBus;
-//# sourceMappingURL=message-bus.d.ts.map

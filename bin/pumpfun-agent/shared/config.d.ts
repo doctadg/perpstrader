@@ -14,4 +14,3 @@ declare class ConfigManager {
 }
 declare const configManager: ConfigManager;
 export default configManager;
-//# sourceMappingURL=config.d.ts.map
