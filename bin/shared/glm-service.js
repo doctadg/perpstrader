@@ -117,7 +117,30 @@ class GLMAIService {
                     timeout: this.timeout,
                 });
                 (0, shared_rate_limiter_1.reportSuccess)(); // Reset rate limiter circuit breaker
-                return response.data.choices[0]?.message?.content || '';
+                // FIX: z-ai/glm models return content in 'reasoning' field, not 'content'
+                // Also handle cases where choices array is empty or undefined
+                const choices = response.data?.choices;
+                if (!choices || choices.length === 0) {
+                    logger_1.default.warn(`[GLM] API returned no choices, attempt ${attempt}/${retries}`);
+                    if (attempt < retries) {
+                        const backoff = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+                        await new Promise(r => setTimeout(r, backoff));
+                        continue;
+                    }
+                    throw new Error('GLM API returned no choices');
+                }
+                const msg = choices[0]?.message;
+                let content = msg?.content || '';
+                if (!content && msg?.reasoning) {
+                    content = msg.reasoning;
+                }
+                if (!content && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+                    content = msg.reasoning_details
+                        .filter((d) => d.type === 'reasoning.text' && d.text)
+                        .map((d) => d.text)
+                        .join('\n');
+                }
+                return content;
             }
             catch (error) {
                 const status = error?.response?.status;

@@ -447,7 +447,14 @@ async function runDailyTraceAnalysis() {
                     },
                     timeout: 60000,
                 });
-                const responseText = response.data.choices[0]?.message?.content || '';
+                // FIX: z-ai/glm models return content in 'reasoning' field
+                const msg = response.data.choices[0]?.message;
+                let responseText = msg?.content || '';
+                if (!responseText && msg?.reasoning)
+                    responseText = msg.reasoning;
+                if (!responseText && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+                    responseText = msg.reasoning_details.filter((d) => d.type === 'reasoning.text' && d.text).map((d) => d.text).join('\n');
+                }
                 analysisResult = parseAnalysisResponse(responseText);
             }
             catch (error) {
@@ -509,7 +516,14 @@ async function runDailyTraceAnalysis() {
                     },
                     timeout: 60000,
                 });
-                const responseText = response.data.choices[0]?.message?.content || '';
+                // FIX: z-ai/glm models return content in 'reasoning' field
+                const msg = response.data.choices[0]?.message;
+                let responseText = msg?.content || '';
+                if (!responseText && msg?.reasoning)
+                    responseText = msg.reasoning;
+                if (!responseText && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+                    responseText = msg.reasoning_details.filter((d) => d.type === 'reasoning.text' && d.text).map((d) => d.text).join('\n');
+                }
                 analysisResult = parseAnalysisResponse(responseText);
             }
             catch (error) {

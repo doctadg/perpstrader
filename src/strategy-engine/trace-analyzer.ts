@@ -540,7 +540,13 @@ export async function runDailyTraceAnalysis(): Promise<AnalysisInsight[]> {
                     }
                 );
 
-                const responseText = response.data.choices[0]?.message?.content || '';
+                // FIX: z-ai/glm models return content in 'reasoning' field
+                const msg = response.data.choices[0]?.message;
+                let responseText = msg?.content || '';
+                if (!responseText && msg?.reasoning) responseText = msg.reasoning;
+                if (!responseText && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+                    responseText = msg.reasoning_details.filter((d: any) => d.type === 'reasoning.text' && d.text).map((d: any) => d.text).join('\n');
+                }
                 analysisResult = parseAnalysisResponse(responseText);
 
             } catch (error) {
@@ -617,7 +623,13 @@ export async function runDailyTraceAnalysis(): Promise<AnalysisInsight[]> {
                     }
                 );
 
-                const responseText = response.data.choices[0]?.message?.content || '';
+                // FIX: z-ai/glm models return content in 'reasoning' field
+                const msg = response.data.choices[0]?.message;
+                let responseText = msg?.content || '';
+                if (!responseText && msg?.reasoning) responseText = msg.reasoning;
+                if (!responseText && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+                    responseText = msg.reasoning_details.filter((d: any) => d.type === 'reasoning.text' && d.text).map((d: any) => d.text).join('\n');
+                }
                 analysisResult = parseAnalysisResponse(responseText);
             } catch (error) {
                 logger.error('[TraceAnalyzer] Comprehensive LLM analysis failed:', error);

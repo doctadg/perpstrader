@@ -431,7 +431,26 @@ Return JSON in this format:
         return results;
       }
 
-      const content = response.data.choices[0]?.message?.content || '';
+      // FIX: z-ai/glm-4.7-flash returns content in 'reasoning' field, not 'content'
+      // Also handle cases where choices array is empty or undefined
+      const choices = response.data?.choices;
+      if (!choices || choices.length === 0) {
+        logger.warn(`[OpenRouter] Categorization batch ${batchIndex}: No choices in response`);
+        return results;
+      }
+      const msg = choices[0]?.message;
+      let content = msg?.content || '';
+      // Fallback to reasoning field for models that use it
+      if (!content && msg?.reasoning) {
+        content = msg.reasoning;
+      }
+      // Also check reasoning_details array
+      if (!content && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+        content = msg.reasoning_details
+          .filter((d: any) => d.type === 'reasoning.text' && d.text)
+          .map((d: any) => d.text)
+          .join('\n');
+      }
       let jsonMatch = content.match(/\{[\s\S]*"articles"[\s\S]*\}/);
       if (!jsonMatch) {
         jsonMatch = content.match(/\{[\s\S]*\}/);

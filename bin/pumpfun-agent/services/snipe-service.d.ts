@@ -68,6 +68,10 @@ declare class SnipeService {
     /**
      * Evaluate a token using quick heuristics and decide whether to snipe
      * This is the fast path -- full AI analysis happens in the background pipeline
+     *
+     * CRITICAL: Heuristic scores are INFLATED. We now require:
+     * 1. Stored AI analysis (preferred) OR
+     * 2. Very high heuristic threshold (0.65+) with no red flags
      */
     private evaluateAndSnipe;
     /**

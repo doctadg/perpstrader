@@ -68,6 +68,20 @@ class RiskManager {
                     leverage: 0
                 };
             }
+            // Block blacklisted symbols (circuit breaker blacklist from .env)
+            const blockedSymbols = process.env.BLOCKED_SYMBOLS?.split(',').map(s => s.trim().toUpperCase()) || [];
+            if (blockedSymbols.includes(signal.symbol.toUpperCase())) {
+                logger_1.default.warn(`[RiskManager] Blocking ${signal.symbol}: symbol is on circuit breaker blacklist`);
+                return {
+                    approved: false,
+                    suggestedSize: 0,
+                    riskScore: 1.0,
+                    warnings: [`Symbol ${signal.symbol} is on circuit breaker blacklist`],
+                    stopLoss: 0,
+                    takeProfit: 0,
+                    leverage: 0
+                };
+            }
             // Revenge-trading cooldown after 4 consecutive losses.
             const cooldownRemainingMs = this.getCooldownRemainingMs();
             if (cooldownRemainingMs > 0) {

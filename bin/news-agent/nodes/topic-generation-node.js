@@ -225,10 +225,18 @@ async function generateTopic(article) {
             },
             timeout: config.openrouter.timeout,
         });
-        if (!response.data?.choices?.[0]?.message?.content) {
+        // FIX: z-ai/glm models return content in 'reasoning' field
+        const msg = response.data?.choices?.[0]?.message;
+        let content = msg?.content || '';
+        if (!content && msg?.reasoning)
+            content = msg.reasoning;
+        if (!content && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+            content = msg.reasoning_details.filter((d) => d.type === 'reasoning.text' && d.text).map((d) => d.text).join('\n');
+        }
+        if (!content) {
             return null;
         }
-        return parseTopicResponse(response.data.choices[0].message.content, article);
+        return parseTopicResponse(content, article);
     }
     catch (error) {
         logger_1.default.debug(`[TopicGenerationNode] LLM request failed: ${error}`);

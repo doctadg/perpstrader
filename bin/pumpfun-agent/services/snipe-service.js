@@ -286,55 +286,100 @@ class SnipeService {
     /**
      * Evaluate a token using quick heuristics and decide whether to snipe
      * This is the fast path -- full AI analysis happens in the background pipeline
+     *
+     * CRITICAL: Heuristic scores are INFLATED. We now require:
+     * 1. Stored AI analysis (preferred) OR
+     * 2. Very high heuristic threshold (0.65+) with no red flags
      */
     async evaluateAndSnipe(event) {
-        // Quick heuristic score (0-1) — starts lower, rewards more signals
-        let score = 0.3; // baseline (was 0.5)
-        // Has a name and symbol (not empty/UNKNOWN)
-        if (event.tokenName && event.tokenName !== 'UNKNOWN' && event.tokenName.length > 2)
-            score += 0.1;
-        if (event.tokenSymbol && event.tokenSymbol !== 'UNKNOWN' && event.tokenSymbol.length > 1)
-            score += 0.05;
-        // Has URI (metadata exists)
-        if (event.uri)
-            score += 0.1;
-        // Has creator (not deployer wallet pattern)
-        if (event.creator && event.creator.length > 30)
-            score += 0.05;
-        // Symbol is reasonable length (2-6 chars, typical ticker)
-        if (event.tokenSymbol.length >= 2 && event.tokenSymbol.length <= 6)
-            score += 0.1; // was 0.05, tighter range
-        else if (event.tokenSymbol.length <= 10)
-            score += 0.05;
-        // Name is different from symbol (shows effort in naming)
-        if (event.tokenName !== event.tokenSymbol && event.tokenName.length > event.tokenSymbol.length)
-            score += 0.1; // was 0.05
-        // Has bonding curve address (means it's on the curve, buyable)
-        if (event.bondingCurveAddress)
-            score += 0.15;
-        // Check if we already have an AI analysis from the pumpfun-agent pipeline
-        // (The analysis pipeline runs separately and stores results in pumpfun-store)
+        let score = 0;
+        let hasStoredAnalysis = false;
+        let recommendation = 'WATCH';
+        let redFlags = [];
+        // ── RED FLAGS (instant disqualifiers) ─────────────────────────────────────
+        const symbol = event.tokenSymbol.toUpperCase();
+        // Obvious test/garbage tokens
+        const garbagePatterns = [
+            /^TEST$/i, /^AAA$/i, /^BBB$/i, /^XXX$/i, /^YYY$/i, /^ZZZ$/i,
+            /^COIN$/i, /^TOKEN$/i, /^MEME$/i, /^NEW$/i, /^HELLO$/i,
+            /^\d+%$/, /^<\d+%$/, />?\d+%$/, // "4%", "<50%", etc
+            /^[a-z]$/i, // Single letter
+            /^(an|the|in|on|at|to|by)$/i, // Random words
+        ];
+        for (const pattern of garbagePatterns) {
+            if (pattern.test(symbol)) {
+                redFlags.push('garbage_symbol');
+                break;
+            }
+        }
+        // Symbol too long (looks like spam)
+        if (event.tokenSymbol.length > 10) {
+            redFlags.push('symbol_too_long');
+        }
+        // Name is just symbol repeated or garbage
+        if (event.tokenName === event.tokenSymbol || event.tokenName.length < 3) {
+            redFlags.push('lazy_naming');
+        }
+        // ── CHECK FOR STORED AI ANALYSIS ─────────────────────────────────────────
         try {
             const { default: pumpfunStore } = await Promise.resolve().then(() => __importStar(require('../../data/pumpfun-store')));
             const stored = pumpfunStore.getTokenByMint(event.tokenMint);
             if (stored) {
-                // Use the stored analysis score if available
                 score = stored.overallScore;
-                logger_1.default.info(`[SnipeService] Using stored analysis for ${event.tokenSymbol}: ${score.toFixed(2)} (${stored.recommendation})`);
+                hasStoredAnalysis = true;
+                recommendation = stored.recommendation;
+                logger_1.default.info(`[SnipeService] AI analysis for ${event.tokenSymbol}: ${score.toFixed(2)} (${recommendation})`);
+                // Add red flags from AI analysis
+                if (stored.redFlags && stored.redFlags.length > 0) {
+                    redFlags.push(...stored.redFlags);
+                }
             }
         }
         catch (e) {
-            // Store not available, continue with heuristic
+            // Store not available
         }
-        score = Math.min(1, Math.max(0, score));
+        // ── HEURISTIC FALLBACK (only if no AI analysis) ───────────────────────────
+        if (!hasStoredAnalysis) {
+            // Much more conservative baseline
+            score = 0.1; // Start LOW, not 0.3
+            // Quality signals (smaller bonuses)
+            if (event.tokenName && event.tokenName !== 'UNKNOWN' && event.tokenName.length > 3)
+                score += 0.05;
+            if (event.tokenSymbol && event.tokenSymbol !== 'UNKNOWN' && event.tokenSymbol.length >= 2)
+                score += 0.03;
+            if (event.uri && event.uri.includes('ipfs'))
+                score += 0.05; // IPFS is better than random
+            if (event.bondingCurveAddress)
+                score += 0.05;
+            // Good symbol length (typical ticker)
+            if (event.tokenSymbol.length >= 3 && event.tokenSymbol.length <= 5)
+                score += 0.07;
+            // Name different from symbol (shows effort)
+            if (event.tokenName !== event.tokenSymbol && event.tokenName.length > event.tokenSymbol.length + 3) {
+                score += 0.05;
+            }
+            // Clamp heuristic score
+            score = Math.min(0.5, Math.max(0, score)); // Cap heuristic at 0.5 max
+            logger_1.default.debug(`[SnipeService] Heuristic for ${event.tokenSymbol}: ${score.toFixed(2)}`);
+        }
+        // ── RED FLAG PENALTIES ────────────────────────────────────────────────────
+        const redFlagPenalty = redFlags.length * 0.15;
+        score = Math.max(0, score - redFlagPenalty);
+        if (redFlags.length > 0) {
+            logger_1.default.info(`[SnipeService] Red flags for ${event.tokenSymbol}: ${redFlags.join(', ')} (-${redFlagPenalty.toFixed(2)})`);
+        }
+        // ── BUY DECISION ──────────────────────────────────────────────────────────
+        // Require higher threshold for heuristic-only scores
+        const effectiveThreshold = hasStoredAnalysis ? this.minScoreToBuy : 0.65;
+        const shouldBuy = score >= effectiveThreshold && redFlags.length < 3;
         const candidate = {
             event,
             score,
-            recommendation: score >= this.minScoreToBuy ? 'BUY' : 'WATCH',
+            recommendation: shouldBuy ? 'BUY' : (hasStoredAnalysis ? recommendation : 'WATCH'),
             buyExecuted: false,
         };
         // Auto-snipe if score exceeds threshold
-        if (score >= this.minScoreToBuy) {
+        if (shouldBuy) {
             // Check rate limits
             this.resetHourlyCountIfNeeded();
             if (this.snipeCountThisHour >= this.maxSnipePerHour) {

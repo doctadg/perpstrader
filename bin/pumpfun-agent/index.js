@@ -165,15 +165,28 @@ async function main() {
                         logger_1.default.info(`[GRADUATED] ${pos.tokenSymbol}: bonding curve complete, exiting at ${mult.toFixed(2)}x`);
                         continue;
                     }
-                    if (ageMs > 60 * 60 * 1000) {
-                        // Force exit anything over 1 hour
+                    // ── PRICE-BASED STOP LOSS (must check BEFORE time-based exits) ──
+                    const STOP_LOSS_MULTIPLIER = 0.4; // 60% down = exit
+                    if (mult <= STOP_LOSS_MULTIPLIER) {
                         await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
-                        logger_1.default.info(`[STOP-LOSS] ${pos.tokenSymbol}: forced exit (age ${(ageMs / 60000).toFixed(0)}min)`);
+                        logger_1.default.warn(`[STOP-LOSS] ${pos.tokenSymbol}: hit price stop at ${mult.toFixed(2)}x (${((mult - 1) * 100).toFixed(0)}%)`);
+                        continue; // Skip further checks
                     }
-                    else if (ageMs > 30 * 60 * 1000 && mult < 1.5) {
-                        // Exit underperformers after 30 min
+                    // ── EXTENDED TIME-BASED EXITS (more patient for memecoin pumps) ──
+                    if (ageMs > 3 * 60 * 60 * 1000) {
+                        // Force exit anything over 3 hours (was 1 hour)
                         await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
-                        logger_1.default.info(`[STOP-LOSS] ${pos.tokenSymbol}: stale exit (age ${(ageMs / 60000).toFixed(0)}min, ${mult.toFixed(2)}x)`);
+                        logger_1.default.info(`[TIME-EXIT] ${pos.tokenSymbol}: max age ${(ageMs / 60000).toFixed(0)}min`);
+                    }
+                    else if (ageMs > 90 * 60 * 1000 && mult < 1.3) {
+                        // Exit underperformers after 90 min if < 30% gain (was 30 min at < 50% gain)
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
+                        logger_1.default.info(`[TIME-EXIT] ${pos.tokenSymbol}: stale ${(ageMs / 60000).toFixed(0)}min @ ${mult.toFixed(2)}x`);
+                    }
+                    else if (mult >= 3.0) {
+                        // Take profit early on 3x+ gains even if TP levels didn't trigger
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
+                        logger_1.default.info(`[TAKE-PROFIT] ${pos.tokenSymbol}: early exit at ${mult.toFixed(2)}x (3x+)`);
                     }
                 }
             }

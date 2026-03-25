@@ -168,7 +168,15 @@ async function applyQualityGate(article) {
             },
             timeout: config.openrouter.timeout,
         });
-        if (!response.data?.choices?.[0]?.message?.content) {
+        // FIX: z-ai/glm models return content in 'reasoning' field
+        const msg = response.data?.choices?.[0]?.message;
+        let content = msg?.content || '';
+        if (!content && msg?.reasoning)
+            content = msg.reasoning;
+        if (!content && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+            content = msg.reasoning_details.filter((d) => d.type === 'reasoning.text' && d.text).map((d) => d.text).join('\n');
+        }
+        if (!content) {
             // On API failure, be conservative and pass
             return {
                 passes: true,
@@ -177,7 +185,7 @@ async function applyQualityGate(article) {
                 isSports: false,
             };
         }
-        return parseQualityGateResponse(response.data.choices[0].message.content, article);
+        return parseQualityGateResponse(content, article);
     }
     catch (error) {
         logger_1.default.debug(`[QualityFilterNode] LLM gate failed for article "${article.title}": ${error}`);
