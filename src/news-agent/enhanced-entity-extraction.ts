@@ -133,6 +133,14 @@ class EnhancedEntityExtractor {
     'ny', 'la', 'dc', 'sf', 'uk', 'eu', 'cn', 'jp', 'kr', 'au', 'ca',
     'q1', 'q2', 'q3', 'q4', 'q1 2026', 'q2 2026', 'q3 2026', 'q4 2026',
     'sec filing', 'form', '8-k', '10-k', '10-q',
+    // Sports leagues (not relevant for crypto trading)
+    'nfl', 'nba', 'mlb', 'nhl', 'mls', 'ncaa',
+    // Generic event terms
+    'inflation', 'earnings', 'recession', 'summit', 'conference',
+    // Financial product abbreviations
+    'etf', 'ico', 'ido', 'ieo',
+    // Common 2-letter country codes that get misidentified
+    'de', 'fr', 'it', 'es', 'nl', 'se', 'no', 'fi', 'dk', 'pl', 'br', 'mx', 'in', 'id', 'th', 'vn', 'ph',
   ]);
 
   // Patterns for garbage entities (dollar amounts, timestamps, etc.)
@@ -352,13 +360,13 @@ Return JSON only:
   private mergeEntities(regexEntities: ExtractedEntity[], llmEntities: ExtractedEntity[]): ExtractedEntity[] {
     const entityMap = new Map<string, ExtractedEntity>();
 
-    // Add regex entities
+    // Add regex entities (already filtered by extractWithRegex)
     for (const entity of regexEntities) {
       const key = `${entity.type}:${entity.normalized}`;
       entityMap.set(key, entity);
     }
 
-    // Merge LLM entities
+    // Merge LLM entities (already filtered by convertLLMResponse)
     for (const entity of llmEntities) {
       const key = `${entity.type}:${entity.normalized}`;
       const existing = entityMap.get(key);
@@ -375,7 +383,9 @@ Return JSON only:
       }
     }
 
+    // Final filter to catch any garbage that slipped through
     return Array.from(entityMap.values())
+      .filter(e => !this.isGarbageEntity(e.name, e.type))
       .sort((a, b) => b.confidence - a.confidence);
   }
 
@@ -449,13 +459,16 @@ Return JSON only:
    * Convert LLM response to entity array
    */
   private convertLLMResponse(response: LLMEntityResponse): ExtractedEntity[] {
-    return response.entities.map(e => ({
-      name: e.name,
-      type: this.normalizeEntityType(e.type),
-      confidence: e.confidence || 0.7,
-      normalized: e.name.toLowerCase(),
-      source: 'llm'
-    }));
+    return response.entities
+      .map(e => ({
+        name: e.name,
+        type: this.normalizeEntityType(e.type),
+        confidence: e.confidence || 0.7,
+        normalized: e.name.toLowerCase(),
+        source: 'llm' as const
+      }))
+      .filter(e => !this.isGarbageEntity(e.name, e.type))
+      .filter(e => !this.shouldSkipEntity(e.name, e.type, e.normalized));
   }
 
   /**

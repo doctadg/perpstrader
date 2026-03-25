@@ -478,9 +478,10 @@ class BondingCurveService {
   }
 
   /**
-   * Force sell entire position (emergency exit / stop loss)
+   * Force sell entire position (emergency exit / stop loss / time-based exit)
+   * @param reason - 'STOP_LOSS' | 'TIME_EXIT' | 'STALE_EXIT' | 'TAKE_PROFIT'
    */
-  async emergencySell(tokenMint: string, currentPriceMultiplier: number): Promise<SellResult | null> {
+  async emergencySell(tokenMint: string, currentPriceMultiplier: number, reason: string = 'STOP_LOSS'): Promise<SellResult | null> {
     const position = this.paperPositions.get(tokenMint);
     if (!position || position.tokensOwned < 1) return null;
 

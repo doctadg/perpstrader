@@ -348,7 +348,18 @@ async function runOpenRouterAnalysis(data: {
         requestConfig
       );
 
-      const content = response.data?.choices?.[0]?.message?.content || '';
+      // FIX: z-ai/glm models return content in 'reasoning' field, not 'content'
+      const msg = response.data?.choices?.[0]?.message;
+      let content = msg?.content || '';
+      if (!content && msg?.reasoning) {
+        content = msg.reasoning;
+      }
+      if (!content && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+        content = msg.reasoning_details
+          .filter((d: any) => d.type === 'reasoning.text' && d.text)
+          .map((d: any) => d.text)
+          .join('\n');
+      }
       const parsed = parseAIResponse(content);
       if (!parsed) {
         logger.warn('[AnalyzeNode] GLM response was not parseable JSON, using fallback');

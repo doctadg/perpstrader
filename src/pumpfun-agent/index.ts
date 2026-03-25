@@ -11,6 +11,7 @@ import snipeService from './services/snipe-service';
 
 const config = configManager.get();
 const cycleIntervalMs = config.pumpfun?.cycleIntervalMs || 30000; // 30s (was 60s)
+const minScoreThreshold = parseFloat(process.env.PUMPFUN_MIN_BUY_SCORE || '0.4');
 
 /**
  * Main function - runs continuous pump.fun analysis cycles + snipe loop
@@ -159,15 +160,15 @@ async function main() {
           // ── EXTENDED TIME-BASED EXITS (more patient for memecoin pumps) ──
           if (ageMs > 3 * 60 * 60 * 1000) {
             // Force exit anything over 3 hours (was 1 hour)
-            await bondingCurveService.emergencySell(pos.tokenMint, mult);
+            await bondingCurveService.emergencySell(pos.tokenMint, mult, 'TIME_EXIT');
             logger.info(`[TIME-EXIT] ${pos.tokenSymbol}: max age ${(ageMs/60000).toFixed(0)}min`);
           } else if (ageMs > 90 * 60 * 1000 && mult < 1.3) {
             // Exit underperformers after 90 min if < 30% gain (was 30 min at < 50% gain)
-            await bondingCurveService.emergencySell(pos.tokenMint, mult);
-            logger.info(`[TIME-EXIT] ${pos.tokenSymbol}: stale ${(ageMs/60000).toFixed(0)}min @ ${mult.toFixed(2)}x`);
+            await bondingCurveService.emergencySell(pos.tokenMint, mult, 'STALE_EXIT');
+            logger.info(`[STALE-EXIT] ${pos.tokenSymbol}: stale ${(ageMs/60000).toFixed(0)}min @ ${mult.toFixed(2)}x`);
           } else if (mult >= 3.0) {
             // Take profit early on 3x+ gains even if TP levels didn't trigger
-            await bondingCurveService.emergencySell(pos.tokenMint, mult);
+            await bondingCurveService.emergencySell(pos.tokenMint, mult, 'TAKE_PROFIT');
             logger.info(`[TAKE-PROFIT] ${pos.tokenSymbol}: early exit at ${mult.toFixed(2)}x (3x+)`);
           }
         }
@@ -185,7 +186,7 @@ async function main() {
         }
         // For now, directly buy the top token if it scores above snipe threshold
         const topToken = result.highConfidenceTokens[0];
-        if (topToken && topToken.overallScore >= 0.40 && snipeStatus.openPositions < 3) {
+        if (topToken && topToken.overallScore >= minScoreThreshold && snipeStatus.openPositions < 3) {
           const solAmount = parseFloat(process.env.PUMPFUN_SNIPER_SOL_AMOUNT || '0.3');
           const buyResult = await bondingCurveService.buy(
             topToken.token.mintAddress,
