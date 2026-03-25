@@ -330,7 +330,18 @@ async function runOpenRouterAnalysis(data) {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             const response = await axios_1.default.post(`${baseUrl}/chat/completions`, requestBody, requestConfig);
-            const content = response.data?.choices?.[0]?.message?.content || '';
+            // FIX: z-ai/glm models return content in 'reasoning' field, not 'content'
+            const msg = response.data?.choices?.[0]?.message;
+            let content = msg?.content || '';
+            if (!content && msg?.reasoning) {
+                content = msg.reasoning;
+            }
+            if (!content && msg?.reasoning_details && Array.isArray(msg.reasoning_details)) {
+                content = msg.reasoning_details
+                    .filter((d) => d.type === 'reasoning.text' && d.text)
+                    .map((d) => d.text)
+                    .join('\n');
+            }
             const parsed = parseAIResponse(content);
             if (!parsed) {
                 logger_1.default.warn('[AnalyzeNode] GLM response was not parseable JSON, using fallback');

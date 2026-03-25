@@ -450,6 +450,65 @@ class BondingCurveService {
         const store = await this.getStore();
         for (const [tokenMint, position] of this.paperPositions) {
             try {
+                // ── PAPER MODE: Simulate price movement instead of reading on-chain ──
+                if (this.paperMode) {
+                    // Simulate realistic memecoin price action:
+                    // - Initial phase: random walk with upward bias (pump potential)
+                    // - After 10 min: introduce rug probability
+                    // - High volatility: 5-15% swings per sample
+                    const ageMs = Date.now() - position.buyTimestamp.getTime();
+                    const ageMinutes = ageMs / 60000;
+                    const lastMult = this.maxMultipliers.get(tokenMint) || 1.0;
+                    // Random walk with trend based on entry score (higher score = better trend)
+                    const entryScore = this.entryScores.get(tokenMint) || 0.5;
+                    const volatility = 0.08 + Math.random() * 0.07; // 8-15% volatility
+                    const trendBias = (entryScore - 0.4) * 0.02; // Higher score = slight upward bias
+                    // Add rug probability after 5 minutes (especially for low-score tokens)
+                    let rugProbability = 0;
+                    if (ageMinutes > 5 && entryScore < 0.45) {
+                        rugProbability = (ageMinutes - 5) * 0.01 * (0.5 - entryScore); // Up to 10% rug chance
+                    }
+                    // Random price change
+                    const randomChange = (Math.random() - 0.5 + trendBias) * volatility;
+                    let newMult = lastMult * (1 + randomChange);
+                    // Apply rug crash if triggered
+                    if (Math.random() < rugProbability) {
+                        newMult = lastMult * 0.3; // 70% crash
+                        logger_1.default.info(`[PAPER SIM] ${position.tokenSymbol} RUG simulated at ${ageMinutes.toFixed(1)}min`);
+                    }
+                    // Clamp to reasonable range
+                    newMult = Math.max(0.1, Math.min(20.0, newMult));
+                    // Track max multiplier
+                    const prevMax = this.maxMultipliers.get(tokenMint) || 1.0;
+                    const newMax = Math.max(prevMax, newMult);
+                    this.maxMultipliers.set(tokenMint, newMax);
+                    multipliers.set(tokenMint, newMult);
+                    // Calculate market cap
+                    const marketCapSol = newMult * position.solSpent * 30; // Rough approximation
+                    // Persist price sample
+                    if (store) {
+                        store.recordPriceSample(tokenMint, newMult, marketCapSol, false).catch(() => { });
+                    }
+                    // Update position in DB
+                    if (store) {
+                        store.upsertPosition({
+                            mintAddress: tokenMint,
+                            tokenSymbol: position.tokenSymbol,
+                            tokensOwned: position.tokensOwned,
+                            solSpent: position.solSpent,
+                            entryPrice: position.entryPrice,
+                            entryScore: this.entryScores.get(tokenMint),
+                            buyTimestamp: position.buyTimestamp,
+                            tpLevels: position.tpLevels,
+                            partialSells: position.partialSells,
+                            status: 'OPEN',
+                            maxMultiplier: newMax,
+                            currentMultiplier: newMult,
+                        }).catch(() => { });
+                    }
+                    logger_1.default.debug(`[PAPER SIM] ${position.tokenSymbol}: ${newMult.toFixed(3)}x (max: ${newMax.toFixed(3)}x, age: ${ageMinutes.toFixed(1)}min)`);
+                    continue;
+                }
                 const state = await this.readBondingCurveState(tokenMint);
                 if (!state) {
                     // Bonding curve not readable (may have graduated or been rugs)

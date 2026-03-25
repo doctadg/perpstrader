@@ -19,7 +19,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path("/home/d/PerpsTrader")
 DB_PATH = PROJECT_ROOT / "data" / "pumpfun.db"
-CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+CONFIG_PATH = PROJECT_ROOT / "config" / "config.json"
 HISTORY_DIR = PROJECT_ROOT / "data" / "pumpfun-training-history"
 METRICS_FILE = PROJECT_ROOT / "data" / "pumpfun-metrics-latest.json"
 
@@ -47,45 +47,22 @@ WEIGHT_BOUNDS = {
 
 
 def read_config_weights():
-    """Read current pumpfun weights from config.yaml (simple regex parsing)."""
+    """Read current pumpfun weights from config.json."""
     if not CONFIG_PATH.exists():
         return dict(DEFAULT_WEIGHTS)
 
-    content = CONFIG_PATH.read_text()
-    weights = dict(DEFAULT_WEIGHTS)
-
-    # Simple YAML parsing for pumpfun.weights section
-    in_pumpfun = False
-    in_weights = False
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("pumpfun:"):
-            in_pumpfun = True
-            continue
-        if in_pumpfun and stripped.startswith("weights:"):
-            in_weights = True
-            continue
-        if in_weights and stripped.startswith("#"):
-            continue
-        if in_weights:
-            if stripped and not stripped.startswith("-") and ":" in stripped and not stripped.startswith("weights"):
-                match = re.match(r"(\w+):\s*([0-9.]+)", stripped)
-                if match:
-                    key, val = match.group(1), float(match.group(2))
-                    if key in DEFAULT_WEIGHTS:
-                        weights[key] = val
-            elif stripped == "" and in_pumpfun and any(
-                l.strip().startswith(("social:", "freshness:", "websiteQuality:"))
-                for l in content.split("\n")
-                if "pumpfun:" in content.split("\n")[:content.split("\n").index(line) + 1]
-            ):
-                # End of weights section
-                break
-            elif stripped and not stripped[0].isspace() and stripped != "weights:":
-                # New top-level key
-                break
-
-    return weights
+    try:
+        with open(CONFIG_PATH) as f:
+            config = json.load(f)
+        weights = config.get("pumpfun", {}).get("weights", {})
+        # Merge with defaults for any missing keys
+        result = dict(DEFAULT_WEIGHTS)
+        for k in DEFAULT_WEIGHTS:
+            if k in weights:
+                result[k] = weights[k]
+        return result
+    except (json.JSONDecodeError, KeyError):
+        return dict(DEFAULT_WEIGHTS)
 
 
 def analyze_outcomes(db):
@@ -200,55 +177,28 @@ def mutate_weights(current_weights, analysis, quick_rugs, dry_run=False):
 
 
 def write_weights_to_config(new_weights, dry_run=False):
-    """Write mutated weights back to config.yaml."""
+    """Write mutated weights back to config.json."""
     if dry_run:
         return "DRY RUN — config not modified"
 
     if not CONFIG_PATH.exists():
-        return "ERROR: config.yaml not found"
+        return "ERROR: config.json not found"
 
-    content = CONFIG_PATH.read_text()
+    try:
+        with open(CONFIG_PATH) as f:
+            config = json.load(f)
 
-    # Build the weights YAML block
-    weights_yaml = "pumpfun:\n  weights:\n"
-    for k, v in new_weights.items():
-        weights_yaml += f"    {k}: {v}\n"
+        # Ensure pumpfun section exists
+        if "pumpfun" not in config:
+            config["pumpfun"] = {}
+        config["pumpfun"]["weights"] = new_weights
 
-    # Check if pumpfun section already exists
-    if "pumpfun:" in content:
-        # Replace existing pumpfun section (simple approach)
-        # Find the section and replace it
-        lines = content.split("\n")
-        new_lines = []
-        skip_until_next_top = False
-        found_pumpfun = False
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
 
-        for i, line in enumerate(lines):
-            if line.strip() == "pumpfun:":
-                found_pumpfun = True
-                new_lines.append("pumpfun:")
-                new_lines.append("  weights:")
-                for k, v in new_weights.items():
-                    new_lines.append(f"    {k}: {v}")
-                skip_until_next_top = True
-                continue
-
-            if skip_until_next_top:
-                if line.strip() and not line.startswith(" ") and not line.startswith("\t"):
-                    skip_until_next_top = False
-                    new_lines.append(line)
-                # skip indented lines under pumpfun
-                continue
-
-            new_lines.append(line)
-
-        content = "\n".join(new_lines)
-    else:
-        # Append pumpfun section
-        content = content.rstrip() + "\n\n" + weights_yaml
-
-    CONFIG_PATH.write_text(content)
-    return "Config updated"
+        return "Config updated"
+    except (json.JSONDecodeError, KeyError) as e:
+        return f"ERROR: Failed to update config.json: {e}"
 
 
 def save_report(weights, new_weights, analysis, quick_rugs, rationale, changed, dry_run):
