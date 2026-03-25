@@ -7,10 +7,10 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const GLM_API_KEY = process.env.ZAI_API_KEY || '';
-const GLM_BASE_URL = process.env.ZAI_API_URL || 'https://api.z.ai/api/paas/v4';
-const LABELING_MODEL = process.env.GLM_LABELING_MODEL || 'glm-4.5-air';
-const MAIN_MODEL = process.env.ZAI_MODEL || 'glm-4.7';
+const GLM_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const GLM_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+const LABELING_MODEL = process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash';
+const MAIN_MODEL = process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash';
 
 const TEST_HEADLINES = [
     'US seizes two tankers linked to Venezuela and Russia',
@@ -118,13 +118,9 @@ async function testSimpleCompletion(): Promise<void> {
     const simplePrompt = 'Say exactly: "GLM API is working"';
     
     const modelsToTest = [
-        'glm-4.5-air',
-        'glm-4.5',
-        'glm-4.6',
-        'glm-4.7',
-        'glm-4',
-        'glm-4-plus',
-        'glm-4-air',
+        'z-ai/glm-4.7-flash',
+        'z-ai/glm-4-plus',
+        'z-ai/glm-4',
     ];
     
     for (const model of modelsToTest) {
@@ -164,10 +160,9 @@ Return JSON ONLY:
 }`;
 
     const modelsToTry = [
-        { name: 'glm-4.5-air', endpoint: '/chat/completions' },
-        { name: 'glm-4.7', endpoint: '/chat/completions' },
-        { name: 'glm-4', endpoint: '/chat/completions' },
-        { name: 'glm-4-plus', endpoint: '/chat/completions' },
+        { name: 'z-ai/glm-4.7-flash', endpoint: '/chat/completions' },
+        { name: 'z-ai/glm-4-plus', endpoint: '/chat/completions' },
+        { name: 'z-ai/glm-4', endpoint: '/chat/completions' },
     ];
 
     for (const { name, endpoint } of modelsToTry) {

@@ -1153,6 +1153,11 @@ export class CircuitBreakerSystem {
         this.registerBreaker('redundancy-filter', { threshold: 4, timeout: 30000, critical: false });
         this.registerBreaker('cluster', { threshold: 4, timeout: 45000, critical: false });
         this.registerBreaker('cluster-fallback', { threshold: 4, timeout: 45000, critical: false });
+
+        // Additional pipeline nodes (non-critical)
+        this.registerBreaker('market-monitor', { threshold: 5, timeout: 30000, critical: false });
+        this.registerBreaker('apr-calculator', { threshold: 5, timeout: 30000, critical: false });
+        this.registerBreaker('ai-analysis', { threshold: 4, timeout: 60000, critical: false });
     }
 
     /**

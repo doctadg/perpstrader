@@ -305,7 +305,7 @@ async function runOpenRouterAnalysis(data: {
   // Use GLM service instead of OpenRouter (OpenRouter API key is dead)
   const apiKey = config.glm.apiKey;
   const baseUrl = config.glm.baseUrl;
-  const model = config.glm.model || 'z-ai/glm-5';
+  const model = config.glm.model || 'z-ai/glm-4.7-flash';
 
   if (!apiKey || apiKey.length === 0 || apiKey === 'your-api-key-here') {
     logger.warn('[AnalyzeNode] GLM API key not configured, using heuristic fallback');

@@ -84,6 +84,58 @@ class EnhancedEntityExtractor {
             /\b(earnings|merger|acquisition|IPO|SPAC|delisting|halving|fork|airdrop|staking|yield|governance vote|proposal|regulation|sanction|tariff|trade war|recession|inflation|deflation|interest rate|fed decision)\b/gi,
         ],
     };
+    // Entities to exclude - too generic or garbage
+    ENTITY_BLACKLIST = new Set([
+        // Generic abbreviations that get misidentified as TOKENs
+        'us', 'pm', 'am', 'ai', 'tv', 'rss', 'api', 'ceo', 'cfo', 'cto', 'coo', 'hr', 'pr', 'qa',
+        // Timezone/time expressions
+        'utc', 'est', 'pst', 'gmt', 'et', 'pt', 'ct', 'mt',
+        // Generic business/legal terms
+        'inc', 'llc', 'ltd', 'corp', 'co', 'corp',
+        // Month names (should not be entities)
+        'january', 'february', 'march', 'april', 'may', 'june',
+        'july', 'august', 'september', 'october', 'november', 'december',
+        // Common false positives
+        'ny', 'la', 'dc', 'sf', 'uk', 'eu', 'cn', 'jp', 'kr', 'au', 'ca',
+        'q1', 'q2', 'q3', 'q4', 'q1 2026', 'q2 2026', 'q3 2026', 'q4 2026',
+        'sec filing', 'form', '8-k', '10-k', '10-q',
+    ]);
+    // Patterns for garbage entities (dollar amounts, timestamps, etc.)
+    GARBAGE_PATTERNS = [
+        /^\$[\d,\.]+$/, // Dollar amounts like $0.0000001
+        /^\d+$/, // Pure numbers
+        /^\d{4}$/, // Years like 2024
+        /^\d{1,2}:\d{2}/, // Time expressions
+        /^https?:\/\//, // URLs
+        /^[a-f0-9]{20,}$/i, // Hash strings
+        /^\d+\s*(am|pm)$/i, // Time with am/pm
+        /^(am|pm)$/i, // Just am/pm
+    ];
+    /**
+     * Check if entity should be filtered out
+     */
+    isGarbageEntity(name, type) {
+        const normalized = name.toLowerCase().trim();
+        // Check blacklist
+        if (this.ENTITY_BLACKLIST.has(normalized)) {
+            return true;
+        }
+        // Check garbage patterns
+        for (const pattern of this.GARBAGE_PATTERNS) {
+            if (pattern.test(name)) {
+                return true;
+            }
+        }
+        // Skip DATE entities entirely - they're not useful for clustering
+        if (type === 'DATE') {
+            return true;
+        }
+        // Skip AMOUNT entities - too specific
+        if (type === 'AMOUNT') {
+            return true;
+        }
+        return false;
+    }
     /**
      * Extract entities from text using regex patterns
      */
@@ -97,6 +149,10 @@ class EnhancedEntityExtractor {
                 for (const match of matches) {
                     const name = match[0].trim();
                     const normalized = name.toLowerCase();
+                    // Skip garbage entities
+                    if (this.isGarbageEntity(name, type)) {
+                        continue;
+                    }
                     // Skip duplicates
                     if (seen.has(`${type}:${normalized}`))
                         continue;

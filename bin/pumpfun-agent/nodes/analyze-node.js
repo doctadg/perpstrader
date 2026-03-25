@@ -43,7 +43,6 @@ exports.updateStep = exports.addThought = void 0;
 exports.analyzeNode = analyzeNode;
 const logger_1 = __importDefault(require("../../shared/logger"));
 const config_1 = __importDefault(require("../../shared/config"));
-const openrouter_service_1 = __importDefault(require("../../shared/openrouter-service"));
 const state_1 = require("../state");
 const bonding_curve_1 = require("../services/bonding-curve");
 const uuid_1 = require("uuid");
@@ -288,29 +287,21 @@ function normalizeWebsiteUrl(raw) {
     }
 }
 /**
- * Run OpenRouter analysis for a token (rate-limited by caller).
- * On 429 or other failures, returns null so caller can use heuristic fallback
- * instead of spamming retries.
+ * Run AI analysis for a token using GLM service (z.ai).
+ * On failure, returns null so caller can use heuristic fallback.
  */
 async function runOpenRouterAnalysis(data) {
     const prompt = buildAnalysisPrompt(data);
     const config = config_1.default.get();
-    const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.openrouter.labelingModel;
-    let maxTokens = Number.parseInt(process.env.PUMPFUN_MAX_TOKENS || '120', 10);
-    if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
-        maxTokens = 120;
-    }
-    // Check API key from multiple sources (singleton, config, and direct env)
-    const configApiKey = config.openrouter.apiKey;
-    const envApiKey = process.env.OPENROUTER_API_KEY || process.env.ZAI_API_KEY || '';
-    const apiKey = openrouter_service_1.default.canUseService()
-        ? openrouter_service_1.default['apiKey'] // Access the singleton's key
-        : (configApiKey || envApiKey);
+    // Use GLM service instead of OpenRouter (OpenRouter API key is dead)
+    const apiKey = config.glm.apiKey;
+    const baseUrl = config.glm.baseUrl;
+    const model = config.glm.model || 'z-ai/glm-4.7-flash';
     if (!apiKey || apiKey.length === 0 || apiKey === 'your-api-key-here') {
-        logger_1.default.warn('[AnalyzeNode] OpenRouter API key missing from all sources (singleton, config, env), using heuristic fallback');
+        logger_1.default.warn('[AnalyzeNode] GLM API key not configured, using heuristic fallback');
         return null;
     }
-    const requestBody = (tokenBudget) => ({
+    const requestBody = {
         model,
         messages: [
             {
@@ -323,8 +314,8 @@ async function runOpenRouterAnalysis(data) {
             },
         ],
         temperature: 0.2,
-        max_tokens: tokenBudget,
-    });
+        max_tokens: 800,
+    };
     const requestConfig = {
         headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -332,17 +323,17 @@ async function runOpenRouterAnalysis(data) {
             'HTTP-Referer': 'https://perps-trader.ai',
             'X-Title': 'PerpsTrader PumpFun Analyzer',
         },
-        timeout: config.openrouter.timeout,
+        timeout: config.glm.timeout || 30000,
     };
-    // Retry with backoff (max 5 retries)
-    const MAX_RETRIES = 5;
+    // Retry with backoff (max 3 retries)
+    const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const response = await axios_1.default.post(`${config.openrouter.baseUrl}/chat/completions`, requestBody(maxTokens), requestConfig);
+            const response = await axios_1.default.post(`${baseUrl}/chat/completions`, requestBody, requestConfig);
             const content = response.data?.choices?.[0]?.message?.content || '';
             const parsed = parseAIResponse(content);
             if (!parsed) {
-                logger_1.default.warn('[AnalyzeNode] OpenRouter response was not parseable JSON, using fallback');
+                logger_1.default.warn('[AnalyzeNode] GLM response was not parseable JSON, using fallback');
                 return null;
             }
             return parsed;
@@ -359,43 +350,30 @@ async function runOpenRouterAnalysis(data) {
                 }
                 if (attempt < MAX_RETRIES) {
                     const backoff = retryAfterMs || (1000 * Math.pow(2, attempt - 1) + Math.random() * 500);
-                    logger_1.default.warn(`[AnalyzeNode] OpenRouter 429 on attempt ${attempt}/${MAX_RETRIES}, retrying in ${Math.round(backoff)}ms`);
+                    logger_1.default.warn(`[AnalyzeNode] GLM 429 on attempt ${attempt}/${MAX_RETRIES}, retrying in ${Math.round(backoff)}ms`);
                     await new Promise(r => setTimeout(r, Math.min(backoff, 30000)));
                     continue;
                 }
-                logger_1.default.warn(`[AnalyzeNode] OpenRouter 429 exhausted all ${MAX_RETRIES} retries, skipping AI for this token`);
+                logger_1.default.warn(`[AnalyzeNode] GLM 429 exhausted all ${MAX_RETRIES} retries, skipping AI for this token`);
                 return null;
             }
             // 400 = bad request (wrong model, invalid params) — NOT transient, don't retry
             if (status === 400) {
-                logger_1.default.warn(`[AnalyzeNode] OpenRouter 400 (bad request) — model ${model} likely unsupported on ${config.openrouter.baseUrl}, skipping AI for this token`);
+                logger_1.default.warn(`[AnalyzeNode] GLM 400 (bad request) — model ${model} likely unsupported on ${baseUrl}, skipping AI for this token`);
                 return null;
             }
-            // Handle 402 with reduced token budget
-            const affordMatch = String(error?.response?.data?.error?.message || '').match(/afford\s+(\d+)/i);
-            const affordableBudget = affordMatch ? Number.parseInt(affordMatch[1], 10) : NaN;
-            if (status === 402 && Number.isFinite(affordableBudget) && affordableBudget > 12) {
-                try {
-                    const retryBudget = Math.max(12, affordableBudget - 2);
-                    logger_1.default.warn(`[AnalyzeNode] Retrying OpenRouter analysis with lower token budget: ${retryBudget}`);
-                    const retryResponse = await axios_1.default.post(`${config.openrouter.baseUrl}/chat/completions`, requestBody(retryBudget), requestConfig);
-                    const retryContent = retryResponse.data?.choices?.[0]?.message?.content || '';
-                    const retryParsed = parseAIResponse(retryContent);
-                    if (retryParsed) {
-                        return retryParsed;
-                    }
-                }
-                catch (retryError) {
-                    logger_1.default.warn(`[AnalyzeNode] OpenRouter retry failed: ${retryError}`);
-                }
+            // 401 = auth error — no point retrying
+            if (status === 401) {
+                logger_1.default.warn(`[AnalyzeNode] GLM 401 (unauthorized) — check GLM_API_KEY, skipping AI for this token`);
+                return null;
             }
-            else if (attempt === MAX_RETRIES) {
-                logger_1.default.warn(`[AnalyzeNode] OpenRouter analysis failed after ${MAX_RETRIES} attempts: ${error}`);
+            if (attempt === MAX_RETRIES) {
+                logger_1.default.warn(`[AnalyzeNode] GLM analysis failed after ${MAX_RETRIES} attempts: ${error?.message || error}`);
             }
             else {
                 // Transient errors: retry with backoff
                 const backoff = 1000 * Math.pow(2, attempt - 1);
-                logger_1.default.warn(`[AnalyzeNode] OpenRouter error ${status || error?.code} on attempt ${attempt}/${MAX_RETRIES}, retrying in ${Math.min(backoff, 30000)}ms`);
+                logger_1.default.warn(`[AnalyzeNode] GLM error ${status || error?.code} on attempt ${attempt}/${MAX_RETRIES}, retrying in ${Math.min(backoff, 30000)}ms`);
                 await new Promise(r => setTimeout(r, Math.min(backoff, 30000)));
                 continue;
             }

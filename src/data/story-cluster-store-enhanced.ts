@@ -1172,6 +1172,14 @@ class StoryClusterStoreEnhanced {
                 WHERE id = ?
             `).run(moved, sourceId, new Date().toISOString(), targetId);
 
+            // Create hierarchy record BEFORE deleting (FK constraint requires both clusters exist)
+            const now = new Date().toISOString();
+            this.db.prepare(`
+                INSERT OR IGNORE INTO cluster_hierarchy
+                (parent_cluster_id, child_cluster_id, relationship_type, created_at)
+                VALUES (?, ?, 'MERGED_INTO', ?)
+            `).run(targetId, sourceId, now);
+
             // Delete source cluster
             this.db.prepare(`DELETE FROM story_clusters WHERE id = ?`).run(sourceId);
 

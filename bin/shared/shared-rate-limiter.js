@@ -1,7 +1,6 @@
 "use strict";
-// Shared Rate Limiter for z.ai API calls
-// Both GLM service and OpenRouter service hit the same z.ai endpoint
-// (https://api.z.ai/api/paas/v4) with the same API key.
+// Shared Rate Limiter for OpenRouter API calls
+// All LLM calls (GLM, labeling, embeddings) go through OpenRouter.
 // This module provides a single global rate limiter to prevent 429 errors.
 // Enhanced with circuit breaker mode to fully block calls under sustained 429 storms.
 var __importDefault = (this && this.__importDefault) || function (mod) {

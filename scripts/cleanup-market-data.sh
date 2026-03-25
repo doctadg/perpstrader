@@ -11,8 +11,8 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Get current stats
-ROWS_BEFORE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM market_data;")
+# Get current stats (use -list to avoid headers)
+ROWS_BEFORE=$(sqlite3 -list "$DB_PATH" "SELECT COUNT(*) FROM market_data;")
 SIZE_BEFORE=$(du -sh "$DB_PATH" | cut -f1)
 
 log "Starting cleanup: $ROWS_BEFORE rows, $SIZE_BEFORE size"
@@ -32,7 +32,7 @@ sqlite3 "$DB_PATH" "CREATE INDEX IF NOT EXISTS idx_market_data_symbol ON market_
 sqlite3 "$DB_PATH" "CREATE INDEX IF NOT EXISTS idx_market_data_timestamp ON market_data(timestamp);"
 
 # Get new stats
-ROWS_AFTER=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM market_data;")
+ROWS_AFTER=$(sqlite3 -list "$DB_PATH" "SELECT COUNT(*) FROM market_data;")
 log "After cleanup: $ROWS_AFTER rows (removed $((ROWS_BEFORE - ROWS_AFTER)) rows)"
 
 # Vacuum to reclaim space (use INTO to avoid locking)

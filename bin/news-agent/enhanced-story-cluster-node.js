@@ -24,7 +24,7 @@ const semantic_similarity_1 = __importDefault(require("./semantic-similarity"));
 const enhanced_entity_extraction_1 = __importDefault(require("./enhanced-entity-extraction"));
 // Configuration - Optimized thresholds based on testing
 const VECTOR_SIMILARITY_THRESHOLD = Number.parseFloat(process.env.NEWS_VECTOR_DISTANCE_THRESHOLD || '0.50'); // Aggressively lowered for recall
-const KEYWORD_SIMILARITY_THRESHOLD = 0.40; // Lowered from 0.55 — entity overlap validates merges
+const KEYWORD_SIMILARITY_THRESHOLD = 0.35; // Lowered from 0.40 — entity overlap validates merges
 const TITLE_SIMILARITY_THRESHOLD = 0.55; // Lowered from 0.70 — more title-based grouping
 const FILTER_VECTOR_BY_CATEGORY = process.env.NEWS_VECTOR_FILTER_BY_CATEGORY === 'true';
 const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM === 'true';
@@ -895,8 +895,7 @@ async function mergeSingletonClusters() {
             if (result.moved > 0) {
                 mergedCount++;
                 mergedAway.add(singleton.id);
-                await story_cluster_store_enhanced_1.default.createHierarchy(bestTarget.id, singleton.id, 'MERGED_INTO');
-                // Don't remove target — multiple singletons can merge into the same target
+                // Hierarchy is now created inside mergeClusters before the source is deleted
             }
         }
     }

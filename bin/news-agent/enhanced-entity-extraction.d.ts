@@ -19,6 +19,12 @@ declare class EnhancedEntityExtractor {
     private llmCache;
     private cacheMaxSize;
     private readonly PATTERNS;
+    private readonly ENTITY_BLACKLIST;
+    private readonly GARBAGE_PATTERNS;
+    /**
+     * Check if entity should be filtered out
+     */
+    private isGarbageEntity;
     /**
      * Extract entities from text using regex patterns
      */

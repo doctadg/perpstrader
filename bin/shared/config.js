@@ -32,11 +32,11 @@ class ConfigManager {
                 timeout: parseInt(process.env.SEARCH_API_TIMEOUT || '30000')
             },
             glm: {
-                // GLM now routes through OpenRouter exclusively
-                apiKey: process.env.OPENROUTER_API_KEY || '',
-                baseUrl: 'https://openrouter.ai/api/v1',
-                model: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
-                timeout: parseInt(process.env.OPENROUTER_TIMEOUT || '60000')
+                // GLM via OpenRouter
+                apiKey: process.env.OPENROUTER_API_KEY || process.env.GLM_API_KEY || '',
+                baseUrl: process.env.OPENROUTER_BASE_URL || process.env.GLM_BASE_URL || 'https://openrouter.ai/api/v1',
+                model: process.env.OPENROUTER_LABELING_MODEL || process.env.GLM_MODEL || 'z-ai/glm-4.7-flash',
+                timeout: parseInt(process.env.OPENROUTER_TIMEOUT || process.env.GLM_TIMEOUT || '60000')
             },
             openrouter: {
                 // All LLM calls go through OpenRouter
