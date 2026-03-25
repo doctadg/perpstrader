@@ -35,6 +35,56 @@ def q1(sql, params=None):
     except:
         return 0
 
+def update_strategy_performance():
+    """Update strategies.performance from live trades - CRITICAL for Hermes training"""
+    import datetime
+    try:
+        c = sqlite3.connect(DB)
+        c.row_factory = sqlite3.Row
+        
+        # Get all strategies with exits
+        rows = c.execute("""SELECT strategyId, 
+            COUNT(*) as total_trades,
+            SUM(CASE WHEN status='FILLED' THEN 1 ELSE 0 END) as filled,
+            SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' THEN 1 ELSE 0 END) as exits,
+            SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' THEN pnl ELSE 0 END) as total_pnl,
+            SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' AND pnl > 0 THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' AND pnl < 0 THEN 1 ELSE 0 END) as losses,
+            SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' AND pnl > 0 THEN pnl ELSE 0 END) as win_pnl,
+            SUM(CASE WHEN entryExit='EXIT' AND status='FILLED' AND pnl < 0 THEN ABS(pnl) ELSE 0 END) as loss_pnl
+            FROM trades GROUP BY strategyId HAVING exits > 0""").fetchall()
+        
+        now = datetime.datetime.utcnow().isoformat() + 'Z'
+        for r in rows:
+            sid = r['strategyId']
+            exits = r['exits']
+            wins = r['wins']
+            losses = r['losses']
+            win_rate = (wins / exits * 100) if exits > 0 else 0
+            profit_factor = r['win_pnl'] / r['loss_pnl'] if r['loss_pnl'] > 0 else 999.0
+            sharpe = (profit_factor * win_rate / 100) * 0.5 if profit_factor < 999 else 10
+            
+            perf = json.dumps({
+                "totalTrades": r['total_trades'],
+                "exits": exits,
+                "winningTrades": int(wins),
+                "losingTrades": int(losses),
+                "winRate": round(win_rate, 2),
+                "totalPnL": round(r['total_pnl'] or 0, 6),
+                "profitFactor": round(profit_factor, 4) if profit_factor < 999 else 999,
+                "sharpeRatio": round(sharpe, 4),
+                "lastUpdated": now
+            })
+            c.execute("UPDATE strategies SET performance = ?, updatedAt = ? WHERE id = ?", (perf, now, sid))
+        c.commit()
+        c.close()
+        return len(rows)
+    except Exception as e:
+        return 0
+
+# Update strategy performance from live trades
+updated = update_strategy_performance()
+
 # Trading metrics
 entries = q1("SELECT COUNT(*) FROM trades WHERE entryExit='ENTRY' AND status='FILLED'")
 exits = q1("SELECT COUNT(*) FROM trades WHERE entryExit='EXIT' AND status='FILLED'")
