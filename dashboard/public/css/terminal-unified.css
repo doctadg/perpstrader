@@ -1149,6 +1149,7 @@ body.unified-theme.page-trace header {
 }
 
 body.unified-theme.page-trace main {
+  display: flex;
   height: calc(100vh - 64px);
   padding: 16px;
   gap: 16px;
@@ -1158,6 +1159,7 @@ body.unified-theme.page-trace #sidebar {
   width: 320px;
   min-width: 280px;
   padding: 8px;
+  overflow-y: auto;
 }
 
 body.unified-theme.page-trace #sidebar::before {
@@ -1177,7 +1179,9 @@ body.unified-theme.page-trace #sidebar::before {
 }
 
 body.unified-theme.page-trace #content {
+  flex: 1;
   padding: 16px;
+  overflow-y: auto;
 }
 
 body.unified-theme.page-trace .trace-item {

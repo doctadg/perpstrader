@@ -22,7 +22,7 @@
     },
     {
       "name": "perps-dashboard",
-      "script": "bin/dashboard-server.js",
+      "script": "bin/dashboard/dashboard-server.js",
       "cwd": "/home/d/PerpsTrader",
       "instances": 1,
       "exec_mode": "fork",
@@ -30,7 +30,7 @@
       "max_memory_restart": "512M",
       "env": {
         "NODE_ENV": "production",
-        "DASHBOARD_PORT": 3002
+        "DASHBOARD_PORT": 3003
       },
       "log_date_format": "YYYY-MM-DD HH:mm:ss",
       "error_file": "/home/d/PerpsTrader/logs/dashboard-error.log",

@@ -22,7 +22,7 @@ class EntityExtractor {
     // Crypto tokens and protocols (regex patterns)
     private static readonly TOKEN_PATTERNS = [
         // Major tokens
-        /\b(Bitcoin|BTC|Ethereum|ETH|Solana|SOL|Cardano|ADA|Polkadot|DOT|Avalanche|AVAX|Dogecoin|DOGE|Shiba Inu|SHIB|Chainlink|LINK|Polygon|MATIC|Uniswap|UNI|Aave|AAVE|Curve|CRV|Maker|MKR|Compound|COMP|Synthetix|SNX|Yearn|YFI)\b/gi,
+        /\b(Bitcoin|BTC|Ethereum|ETH|Solana|SOL|Cardano|ADA|Polkadot|DOT|Avalanche|AVAX|Dogecoin|DOGE|Shiba Inu|SHIB|Chainlink|LINK|Polygon|MATIC|Uniswap|UNI|Aave|AAVE|Curve|CRV|Maker|MKR|Compound|COMP|Synthetix|SNX|Yearn|YFI|Pepeto|Hyperliquid|HYPE|Sui|SUI|Sei|SEI|Aptos|APT|Arbitrum|ARB|Optimism|OP|Celestia|TIA|Injective|INJ|Osmosis|OSMO|Jupiter|JUP)\b/gi,
         // Common token symbols
         /\b[A-Z]{2,6}(?=\s|$|,|\.)/g, // All caps 2-6 chars (likely token symbols)
     ];

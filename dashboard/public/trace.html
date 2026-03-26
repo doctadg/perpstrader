@@ -111,6 +111,56 @@
 
         body.unified-theme.page-trace .positive { color: var(--good); }
         body.unified-theme.page-trace .negative { color: var(--bad); }
+
+        body.unified-theme.page-trace .trace-item {
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        body.unified-theme.page-trace .trace-item:hover {
+            background: rgba(59, 130, 246, 0.08);
+        }
+
+        body.unified-theme.page-trace .trace-item.active {
+            background: rgba(59, 130, 246, 0.12);
+            border-left: 2px solid var(--accent);
+        }
+
+        body.unified-theme.page-trace .trace-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        body.unified-theme.page-trace .trace-status {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        #sidebar {
+            overflow-y: auto;
+            max-height: calc(100vh - 60px);
+        }
+
+        #content {
+            overflow-y: auto;
+            max-height: calc(100vh - 60px);
+            padding: 20px;
+        }
+
+        #content .section {
+            margin-bottom: 16px;
+        }
+
+        #content .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 8px;
+        }
     </style>
     <!-- Conversational Agent Widget -->
     <link rel="stylesheet" href="/css/terminal-unified.css">
@@ -156,10 +206,21 @@
         async function showTrace(id) {
             activeId = id;
             renderList();
-            const res = await fetch(`/api/traces/${id}`);
-            const t = await res.json();
-            console.log('Trace data:', t);
-            render(t);
+            try {
+                const res = await fetch(`/api/traces/${id}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const t = await res.json();
+                console.log('Trace data:', t);
+                render(t);
+            } catch (err) {
+                console.error('showTrace error:', err);
+                document.getElementById('content').innerHTML = `
+                    <div class="section" style="border-color:var(--red)">
+                        <div class="section-header" style="color:var(--red)">ERROR</div>
+                        <div class="section-body" style="color:var(--red)">${err.message}</div>
+                    </div>
+                `;
+            }
         }
 
         function safeNum(value, fallback = 0) {
@@ -204,18 +265,19 @@
         }
 
         function render(t) {
-            const ind = t.indicators || {};
-            const risk = t.riskAssessment || {};
-            const sig = t.signal || {};
-            const exec = t.executionResult || {};
-            const strategies = asArray(t.strategyIdeas);
-            const backtests = asArray(t.backtestResults);
-            const thoughts = asArray(t.thoughts);
-            const selectedStrategy = t.selectedStrategy || null;
-            const selectedStrategyName = strategyName(selectedStrategy);
-            const selectedIntel = findSelectedIntel(t, selectedStrategy);
-            const isPrediction = t.agentType === 'PREDICTION' || strategies.some(s => !!s.marketId);
-            const ideaById = new Map();
+            try {
+                const ind = t.indicators || {};
+                const risk = t.riskAssessment || {};
+                const sig = t.signal || {};
+                const exec = t.executionResult || {};
+                const strategies = asArray(t.strategyIdeas);
+                const backtests = asArray(t.backtestResults);
+                const thoughts = asArray(t.thoughts);
+                const selectedStrategy = t.selectedStrategy || null;
+                const selectedStrategyName = strategyName(selectedStrategy);
+                const selectedIntel = findSelectedIntel(t, selectedStrategy);
+                const isPrediction = t.agentType === 'PREDICTION' || strategies.some(s => !!s.marketId);
+                const ideaById = new Map();
 
             for (const strategy of strategies) {
                 if (strategy.id) ideaById.set(strategy.id, strategy);
@@ -362,6 +424,13 @@
                     </div>
                 ` : ''}
             `;
+            } catch (err) {
+                console.error('Render error:', err);
+                return `<div class="section" style="border-color:var(--red)">
+                    <div class="section-header" style="color:var(--red)">RENDER ERROR</div>
+                    <div class="section-body" style="color:var(--red)">${err.message}<br><pre style="font-size:0.7em;overflow:auto">${err.stack}</pre></div>
+                </div>`;
+            }
         }
 
         load();

@@ -169,7 +169,7 @@ async function main() {
                     // ── PRICE-BASED STOP LOSS (must check BEFORE time-based exits) ──
                     const STOP_LOSS_MULTIPLIER = 0.4; // 60% down = exit
                     if (mult <= STOP_LOSS_MULTIPLIER) {
-                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult, 'STOP_LOSS');
                         logger_1.default.warn(`[STOP-LOSS] ${pos.tokenSymbol}: hit price stop at ${mult.toFixed(2)}x (${((mult - 1) * 100).toFixed(0)}%)`);
                         continue; // Skip further checks
                     }
