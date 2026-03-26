@@ -1203,6 +1203,7 @@ class StoryClusterStoreEnhanced {
             let query = `
                 SELECT * FROM story_clusters 
                 WHERE updated_at > ?
+                AND article_count < 500
             `;
             const params: any[] = [cutoff];
 
@@ -1318,6 +1319,7 @@ class StoryClusterStoreEnhanced {
                 JOIN named_entities ne ON ecl.entity_id = ne.id
                 WHERE ne.normalized_name = ?
                 AND sc.updated_at > ?
+                AND sc.article_count < 500
             `;
             const params: any[] = [normalizedName, cutoff];
 

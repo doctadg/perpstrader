@@ -56,7 +56,9 @@ const VECTOR_SIMILARITY_THRESHOLD = Number.isFinite(Number.parseFloat(process.en
     : 0.70;
 const KEYWORD_SIMILARITY_THRESHOLD = 0.60;
 const FILTER_VECTOR_BY_CATEGORY = process.env.NEWS_VECTOR_FILTER_BY_CATEGORY === 'true';
-const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM === 'true';
+// GLM fallback enabled by default since OpenRouter API key is dead (401)
+// Set NEWS_USE_GLM=false to disable if needed
+const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM !== 'false';
 const CLUSTER_MERGE_HOURS_THRESHOLD = 48; // Only consider clusters within 48 hours for matching
 // Parallel processing batch size for clustering
 const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '20', 10);

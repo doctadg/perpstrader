@@ -509,11 +509,17 @@ class BondingCurveService {
     // Determine outcome based on reason and PnL
     let outcome: string;
     let sellType: string;
+    const hasHitTpLevels = tpLevelsHit.length > 0;
     if (reason === 'TAKE_PROFIT') {
       outcome = 'PROFIT_TP';
       sellType = 'TAKE_PROFIT';
     } else if (pnlPct > 0) {
+      // Positive PnL = profit, regardless of exit reason
       outcome = 'PROFIT_' + reason;
+      sellType = reason;
+    } else if (hasHitTpLevels) {
+      // Hit TP levels but final exit at loss = still counted as profit cycle
+      outcome = 'PROFIT_PARTIAL';
       sellType = reason;
     } else if (reason === 'TIME_EXIT' || reason === 'STALE_EXIT') {
       outcome = reason;

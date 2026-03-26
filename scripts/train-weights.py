@@ -163,6 +163,27 @@ def mutate_weights(current_weights, analysis, quick_rugs, dry_run=False):
                 f"WR {avg_wr:.0f}% but avg PnL {avg_pnl:.1f}% — TP levels may be too early, consider code change"
             )
 
+    # Rule 5: Mid-score bleeding while high-score outperforms → RAISE THRESHOLD
+    mid_low = analysis.get("0.40-0.49", {})
+    mid_high = analysis.get("0.50-0.59", {})
+    high_60 = analysis.get("0.60-0.69", {})
+    high_70 = analysis.get("0.70-1.00", {})
+
+    mid_total = mid_low.get("count", 0) + mid_high.get("count", 0)
+    high_total = high_60.get("count", 0) + high_70.get("count", 0)
+
+    if mid_total >= 20 and high_total >= 5:
+        mid_wr = (mid_low.get("win_rate", 0) * mid_low.get("count", 1) +
+                  mid_high.get("win_rate", 0) * mid_high.get("count", 1)) / max(mid_total, 1)
+        high_wr = (high_60.get("win_rate", 0) * high_60.get("count", 1) +
+                   high_70.get("win_rate", 0) * high_70.get("count", 1)) / max(high_total, 1)
+
+        if mid_wr < 20 and high_wr >= 80:
+            rationale.append(
+                f"CRITICAL: Mid-score (0.40-0.59) WR={mid_wr:.1f}% vs High-score (0.60+) WR={high_wr:.1f}% — "
+                f"RAISE PUMPFUN_MIN_BUY_SCORE to 0.60 to cut bleeding"
+            )
+
     # Renormalize positive weights to sum to 1.0
     pos_keys = ["social", "freshness", "websiteQuality", "aiAnalysis", "tokenQuality"]
     pos_sum = sum(weights[k] for k in pos_keys)

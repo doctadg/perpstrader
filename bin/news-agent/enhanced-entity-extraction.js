@@ -383,8 +383,7 @@ Return JSON only:
             normalized: e.name.toLowerCase(),
             source: 'llm'
         }))
-            .filter(e => !this.isGarbageEntity(e.name, e.type))
-            .filter(e => !this.shouldSkipEntity(e.name, e.type, e.normalized));
+            .filter(e => !this.isGarbageEntity(e.name, e.type));
     }
     /**
      * Normalize entity type from LLM response

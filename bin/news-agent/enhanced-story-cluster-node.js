@@ -35,6 +35,7 @@ const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.40; // Lowered from 0.55 — entity
 const ANTI_SPAM_HOURS = 48; // Extended from 2 hours to match merge window for better cross-run dedup
 const MAX_ENTITY_CLUSTER_LINKS = 200; // Cap entity links per cluster to prevent gravity wells
 const ENTITY_RELEVANCE_MIN_MATCH = 3; // Min chars of entity name that must appear in topic/keywords to be linked
+const MAX_CLUSTER_ARTICLES = 500; // Cap articles per cluster to prevent gravity wells (22k+ is too big)
 /**
  * Enhanced story clustering with improved title clustering
  */
@@ -111,14 +112,21 @@ async function enhancedStoryClusterNode(state) {
                     }
                 }
                 if (bestMatchCluster) {
-                    // Pre-assign all articles in this title cluster to the existing DB cluster
-                    // by marking them so processArticleEnhanced will find them via the title reverse index
-                    for (const articleId of titleCluster.articleIds) {
-                        // Store the article-to-cluster mapping so the title reverse index can find it
-                        await story_cluster_store_enhanced_1.default.addArticleToCluster(bestMatchCluster.id, articleId, (0, title_cleaner_1.getTitleFingerprint)(repTitle), 0, 'NEUTRAL');
-                        crossBatchMerged++;
+                    // SIZE CAP: Check target cluster has room for all articles in this title cluster
+                    const titleClusterSize = titleCluster.articleIds.length;
+                    if (bestMatchCluster.article_count + titleClusterSize > MAX_CLUSTER_ARTICLES) {
+                        logger_1.default.info(`[EnhancedClusterNode] Cross-batch dedup: target cluster ${bestMatchCluster.id.slice(0, 8)} would exceed capacity (${bestMatchCluster.article_count}+${titleClusterSize}>${MAX_CLUSTER_ARTICLES}), skipping pre-assignment`);
                     }
-                    logger_1.default.info(`[EnhancedClusterNode] Cross-batch dedup: "${repTitle.slice(0, 50)}..." -> existing cluster "${bestMatchCluster.topic.slice(0, 50)}..." (${bestMatchScore.toFixed(2)})`);
+                    else {
+                        // Pre-assign all articles in this title cluster to the existing DB cluster
+                        // by marking them so processArticleEnhanced will find them via the title reverse index
+                        for (const articleId of titleCluster.articleIds) {
+                            // Store the article-to-cluster mapping so the title reverse index can find it
+                            await story_cluster_store_enhanced_1.default.addArticleToCluster(bestMatchCluster.id, articleId, (0, title_cleaner_1.getTitleFingerprint)(repTitle), 0, 'NEUTRAL');
+                            crossBatchMerged++;
+                        }
+                        logger_1.default.info(`[EnhancedClusterNode] Cross-batch dedup: "${repTitle.slice(0, 50)}..." -> existing cluster "${bestMatchCluster.topic.slice(0, 50)}..." (${bestMatchScore.toFixed(2)})`);
+                    }
                 }
             }
             if (crossBatchMerged > 0) {
@@ -533,6 +541,14 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
     let created = false;
     let finalClusterId;
     if (assignedClusterId) {
+        // SIZE CAP: Check cluster isn't already at max capacity
+        const existingClusterForSize = await story_cluster_store_enhanced_1.default.getClusterById(assignedClusterId);
+        if (existingClusterForSize && existingClusterForSize.article_count >= MAX_CLUSTER_ARTICLES) {
+            logger_1.default.info(`[EnhancedClusterNode] Cluster ${assignedClusterId.slice(0, 8)} at capacity (${existingClusterForSize.article_count}/${MAX_CLUSTER_ARTICLES}), creating new cluster instead`);
+            assignedClusterId = null; // Force new cluster creation
+        }
+    }
+    if (assignedClusterId) {
         // Join existing cluster
         const articleDate = article.publishedAt || new Date();
         const heatDelta = await story_cluster_store_enhanced_1.default.calculateEnhancedHeat(article, new Date(), 10);
@@ -574,27 +590,34 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                 if (recentClusters.length > 0) {
                     // Merge into the most recent/highest-heat cluster instead of creating new
                     const target = recentClusters[0];
-                    logger_1.default.info(`[EnhancedClusterNode] Anti-spam: merging into existing cluster "${target.topic.slice(0, 40)}..." (primary entity: ${primaryEntity.name})`);
-                    const heatDelta = await story_cluster_store_enhanced_1.default.calculateEnhancedHeat(article, new Date(), 10);
-                    const titleFingerprint = (0, title_cleaner_1.getTitleFingerprint)(article.title);
-                    await story_cluster_store_enhanced_1.default.addArticleToCluster(target.id, article.id, titleFingerprint, heatDelta, aiLabel.trendDirection);
-                    if (useVectorMode) {
-                        await news_vector_store_1.default.storeArticle(article, target.id);
+                    // SIZE CAP: Check target cluster isn't at max capacity
+                    if (target.article_count >= MAX_CLUSTER_ARTICLES) {
+                        logger_1.default.info(`[EnhancedClusterNode] Anti-spam target cluster ${target.id.slice(0, 8)} at capacity (${target.article_count}/${MAX_CLUSTER_ARTICLES}), creating new cluster instead`);
+                        // Fall through to create new cluster below
                     }
-                    // Link entities (FIX 8: filtered by relevance)
-                    for (const entity of entities) {
-                        try {
-                            const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
-                            await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
-                            if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), target.topic, target.keywords || [])) {
-                                await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
+                    else {
+                        logger_1.default.info(`[EnhancedClusterNode] Anti-spam: merging into existing cluster "${target.topic.slice(0, 40)}..." (primary entity: ${primaryEntity.name})`);
+                        const heatDelta = await story_cluster_store_enhanced_1.default.calculateEnhancedHeat(article, new Date(), 10);
+                        const titleFingerprint = (0, title_cleaner_1.getTitleFingerprint)(article.title);
+                        await story_cluster_store_enhanced_1.default.addArticleToCluster(target.id, article.id, titleFingerprint, heatDelta, aiLabel.trendDirection);
+                        if (useVectorMode) {
+                            await news_vector_store_1.default.storeArticle(article, target.id);
+                        }
+                        // Link entities (FIX 8: filtered by relevance)
+                        for (const entity of entities) {
+                            try {
+                                const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
+                                await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
+                                if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), target.topic, target.keywords || [])) {
+                                    await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
+                                }
+                            }
+                            catch (e) {
+                                logger_1.default.warn(`[EnhancedClusterNode] Anti-spam entity linking failed: ${entity.name} -> ${target.id.slice(0, 8)}`, e);
                             }
                         }
-                        catch (e) {
-                            logger_1.default.warn(`[EnhancedClusterNode] Anti-spam entity linking failed: ${entity.name} -> ${target.id.slice(0, 8)}`, e);
-                        }
+                        return { clusterId: target.id, created: false, assigned: true, semanticMatch: false };
                     }
-                    return { clusterId: target.id, created: false, assigned: true, semanticMatch: false };
                 }
             }
         }
@@ -712,6 +735,11 @@ async function mergeSimilarClustersEnhanced(useVectorMode) {
                 if (similarity.similarity >= CLUSTER_MERGE_SIMILARITY_THRESHOLD) {
                     const target = c1.heatScore >= c2.heatScore ? c1 : c2;
                     const source = c1.heatScore >= c2.heatScore ? c2 : c1;
+                    // SIZE CAP: Don't merge if target would exceed max articles
+                    if (target.article_count + source.article_count > MAX_CLUSTER_ARTICLES) {
+                        logger_1.default.debug(`[EnhancedClusterNode] Skipping merge: would exceed capacity (${target.article_count}+${source.article_count}>${MAX_CLUSTER_ARTICLES})`);
+                        continue;
+                    }
                     logger_1.default.info(`[EnhancedClusterNode] Merging: "${source.topic}" -> "${target.topic}" (${similarity.similarity.toFixed(2)})`);
                     const result = await story_cluster_store_enhanced_1.default.mergeClusters(target.id, source.id);
                     if (result.moved > 0) {

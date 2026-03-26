@@ -144,7 +144,7 @@ async function main() {
           const state = await bondingCurveService.readBondingCurveState(pos.tokenMint);
           if (state?.complete) {
             // Bonding curve graduated - force exit at current multiplier
-            await bondingCurveService.emergencySell(pos.tokenMint, Math.max(mult, 1.0));
+            await bondingCurveService.emergencySell(pos.tokenMint, Math.max(mult, 1.0), 'GRADUATED');
             logger.info(`[GRADUATED] ${pos.tokenSymbol}: bonding curve complete, exiting at ${mult.toFixed(2)}x`);
             continue;
           }

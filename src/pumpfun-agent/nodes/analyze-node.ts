@@ -38,6 +38,9 @@ const NON_WEBSITE_HOSTS = new Set([
 const MAX_AI_CALLS_PER_CYCLE = 10; // was 5
 let aiCallCount = 0;
 
+// Inter-call delay to prevent GLM rate limiting (serialized calls)
+const AI_INTER_CALL_DELAY_MS = 500;
+
 /**
  * Check if a token passes the pre-filter for AI analysis.
  * Relaxed: any single social link OR a website qualifies.
@@ -116,113 +119,119 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
 
   const analyzedTokens: TokenAnalysis[] = [];
 
-  // Process tokens with concurrency
+  // PHASE 1: Collect on-chain data and website scraping concurrently (these hit different APIs)
   const concurrency = 5;
+  const preprocessResults: Array<{
+    token: any;
+    metadata: any;
+    onChainData: any;
+    website: any;
+    websiteUrl: string;
+  } | null> = [];
+
   for (let i = 0; i < state.queuedTokens.length; i += concurrency) {
     const batch = state.queuedTokens.slice(i, i + concurrency);
 
-    const results = await Promise.allSettled(
+    const batchResults = await Promise.allSettled(
       batch.map(async (item: any) => {
         const token = item.token || item;
         const metadata = item.metadata || token;
 
         try {
-          // --- STEP 1: On-chain data collection (always) ---
+          // On-chain data collection (always)
           const onChainData = await collectOnChainData(token.mintAddress);
           if (onChainData) {
             (token as any).onChainData = onChainData;
           }
 
-          // --- STEP 2: Website scraping ---
+          // Website scraping
           const websiteUrl = normalizeWebsiteUrl(metadata.website);
           const website = websiteUrl
             ? await webScraper.analyzeWebsite(websiteUrl, metadata)
             : emptyWebsiteResult(metadata.website);
 
-          // --- STEP 3: Optional AI analysis (pre-filtered + rate-limited) ---
-          let aiAnalysis;
-          const shouldRunAI = passesAIPrefilter(metadata, websiteUrl) && aiCallCount < MAX_AI_CALLS_PER_CYCLE;
-
-          if (shouldRunAI) {
-            aiAnalysis = await runOpenRouterAnalysis({
-              token,
-              metadata,
-              website,
-            });
-            aiCallCount++;
-          } else {
-            if (!passesAIPrefilter(metadata, websiteUrl)) {
-              logger.debug(`[AnalyzeNode] Skipping AI for ${token.symbol}: failed pre-filter`);
-            } else {
-              logger.debug(`[AnalyzeNode] Skipping AI for ${token.symbol}: rate limit reached (${aiCallCount}/${MAX_AI_CALLS_PER_CYCLE})`);
-            }
-            aiAnalysis = getWebsiteFallback(website, metadata);
-          }
-
-          // --- STEP 4: Build TokenAnalysis ---
-          return {
-            id: uuidv4(),
-            token,
-            metadata,
-            // Security checks intentionally disabled for this flow.
-            security: {
-              mintAuthority: null,
-              freezeAuthority: null,
-              decimals: 0,
-              supply: 0n,
-              isMintable: false,
-              isFreezable: false,
-              metadataHash: '',
-              riskLevel: 'LOW',
-            },
-            website,
-            social: {
-              twitter: {
-                exists: false,
-                followerCount: 0,
-                tweetCount: 0,
-                bio: '',
-                verified: false,
-                sentimentScore: 0,
-              },
-              telegram: {
-                exists: false,
-                memberCount: 0,
-                isChannel: false,
-                description: '',
-              },
-              discord: {
-                exists: false,
-                memberCount: 0,
-                inviteActive: false,
-              },
-              overallPresenceScore: 0,
-              glmAnalysis: '',
-            },
-            websiteScore: website.contentQuality || 0,
-            socialScore: 0,
-            securityScore: 0,
-            overallScore: 0, // Will be calculated in score node
-            rationale: aiAnalysis.rationale,
-            redFlags: aiAnalysis.redFlags,
-            greenFlags: aiAnalysis.greenFlags,
-            recommendation: aiAnalysis.recommendation,
-            analyzedAt: new Date(),
-            cycleId: state.cycleId,
-            errors: [],
-            onChainData: onChainData,
-          } as TokenAnalysis;
+          return { token, metadata, onChainData, website, websiteUrl };
         } catch (error) {
-          logger.debug(`[AnalyzeNode] Failed to analyze ${token.symbol}: ${error}`);
+          logger.debug(`[AnalyzeNode] Pre-processing failed for ${token.symbol}: ${error}`);
           return null;
         }
       })
     );
 
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        analyzedTokens.push(result.value);
+    for (const result of batchResults) {
+      preprocessResults.push(result.status === 'fulfilled' ? result.value : null);
+    }
+  }
+
+  // PHASE 2: Run AI analysis SERIALLY with inter-call delay to prevent GLM 429s
+  for (const preprocessed of preprocessResults) {
+    if (!preprocessed) continue;
+
+    const { token, metadata, onChainData, website, websiteUrl } = preprocessed;
+
+    try {
+      // Optional AI analysis (pre-filtered + rate-limited)
+      let aiAnalysis;
+      const shouldRunAI = passesAIPrefilter(metadata, websiteUrl) && aiCallCount < MAX_AI_CALLS_PER_CYCLE;
+
+      if (shouldRunAI) {
+        // Add inter-call delay to prevent rate limiting (except for first call)
+        if (aiCallCount > 0) {
+          await new Promise(r => setTimeout(r, AI_INTER_CALL_DELAY_MS));
+        }
+        aiAnalysis = await runOpenRouterAnalysis({
+          token,
+          metadata,
+          website,
+        });
+        aiCallCount++;
+      } else {
+        if (!passesAIPrefilter(metadata, websiteUrl)) {
+          logger.debug(`[AnalyzeNode] Skipping AI for ${token.symbol}: failed pre-filter`);
+        } else {
+          logger.debug(`[AnalyzeNode] Skipping AI for ${token.symbol}: rate limit reached (${aiCallCount}/${MAX_AI_CALLS_PER_CYCLE})`);
+        }
+        aiAnalysis = getWebsiteFallback(website, metadata);
       }
+
+      // Build TokenAnalysis
+      analyzedTokens.push({
+        id: uuidv4(),
+        token,
+        metadata,
+        security: {
+          mintAuthority: null,
+          freezeAuthority: null,
+          decimals: 0,
+          supply: 0n,
+          isMintable: false,
+          isFreezable: false,
+          metadataHash: '',
+          riskLevel: 'LOW',
+        },
+        website,
+        social: {
+          twitter: { exists: false, followerCount: 0, tweetCount: 0, bio: '', verified: false, sentimentScore: 0 },
+          telegram: { exists: false, memberCount: 0, isChannel: false, description: '' },
+          discord: { exists: false, memberCount: 0, inviteActive: false },
+          overallPresenceScore: 0,
+          glmAnalysis: '',
+        },
+        websiteScore: website.contentQuality || 0,
+        socialScore: 0,
+        securityScore: 0,
+        overallScore: 0,
+        rationale: aiAnalysis.rationale,
+        redFlags: aiAnalysis.redFlags,
+        greenFlags: aiAnalysis.greenFlags,
+        recommendation: aiAnalysis.recommendation,
+        analyzedAt: new Date(),
+        cycleId: state.cycleId,
+        errors: [],
+        onChainData: onChainData,
+      } as TokenAnalysis);
+    } catch (error) {
+      logger.debug(`[AnalyzeNode] Failed to analyze ${token.symbol}: ${error}`);
     }
   }
 

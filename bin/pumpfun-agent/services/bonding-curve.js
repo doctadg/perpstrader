@@ -400,9 +400,35 @@ class BondingCurveService {
         const holdTimeMinutes = (Date.now() - position.buyTimestamp.getTime()) / 60000;
         const pnlPct = position.solSpent > 0 ? ((exitSol - position.solSpent) / position.solSpent) * 100 : 0;
         const tpLevelsHit = position.partialSells.map(p => p.tpLevel);
-        this.persistSellToDb(tokenMint, position.tokenSymbol, position.tokensOwned, solToReceive, 'STOP_LOSS', totalPnl, entryScore, currentPriceMultiplier).catch(() => { });
+        // Determine outcome based on reason and PnL
+        let outcome;
+        let sellType;
+        const hasHitTpLevels = tpLevelsHit.length > 0;
+        if (reason === 'TAKE_PROFIT') {
+            outcome = 'PROFIT_TP';
+            sellType = 'TAKE_PROFIT';
+        }
+        else if (pnlPct > 0) {
+            // Positive PnL = profit, regardless of exit reason
+            outcome = 'PROFIT_' + reason;
+            sellType = reason;
+        }
+        else if (hasHitTpLevels) {
+            // Hit TP levels but final exit at loss = still counted as profit cycle
+            outcome = 'PROFIT_PARTIAL';
+            sellType = reason;
+        }
+        else if (reason === 'TIME_EXIT' || reason === 'STALE_EXIT') {
+            outcome = reason;
+            sellType = reason;
+        }
+        else {
+            outcome = 'LOSS_STOP';
+            sellType = 'STOP_LOSS';
+        }
+        this.persistSellToDb(tokenMint, position.tokenSymbol, position.tokensOwned, solToReceive, sellType, totalPnl, entryScore, currentPriceMultiplier).catch(() => { });
         this.persistPositionUpdate(tokenMint, position, 'CLOSED', positionMaxMultiplier, currentPriceMultiplier, entryScore).catch(() => { });
-        this.persistOutcomeToDb(tokenMint, position.tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, 'LOSS_STOP', holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => { });
+        this.persistOutcomeToDb(tokenMint, position.tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, outcome, holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => { });
         // Clean up tracking maps
         this.entryScores.delete(tokenMint);
         this.maxMultipliers.delete(tokenMint);

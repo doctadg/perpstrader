@@ -894,6 +894,10 @@ class CircuitBreakerSystem {
         this.registerBreaker('market-monitor', { threshold: 5, timeout: 30000, critical: false });
         this.registerBreaker('apr-calculator', { threshold: 5, timeout: 30000, critical: false });
         this.registerBreaker('ai-analysis', { threshold: 4, timeout: 60000, critical: false });
+        // News pipeline cleanup node
+        this.registerBreaker('cleanup', { threshold: 5, timeout: 30000, critical: false });
+        // Safekeeping fund nodes
+        this.registerBreaker('rebalance-planner', { threshold: 4, timeout: 60000, critical: false });
     }
     /**
      * Register a new circuit breaker
