@@ -5,9 +5,9 @@
 
 import logger from './logger';
 
-// Reduced from 15s to 3s — the old value was far too conservative and caused
-// all API consumers to queue up, starving the prediction agent.
-const MIN_INTERVAL_MS = 3000; // 3 seconds between API calls
+// GLM free tier has strict rate limits. 5s interval provides breathing room
+// while still allowing ~720 calls/hour which is sufficient for all agents.
+const MIN_INTERVAL_MS = 5000; // 5 seconds between API calls
 
 // When a real 429 is received, we ramp up the interval adaptively.
 const BACKOFF_MULTIPLIER = 2.0;
