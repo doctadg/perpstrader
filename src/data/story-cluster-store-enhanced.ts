@@ -960,10 +960,10 @@ class StoryClusterStoreEnhanced {
         if (!this.db) return null;
 
         try {
-            // Primary: exact match
+            // Primary: exact match — FIX 15: exclude monster clusters
             const row = this.db.prepare(`
                 SELECT id FROM story_clusters
-                WHERE topic_key = ?
+                WHERE topic_key = ? AND article_count < 500
                 ORDER BY updated_at DESC
                 LIMIT 1
             `).get(topicKey) as { id: string } | undefined;
@@ -979,7 +979,7 @@ class StoryClusterStoreEnhanced {
             if (prefix.length >= 20) {
                 const fallbackRow = this.db.prepare(`
                     SELECT id FROM story_clusters
-                    WHERE topic_key LIKE ? || '%'
+                    WHERE topic_key LIKE ? || '%' AND article_count < 500
                     ORDER BY updated_at DESC
                     LIMIT 1
                 `).get(prefix) as { id: string } | undefined;
@@ -1106,6 +1106,7 @@ class StoryClusterStoreEnhanced {
 
     /**
      * Add article to cluster
+     * FIX 15: Size cap enforced at store level — no code path can bypass this
      */
     async addArticleToCluster(
         clusterId: string,
@@ -1118,6 +1119,14 @@ class StoryClusterStoreEnhanced {
         if (!this.db) return { added: false };
 
         try {
+            // FIX 15: Hard size cap — check BEFORE adding anything
+            const MAX_CLUSTER_ARTICLES = 500;
+            const cluster = this.db.prepare(`SELECT article_count FROM story_clusters WHERE id = ?`).get(clusterId) as any;
+            if (cluster && cluster.article_count >= MAX_CLUSTER_ARTICLES) {
+                logger.warn(`[StoryClusterStoreEnhanced] BLOCKED addArticleToCluster: cluster ${clusterId.slice(0, 8)} at capacity (${cluster.article_count}/${MAX_CLUSTER_ARTICLES})`);
+                return { added: false };
+            }
+
             const now = new Date().toISOString();
 
             // Insert cluster article link
@@ -1146,12 +1155,21 @@ class StoryClusterStoreEnhanced {
 
     /**
      * Merge clusters
+     * FIX 15: Size cap enforced at store level
      */
     async mergeClusters(targetId: string, sourceId: string): Promise<{ moved: number }> {
         await this.initialize();
         if (!this.db) return { moved: 0 };
 
         try {
+            // FIX 15: Hard size cap — check BEFORE merging
+            const MAX_CLUSTER_ARTICLES = 500;
+            const target = this.db.prepare(`SELECT article_count FROM story_clusters WHERE id = ?`).get(targetId) as any;
+            const source = this.db.prepare(`SELECT article_count FROM story_clusters WHERE id = ?`).get(sourceId) as any;
+            if (target && source && target.article_count + source.article_count > MAX_CLUSTER_ARTICLES) {
+                logger.warn(`[StoryClusterStoreEnhanced] BLOCKED mergeClusters: target ${targetId.slice(0, 8)} would exceed capacity (${target.article_count}+${source.article_count}>${MAX_CLUSTER_ARTICLES})`);
+                return { moved: 0 };
+            }
             // Move articles from source to target
             const result = this.db.prepare(`
                 UPDATE cluster_articles
@@ -1274,11 +1292,14 @@ class StoryClusterStoreEnhanced {
             const normalized = entityNames.map(e => e.toLowerCase());
             const placeholders = normalized.map(() => '?').join(',');
 
+            // FIX 15: Exclude monster clusters (article_count > 500) from entity matching
             const rows = this.db.prepare(`
                 SELECT DISTINCT ecl.cluster_id, ne.normalized_name
                 FROM entity_cluster_links ecl
                 JOIN named_entities ne ON ecl.entity_id = ne.id
+                JOIN story_clusters sc ON ecl.cluster_id = sc.id
                 WHERE ne.normalized_name IN (${placeholders})
+                AND sc.article_count < 500
             `).all(...normalized) as Array<{ cluster_id: string; normalized_name: string }>;
 
             const result = new Map<string, Set<string>>();

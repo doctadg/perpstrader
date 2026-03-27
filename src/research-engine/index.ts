@@ -431,6 +431,17 @@ export class ResearchEngine {
         }
 
         // --- Phase 2: Diversity enforcement ---
+        // Block options-only strategies from promotion (Hyperliquid is perps-only)
+        const optionsIndicators = ['IV Rank', 'IV (Implied Volatility)', 'Delta', 'Gamma', 'Vega', 'Theta', 'Time Decay', 'HV (Historical Volatility)'];
+        const isOptionsStrategy = (strategy: any) => {
+          const params = typeof strategy.parameters === 'string' ? strategy.parameters : '';
+          const conditions = typeof strategy.entry_conditions === 'string' ? strategy.entry_conditions : '';
+          const combined = `${params} ${conditions}`.toLowerCase();
+          const optionsKeywords = ['straddle', 'strangle', 'iron condor', 'butterfly', 'short put', 'short call', 'long put', 'long call', 'delta neutral', 'gamma scalp'];
+          return optionsIndicators.some(ind => combined.includes(ind.toLowerCase())) ||
+                 optionsKeywords.some(kw => combined.includes(kw));
+        };
+
         // Ensure at least TREND_FOLLOWING is represented among active strategies
         const activeTypes = (db.prepare(
           'SELECT DISTINCT type FROM strategies WHERE isActive = 1'
@@ -458,6 +469,10 @@ export class ResearchEngine {
           `).get() as any;
 
           if (bestTrend) {
+            // Skip options-only strategies (can't execute on perps exchange)
+            if (isOptionsStrategy(bestTrend)) {
+              logger.warn('[ResearchEngine] Diversity fix: skipping options strategy (perps-only exchange)');
+            } else {
             // Check if it already exists in strategies table
             const trendHash = crypto
               .createHash('sha256')
@@ -474,6 +489,7 @@ export class ResearchEngine {
                 WHERE id = ?
               `).run(
                 JSON.stringify({
+                  source: 'backtest',
                   totalTrades: bestTrend.total_trades,
                   winRate: bestTrend.win_rate * 100,
                   totalPnL: bestTrend.pnl,
@@ -506,6 +522,7 @@ export class ResearchEngine {
                 bestTrend.exit_conditions,
                 bestTrend.risk_parameters,
                 JSON.stringify({
+                  source: 'backtest',
                   totalTrades: bestTrend.total_trades,
                   winRate: bestTrend.win_rate * 100,
                   totalPnL: bestTrend.pnl,
@@ -519,6 +536,7 @@ export class ResearchEngine {
               );
               logger.info(`[ResearchEngine] Diversity fix: promoted TREND_FOLLOWING "${bestTrend.name}" (sharpe: ${bestTrend.sharpe.toFixed(2)})`);
             }
+            } // end isOptionsStrategy check
           } else {
             logger.warn('[ResearchEngine] Diversity fix: no suitable TREND_FOLLOWING found (sharpe > 0, max_drawdown <= 3%)');
           }
@@ -556,6 +574,12 @@ export class ResearchEngine {
 
             if (!bestOfType) continue;
 
+            // Skip options-only strategies (can't execute on perps exchange)
+            if (isOptionsStrategy(bestOfType)) {
+              logger.warn(`[ResearchEngine] Diversity fix: skipping options strategy "${bestOfType.name}" (perps-only exchange)`);
+              continue;
+            }
+
             const typeHash = crypto
               .createHash('sha256')
               .update(`${bestOfType.name}|${bestOfType.parameters}`)
@@ -571,6 +595,7 @@ export class ResearchEngine {
                 WHERE id = ?
               `).run(
                 JSON.stringify({
+                  source: 'backtest',
                   totalTrades: bestOfType.total_trades,
                   winRate: bestOfType.win_rate * 100,
                   totalPnL: bestOfType.pnl,
@@ -603,6 +628,7 @@ export class ResearchEngine {
                 bestOfType.exit_conditions,
                 bestOfType.risk_parameters,
                 JSON.stringify({
+                  source: 'backtest',
                   totalTrades: bestOfType.total_trades,
                   winRate: bestOfType.win_rate * 100,
                   totalPnL: bestOfType.pnl,
