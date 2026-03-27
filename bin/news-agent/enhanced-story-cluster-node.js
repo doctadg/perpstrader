@@ -669,36 +669,30 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
     return { clusterId: finalClusterId, created, assigned: !created, semanticMatch };
 }
 /**
- * Create cross-category links between clusters
+ * PHASE 4: Create cross-category links between clusters that share entities
+ * but live in different categories (e.g., "Bitcoin" in CRYPTO + "Fed rate" in ECONOMICS).
+ * Uses entity_cluster_links table directly instead of topic_key lookup (which was broken).
  */
-async function createCrossCategoryLinks(processedArticles) {
-    const entityClusterMap = new Map();
-    // Map entities to their clusters
-    for (const { article, entities } of processedArticles) {
-        for (const entity of entities) {
-            const clusterId = await story_cluster_store_enhanced_1.default.getClusterIdByTopicKey(entity.normalized);
-            if (clusterId) {
-                if (!entityClusterMap.has(entity.normalized)) {
-                    entityClusterMap.set(entity.normalized, new Set());
-                }
-                entityClusterMap.get(entity.normalized).add(clusterId);
-            }
+async function createCrossCategoryLinks(_processedArticles) {
+    try {
+        // Find cluster pairs that share entities across category boundaries
+        const pairs = await story_cluster_store_enhanced_1.default.getCrossCategoryEntityPairs(CLUSTER_MERGE_HOURS_THRESHOLD);
+        if (pairs.length === 0) {
+            logger_1.default.info('[EnhancedClusterNode] PHASE 4: No cross-category entity bridges found');
+            return;
         }
-    }
-    // Create cross-refs for entities with multiple clusters
-    let crossRefCount = 0;
-    for (const [entityName, clusterIds] of entityClusterMap) {
-        if (clusterIds.size > 1) {
-            const clusterArray = Array.from(clusterIds);
-            for (let i = 0; i < clusterArray.length; i++) {
-                for (let j = i + 1; j < clusterArray.length; j++) {
-                    await story_cluster_store_enhanced_1.default.createCrossRef(clusterArray[i], clusterArray[j], 'RELATED', 0.6);
-                    crossRefCount++;
-                }
-            }
+        let crossRefCount = 0;
+        for (const pair of pairs) {
+            // Higher confidence for pairs sharing multiple entities
+            const confidence = Math.min(0.9, 0.5 + pair.sharedEntityCount * 0.1);
+            await story_cluster_store_enhanced_1.default.createCrossRef(pair.sourceClusterId, pair.targetClusterId, 'RELATED', confidence);
+            crossRefCount++;
         }
+        logger_1.default.info(`[EnhancedClusterNode] Created ${crossRefCount} cross-category entity links`);
     }
-    logger_1.default.info(`[EnhancedClusterNode] Created ${crossRefCount} cross-category entity links`);
+    catch (error) {
+        logger_1.default.error('[EnhancedClusterNode] PHASE 4 cross-category linking failed:', error);
+    }
 }
 /**
  * Enhanced cluster merging with entity similarity
@@ -981,18 +975,24 @@ function isEntityRelevantToCluster(entityName, normalizedEntity, clusterTopic, c
     return false;
 }
 function extractEntitiesFromTopicAndKeywords(topic, keywords) {
-    const text = `${topic} ${(keywords || []).join(' ')}`.toLowerCase();
     const entities = [];
-    // Match known crypto tokens, protocols, orgs — 2+ chars, alphanumeric
-    const tokenPattern = /\b([a-z]{2,}(?:coin|swap|dex|fi|token|chain|net|ai|dao)|btc|eth|sol|bnb|xrp|ada|doge|shib|pepe|pepeto|avax|matic|dot|link|uni|aave|crv|ldo|op|arb|ftm|avax|near|apt|sui|sei|ton|trx|xlm|algo|atom|egld|ftm|inj|tia|jup|pendle|ondo|render|worldcoin|wld|hlord|trump|maga)\b/gi;
-    const orgPattern = /\b((?:jpmorgan|goldman|morgan stanley|blackrock|fidelity|binance|coinbase|kraken|openai|google|meta|apple|microsoft|amazon|nvidia|tesla|fed|sec|cftc|imf|world bank|ecb|boj|pboc|trump administration|white house|congress|senate|supreme court|venice biennale|telesat))\b/gi;
-    const knownTokens = new Set(['bitcoin', 'ethereum', 'solana', 'cardano', 'polkadot', 'avalanche', 'polygon', 'chainlink', 'uniswap', 'aave', 'curve', 'arbitrum', 'optimism', 'fantom', 'near', 'aptos', 'sui', 'sei', 'ton', 'tron', 'stellar', 'algorand', 'cosmos', 'injective', 'celestia', 'jupiter', 'pepeto', 'pepe', 'dogecoin', 'shiba inu', 'xrp', 'bnb', 'ada', 'trx', 'xlm', 'algo', 'atom', 'ftm', 'op', 'arb', 'matic', 'dot', 'link', 'uni', 'crv', 'ldo', 'tvl']);
+    // Match known organizations, institutions, and economic entities
+    const orgPattern = /\b((?:jpmorgan|goldman|morgan stanley|blackrock|fidelity|binance|coinbase|kraken|openai|google|meta|apple|microsoft|amazon|nvidia|tesla|federal reserve|fed|sec|cftc|imf|world bank|ecb|boj|pboc|trump administration|white house|congress|senate|supreme court|opec|china|russia|iran|ukraine|israel|treasury|dollar|eu|europe))\b/gi;
+    const orgMatches = topic.match(orgPattern);
+    if (orgMatches) {
+        for (const m of orgMatches)
+            entities.push(m.toLowerCase());
+    }
+    // Match known commodities and precious metals
+    const commodityPattern = /\b((?:gold|silver|copper|platinum|palladium|oil|crude|natural gas|uranium|lithium|cobalt|nickel))\b/gi;
+    const commodityMatches = topic.match(commodityPattern);
+    if (commodityMatches) {
+        for (const m of commodityMatches)
+            entities.push(m.toLowerCase());
+    }
     // Extract proper nouns from topic (capitalized words, 2+ chars)
-    // FIX: Use non-greedy single-word match — previous regex matched entire phrases like
-    // "Pepeto Updates Defi Exchange Bridge Solving Ethereum Blockchain" as one entity
-    // Now extracts individual entities: "Pepeto", "Ethereum", "Bitcoin" separately
     const properNouns = topic.match(/\b[A-Z][a-z]{2,}\b/g) || [];
-    const stopwords = new Set(['this', 'that', 'with', 'from', 'after', 'while', 'when', 'where', 'what', 'which', 'their', 'there', 'they', 'these', 'those', 'than', 'into', 'over', 'under', 'before', 'about', 'between', 'during', 'without', 'within', 'through', 'against', 'first', 'last', 'next', 'best', 'worst', 'some', 'many', 'much', 'more', 'most', 'less', 'very', 'just', 'also', 'even', 'still', 'only', 'then', 'each', 'every', 'both', 'other', 'such', 'being', 'have', 'will', 'would', 'could', 'should', 'might', 'shall', 'can', 'need', 'must', 'news', 'crypto', 'update', 'updates', 'new', 'latest', 'daily', 'weekly']);
+    const stopwords = new Set(['this', 'that', 'with', 'from', 'after', 'while', 'when', 'where', 'what', 'which', 'their', 'there', 'they', 'these', 'those', 'than', 'into', 'over', 'under', 'before', 'about', 'between', 'during', 'without', 'within', 'through', 'against', 'first', 'last', 'next', 'best', 'worst', 'some', 'many', 'much', 'more', 'most', 'less', 'very', 'just', 'also', 'even', 'still', 'only', 'then', 'each', 'every', 'both', 'other', 'such', 'being', 'have', 'will', 'would', 'could', 'should', 'might', 'shall', 'can', 'need', 'must', 'news', 'crypto', 'update', 'updates', 'new', 'latest', 'daily', 'weekly', 'what', ' analysts', ' experts']);
     for (const pn of properNouns) {
         const lower = pn.toLowerCase();
         if (!stopwords.has(lower)) {

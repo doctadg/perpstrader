@@ -711,6 +711,73 @@ class StoryClusterStoreEnhanced {
         }
     }
 
+    /**
+     * Get cluster pairs that share entities but live in different categories.
+     * Used by PHASE 4 cross-category linking. Returns unique pairs where
+     * an entity bridges two clusters across category boundaries.
+     */
+    async getCrossCategoryEntityPairs(sinceHours: number = 24): Promise<Array<{
+        sourceClusterId: string;
+        targetClusterId: string;
+        entityName: string;
+        sharedEntityCount: number;
+    }>> {
+        await this.initialize();
+        if (!this.db) return [];
+
+        try {
+            const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString();
+
+            // Find entities that link to clusters in DIFFERENT categories
+            const rows = this.db.prepare(`
+                SELECT
+                    e1.cluster_id AS source_cluster_id,
+                    e2.cluster_id AS target_cluster_id,
+                    ne.entity_name,
+                    COUNT(*) OVER (PARTITION BY ne.id) AS pair_count
+                FROM entity_cluster_links e1
+                JOIN entity_cluster_links e2 ON e1.entity_id = e2.entity_id AND e1.cluster_id < e2.cluster_id
+                JOIN named_entities ne ON ne.id = e1.entity_id
+                JOIN story_clusters sc1 ON sc1.id = e1.cluster_id
+                JOIN story_clusters sc2 ON sc2.id = e2.cluster_id
+                WHERE sc1.category != sc2.category
+                  AND sc1.article_count >= 2
+                  AND sc2.article_count >= 2
+                  AND sc1.updated_at > ?
+                  AND sc2.updated_at > ?
+                ORDER BY pair_count DESC
+                LIMIT 200
+            `).all(since, since) as any[];
+
+            // Deduplicate by cluster pair, keep entity name
+            const seen = new Set<string>();
+            const results: Array<{
+                sourceClusterId: string;
+                targetClusterId: string;
+                entityName: string;
+                sharedEntityCount: number;
+            }> = [];
+
+            for (const row of rows) {
+                const key = `${row.source_cluster_id}|${row.target_cluster_id}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    results.push({
+                        sourceClusterId: row.source_cluster_id,
+                        targetClusterId: row.target_cluster_id,
+                        entityName: row.entity_name,
+                        sharedEntityCount: row.pair_count || 1,
+                    });
+                }
+            }
+
+            return results;
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to get cross-category entity pairs:', error);
+            return [];
+        }
+    }
+
     // ============================================================
     // ENHANCEMENT 3: Multi-dimensional Ranking
     // ============================================================

@@ -384,6 +384,16 @@ class ResearchEngine {
                     }
                 }
                 // --- Phase 2: Diversity enforcement ---
+                // Block options-only strategies from promotion (Hyperliquid is perps-only)
+                const optionsIndicators = ['IV Rank', 'IV (Implied Volatility)', 'Delta', 'Gamma', 'Vega', 'Theta', 'Time Decay', 'HV (Historical Volatility)'];
+                const isOptionsStrategy = (strategy) => {
+                    const params = typeof strategy.parameters === 'string' ? strategy.parameters : '';
+                    const conditions = typeof strategy.entry_conditions === 'string' ? strategy.entry_conditions : '';
+                    const combined = `${params} ${conditions}`.toLowerCase();
+                    const optionsKeywords = ['straddle', 'strangle', 'iron condor', 'butterfly', 'short put', 'short call', 'long put', 'long call', 'delta neutral', 'gamma scalp'];
+                    return optionsIndicators.some(ind => combined.includes(ind.toLowerCase())) ||
+                        optionsKeywords.some(kw => combined.includes(kw));
+                };
                 // Ensure at least TREND_FOLLOWING is represented among active strategies
                 const activeTypes = db.prepare('SELECT DISTINCT type FROM strategies WHERE isActive = 1').all().map((r) => r.type);
                 const activeTypeSet = new Set(activeTypes);
@@ -406,45 +416,53 @@ class ResearchEngine {
             LIMIT 1
           `).get();
                     if (bestTrend) {
-                        // Check if it already exists in strategies table
-                        const trendHash = crypto
-                            .createHash('sha256')
-                            .update(`${bestTrend.name}|${bestTrend.parameters}`)
-                            .digest('hex');
-                        const existingTrend = db.prepare('SELECT id FROM strategies WHERE params_hash = ?').get(trendHash);
-                        if (existingTrend) {
-                            db.prepare(`
+                        // Skip options-only strategies (can't execute on perps exchange)
+                        if (isOptionsStrategy(bestTrend)) {
+                            logger_1.default.warn('[ResearchEngine] Diversity fix: skipping options strategy (perps-only exchange)');
+                        }
+                        else {
+                            // Check if it already exists in strategies table
+                            const trendHash = crypto
+                                .createHash('sha256')
+                                .update(`${bestTrend.name}|${bestTrend.parameters}`)
+                                .digest('hex');
+                            const existingTrend = db.prepare('SELECT id FROM strategies WHERE params_hash = ?').get(trendHash);
+                            if (existingTrend) {
+                                db.prepare(`
                 UPDATE strategies SET isActive = 1, performance = ?, updatedAt = ?
                 WHERE id = ?
               `).run(JSON.stringify({
-                                totalTrades: bestTrend.total_trades,
-                                winRate: bestTrend.win_rate * 100,
-                                totalPnL: bestTrend.pnl,
-                                sharpeRatio: bestTrend.sharpe,
-                                maxDrawdown: bestTrend.max_drawdown,
-                                profitFactor: bestTrend.profit_factor,
-                            }), new Date().toISOString(), existingTrend.id);
-                            logger_1.default.info(`[ResearchEngine] Diversity fix: reactivated TREND_FOLLOWING "${bestTrend.name}" (sharpe: ${bestTrend.sharpe.toFixed(2)})`);
-                        }
-                        else {
-                            const strategyId = uuidv4();
-                            const now = new Date().toISOString();
-                            db.prepare(`
+                                    source: 'backtest',
+                                    totalTrades: bestTrend.total_trades,
+                                    winRate: bestTrend.win_rate * 100,
+                                    totalPnL: bestTrend.pnl,
+                                    sharpeRatio: bestTrend.sharpe,
+                                    maxDrawdown: bestTrend.max_drawdown,
+                                    profitFactor: bestTrend.profit_factor,
+                                }), new Date().toISOString(), existingTrend.id);
+                                logger_1.default.info(`[ResearchEngine] Diversity fix: reactivated TREND_FOLLOWING "${bestTrend.name}" (sharpe: ${bestTrend.sharpe.toFixed(2)})`);
+                            }
+                            else {
+                                const strategyId = uuidv4();
+                                const now = new Date().toISOString();
+                                db.prepare(`
                 INSERT INTO strategies (
                   id, name, description, type, symbols, timeframe, parameters,
                   entryConditions, exitConditions, riskParameters, isActive,
                   performance, params_hash, createdAt, updatedAt
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
               `).run(strategyId, bestTrend.name, `Diversity promotion: TREND_FOLLOWING. Sharpe: ${bestTrend.sharpe.toFixed(2)}`, bestTrend.type, bestTrend.symbols, bestTrend.timeframe, bestTrend.parameters, bestTrend.entry_conditions, bestTrend.exit_conditions, bestTrend.risk_parameters, JSON.stringify({
-                                totalTrades: bestTrend.total_trades,
-                                winRate: bestTrend.win_rate * 100,
-                                totalPnL: bestTrend.pnl,
-                                sharpeRatio: bestTrend.sharpe,
-                                maxDrawdown: bestTrend.max_drawdown,
-                                profitFactor: bestTrend.profit_factor,
-                            }), trendHash, now, now);
-                            logger_1.default.info(`[ResearchEngine] Diversity fix: promoted TREND_FOLLOWING "${bestTrend.name}" (sharpe: ${bestTrend.sharpe.toFixed(2)})`);
-                        }
+                                    source: 'backtest',
+                                    totalTrades: bestTrend.total_trades,
+                                    winRate: bestTrend.win_rate * 100,
+                                    totalPnL: bestTrend.pnl,
+                                    sharpeRatio: bestTrend.sharpe,
+                                    maxDrawdown: bestTrend.max_drawdown,
+                                    profitFactor: bestTrend.profit_factor,
+                                }), trendHash, now, now);
+                                logger_1.default.info(`[ResearchEngine] Diversity fix: promoted TREND_FOLLOWING "${bestTrend.name}" (sharpe: ${bestTrend.sharpe.toFixed(2)})`);
+                            }
+                        } // end isOptionsStrategy check
                     }
                     else {
                         logger_1.default.warn('[ResearchEngine] Diversity fix: no suitable TREND_FOLLOWING found (sharpe > 0, max_drawdown <= 3%)');
@@ -477,6 +495,11 @@ class ResearchEngine {
             `).get(missingType);
                         if (!bestOfType)
                             continue;
+                        // Skip options-only strategies (can't execute on perps exchange)
+                        if (isOptionsStrategy(bestOfType)) {
+                            logger_1.default.warn(`[ResearchEngine] Diversity fix: skipping options strategy "${bestOfType.name}" (perps-only exchange)`);
+                            continue;
+                        }
                         const typeHash = crypto
                             .createHash('sha256')
                             .update(`${bestOfType.name}|${bestOfType.parameters}`)
@@ -487,6 +510,7 @@ class ResearchEngine {
                 UPDATE strategies SET isActive = 1, performance = ?, updatedAt = ?
                 WHERE id = ?
               `).run(JSON.stringify({
+                                source: 'backtest',
                                 totalTrades: bestOfType.total_trades,
                                 winRate: bestOfType.win_rate * 100,
                                 totalPnL: bestOfType.pnl,
@@ -506,6 +530,7 @@ class ResearchEngine {
                   performance, params_hash, createdAt, updatedAt
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
               `).run(strategyId, bestOfType.name, `Diversity promotion: ${missingType}. Sharpe: ${bestOfType.sharpe.toFixed(2)}`, bestOfType.type, bestOfType.symbols, bestOfType.timeframe, bestOfType.parameters, bestOfType.entry_conditions, bestOfType.exit_conditions, bestOfType.risk_parameters, JSON.stringify({
+                                source: 'backtest',
                                 totalTrades: bestOfType.total_trades,
                                 winRate: bestOfType.win_rate * 100,
                                 totalPnL: bestOfType.pnl,
