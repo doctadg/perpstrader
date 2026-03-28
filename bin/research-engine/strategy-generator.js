@@ -114,7 +114,33 @@ Return valid JSON only:
                 logger_1.default.warn('[StrategyGenerator] Could not find JSON in GLM response');
                 return [];
             }
-            const parsed = JSON.parse(jsonMatch[0]);
+            let parsed;
+            try {
+                parsed = JSON.parse(jsonMatch[0]);
+            }
+            catch {
+                // Attempt partial repair: truncate at the last complete strategy object
+                logger_1.default.warn('[StrategyGenerator] Malformed JSON from GLM, attempting repair');
+                const repaired = jsonMatch[0].replace(/,\s*([}\]])\s*$/g, '$1'); // trailing commas
+                try {
+                    parsed = JSON.parse(repaired);
+                }
+                catch {
+                    // Last resort: extract individual strategy objects and parse them
+                    const strategyObjects = jsonMatch[0].match(/\{[^{}]*"name"[^{}]*\}/g) || [];
+                    if (strategyObjects.length > 0) {
+                        parsed = { strategies: strategyObjects.map(s => { try {
+                                return JSON.parse(s);
+                            }
+                            catch {
+                                return null;
+                            } }).filter(Boolean) };
+                    }
+                    else {
+                        return [];
+                    }
+                }
+            }
             const strategies = [];
             for (const s of parsed.strategies || []) {
                 const strategy = {
