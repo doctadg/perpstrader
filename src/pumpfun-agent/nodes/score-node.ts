@@ -21,12 +21,12 @@ interface ScoringWeights {
 }
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
-  social: 0.38,       // +0.05 — strongest discriminator, 0.70+ trades earn +19.5pp PnL
-  freshness: 0.22,    // stable — early entry signal, no change needed
-  websiteQuality: 0.06, // -0.05 — weakest signal, trimmed to boost stronger factors
-  aiAnalysis: 0.22,   // +0.04 — LLM pushes mid→high score range, big PnL delta
-  tokenQuality: 0.12, // -0.04 — compensate, lower priority than social/ai
-  redFlagPenalty: 0.10, // unchanged — zero rugs already
+  social: 0.35,       // -0.03 — was over-inflating scores to 0.75+ where WR drops to 85%
+  freshness: 0.20,    // -0.02 — stable early entry signal, slight trim for rebalance
+  websiteQuality: 0.05, // -0.01 — weakest signal, minor trim
+  aiAnalysis: 0.25,   // +0.03 — strongest differentiator for real pumps vs dead tokens
+  tokenQuality: 0.15, // +0.03 — better filtering of false positives (TIME_EXIT dead tokens)
+  redFlagPenalty: 0.10, // unchanged — zero rugs, no change needed
 };
 
 const DEFAULT_MIN_SCORE = 0.35;

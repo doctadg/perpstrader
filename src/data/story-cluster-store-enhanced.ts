@@ -75,6 +75,11 @@ class StoryClusterStoreEnhanced {
             // Run migration if needed
             await this.ensureEnhancedSchema();
 
+            // Backfill entity_cluster_links for clusters missing them (runs async, non-blocking)
+            this.backfillEntityClusterLinks().catch(err =>
+                logger.warn('[StoryClusterStoreEnhanced] Entity backfill failed (non-fatal):', err)
+            );
+
             this.initialized = true;
             logger.info('[StoryClusterStoreEnhanced] Initialized successfully');
         } catch (error) {
@@ -105,6 +110,45 @@ class StoryClusterStoreEnhanced {
 
         // Ensure all new columns exist
         this.ensureEnhancedColumns();
+    }
+
+    /**
+     * Backfill entity_cluster_links for clusters that don't have any.
+     * Matches named_entities to cluster topics via LIKE (case-insensitive).
+     * Only uses entities with 5+ occurrences and name length 3-40 chars to avoid noise.
+     * Runs on every startup; INSERT OR IGNORE makes it idempotent.
+     */
+    private async backfillEntityClusterLinks(): Promise<void> {
+        if (!this.db) return;
+
+        try {
+            const clustersWithoutLinks = this.db.prepare(`
+                SELECT COUNT(*) as cnt FROM story_clusters sc
+                WHERE sc.id NOT IN (SELECT DISTINCT cluster_id FROM entity_cluster_links)
+            `).get() as { cnt: number };
+
+            if (!clustersWithoutLinks || clustersWithoutLinks.cnt === 0) {
+                return; // Nothing to backfill
+            }
+
+            logger.info(`[StoryClusterStoreEnhanced] Backfilling entity_cluster_links for ${clustersWithoutLinks.cnt} clusters...`);
+
+            const result = this.db.prepare(`
+                INSERT OR IGNORE INTO entity_cluster_links (entity_id, cluster_id, article_count, heat_contribution, first_linked, last_linked)
+                SELECT ne.id, sc.id, sc.article_count, sc.heat_score * 0.1, datetime('now'), datetime('now')
+                FROM story_clusters sc
+                JOIN named_entities ne ON LOWER(sc.topic) LIKE '%' || LOWER(ne.normalized_name) || '%'
+                WHERE sc.id NOT IN (SELECT DISTINCT cluster_id FROM entity_cluster_links)
+                AND ne.occurrence_count >= 5
+                AND LENGTH(ne.normalized_name) >= 3
+                AND LENGTH(ne.normalized_name) <= 40
+            `).run();
+
+            logger.info(`[StoryClusterStoreEnhanced] Entity backfill complete: ${result.changes} new links created`);
+        } catch (error) {
+            logger.warn('[StoryClusterStoreEnhanced] Entity backfill error:', error);
+            // Non-fatal — entity matching will fall back to topic/keyword extraction
+        }
     }
 
     private ensureEnhancedColumns(): void {

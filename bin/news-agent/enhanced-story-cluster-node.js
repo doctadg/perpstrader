@@ -800,8 +800,10 @@ async function mergeSingletonClusters() {
         ['near', 'near protocol'], ['atom', 'cosmos'], ['trx', 'tron'], ['xlm', 'stellar'],
         ['algo', 'algorand'], ['inj', 'injective'], ['tia', 'celestia'], ['jup', 'jupiter'],
         ['sui', 'sui'], ['sei', 'sei'], ['ton', 'ton'], ['apt', 'aptos'],
-        ['pepe', 'pepeto'], ['pepeto', 'pepe'], ['far', 'fartcoin'], ['fartcoin', 'far'],
-        ['wif', 'dogwifhat'], ['pengu', 'pudgy penguins'], ['trump', 'maga'],
+        ['hbar', 'hedera'], ['ena', 'ethena'], ['eigen', 'eigenlayer'], ['pendle', 'pendle'],
+        ['aave', 'aave'], ['mkr', 'maker'], ['ldo', 'lido'], ['rpl', 'rocket pool'],
+        ['far', 'fartcoin'], ['fartcoin', 'far'],
+        ['wif', 'dogwifhat'], ['pengu', 'pudgy penguins'],
     ]);
     const resolveToken = (s) => TOKEN_ALIASES.get(s.toLowerCase()) || s.toLowerCase();
     // === BUILD INVERTED INDEXES for merge targets ===
