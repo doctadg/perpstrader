@@ -85,6 +85,12 @@ declare class MarketIngester {
     private refreshWsSymbolWindow;
     private categorizeSymbol;
     private setupWriteBuffer;
+    /**
+     * Periodically purge old market_data rows to prevent DB bloat.
+     * Retains the last 24 hours of data. Runs every 6 hours.
+     */
+    private startMarketDataCleanup;
+    private cleanupOldMarketData;
     private maybeFlush;
     private flushWriteBuffers;
     start(): Promise<void>;

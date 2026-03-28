@@ -293,10 +293,10 @@ function normalizeWebsiteUrl(raw) {
 async function runOpenRouterAnalysis(data) {
     const prompt = buildAnalysisPrompt(data);
     const config = config_1.default.get();
-    // Use GLM service instead of OpenRouter (OpenRouter API key is dead)
+    // Use GLM service via OpenRouter
     const apiKey = config.glm.apiKey;
     const baseUrl = config.glm.baseUrl;
-    const model = config.glm.model || 'z-ai/glm-4.7-flash';
+    const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.glm.model || 'z-ai/glm-4.7-flash';
     if (!apiKey || apiKey.length === 0 || apiKey === 'your-api-key-here') {
         logger_1.default.warn('[AnalyzeNode] GLM API key not configured, using heuristic fallback');
         return null;
@@ -430,8 +430,28 @@ Important:
  */
 function parseAIResponse(response) {
     try {
-        // Extract JSON from response
-        const jsonMatch = response.match(/\{[\s\S]*"recommendation"[\s\S]*\}/);
+        if (!response || typeof response !== 'string') {
+            throw new Error('Empty or non-string response');
+        }
+        // Strip markdown code blocks if present
+        let cleaned = response.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+        // Try direct JSON parse first
+        try {
+            const parsed = JSON.parse(cleaned);
+            if (parsed) {
+                return {
+                    rationale: parsed.rationale || parsed.r || 'No rationale provided',
+                    redFlags: Array.isArray(parsed.redFlags) ? parsed.redFlags : (Array.isArray(parsed.rf) ? parsed.rf : []),
+                    greenFlags: Array.isArray(parsed.greenFlags) ? parsed.greenFlags : (Array.isArray(parsed.gf) ? parsed.gf : []),
+                    recommendation: validateRecommendation(parsed.recommendation || parsed.rec),
+                };
+            }
+        }
+        catch (_) {
+            // Not valid JSON as-is, try regex extraction
+        }
+        // Extract JSON object containing recommendation-related keys
+        const jsonMatch = cleaned.match(/\{[\s\S]*?(?:recommendation|rec|rationale)[\s\S]*\}/);
         if (!jsonMatch) {
             throw new Error('No JSON found in response');
         }
@@ -444,7 +464,7 @@ function parseAIResponse(response) {
         };
     }
     catch (error) {
-        logger_1.default.debug('[AnalyzeNode] Failed to parse OpenRouter response');
+        logger_1.default.debug('[AnalyzeNode] Failed to parse AI response: ' + (response || '').substring(0, 200));
         return null;
     }
 }

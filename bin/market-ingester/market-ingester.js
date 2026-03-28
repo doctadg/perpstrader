@@ -430,6 +430,36 @@ class MarketIngester {
             return;
         this.writeFlushTimer = setInterval(() => this.flushWriteBuffers(), this.writeFlushIntervalMs);
     }
+    /**
+     * Periodically purge old market_data rows to prevent DB bloat.
+     * Retains the last 24 hours of data. Runs every 6 hours.
+     */
+    startMarketDataCleanup() {
+        const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+        const RETENTION_HOURS = 24;
+        // Run first cleanup after 5 minutes (avoid startup contention)
+        setTimeout(() => {
+            this.cleanupOldMarketData(RETENTION_HOURS);
+            // Then repeat on interval
+            setInterval(() => {
+                this.cleanupOldMarketData(RETENTION_HOURS);
+            }, CLEANUP_INTERVAL_MS);
+        }, 5 * 60 * 1000);
+    }
+    cleanupOldMarketData(retentionHours) {
+        try {
+            if (!this.db)
+                return;
+            const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
+            const result = this.db.prepare('DELETE FROM market_data WHERE timestamp < ?').run(cutoff);
+            if (result.changes > 0) {
+                logger_1.default.info(`[MarketIngester] Cleaned up ${result.changes} old market_data rows (cutoff: ${cutoff})`);
+            }
+        }
+        catch (error) {
+            logger_1.default.warn(`[MarketIngester] market_data cleanup failed: ${error?.message}`);
+        }
+    }
     maybeFlush() {
         const queued = this.marketDataQueue.length
             + this.orderBookQueue.length
@@ -500,6 +530,7 @@ class MarketIngester {
             this.startCandleFlushTimer();
             this.startCoverageMonitoring();
             this.startEnrichmentPolling();
+            this.startMarketDataCleanup();
             if (!this.primaryTimeframe.endsWith('s')) {
                 await this.startPolling();
             }
