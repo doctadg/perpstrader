@@ -1180,6 +1180,103 @@ async function mergeSingletonClusters(): Promise<{ mergedCount: number }> {
         logger.info(`[EnhancedClusterNode] PHASE 5b: Merged ${mergedCount}/${singletons.length} singleton clusters (inverted index)`);
     }
 
+    // PHASE 5b-II: Singleton-to-Singleton merging
+    // Group remaining singletons with each other when they share entities/keywords.
+    // This is critical because many singletons cover the same topic but arrived in different cycles.
+    const remainingSingletons = singletons.filter(s => !mergedAway.has(s.id));
+    if (remainingSingletons.length >= 2) {
+        logger.info(`[EnhancedClusterNode] PHASE 5b-II: Attempting singleton-to-singleton merge for ${remainingSingletons.length} remaining singletons`);
+
+        // Build inverted index on remaining singletons themselves
+        const s2sEntityIndex = new Map<string, number[]>();
+        const s2sKwIndex = new Map<string, number[]>();
+        const s2sCatIndex = new Map<string, number[]>();
+
+        const s2sData = remainingSingletons.map((s, idx) => {
+            const entities = extractEntitiesFromTopicAndKeywords(s.topic || '', s.keywords || []);
+            const entitySet = new Set(entities.map(resolveToken));
+            const kws = new Set(((s.keywords || []) as string[]).map((k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((k: string) => k.length >= 3));
+            const cat = s.category || 'UNKNOWN';
+
+            for (const e of entitySet) {
+                if (!s2sEntityIndex.has(e)) s2sEntityIndex.set(e, []);
+                s2sEntityIndex.get(e)!.push(idx);
+            }
+            for (const kw of kws) {
+                if (!s2sKwIndex.has(kw)) s2sKwIndex.set(kw, []);
+                s2sKwIndex.get(kw)!.push(idx);
+            }
+            if (!s2sCatIndex.has(cat)) s2sCatIndex.set(cat, []);
+            s2sCatIndex.get(cat)!.push(idx);
+
+            return { cluster: s, entitySet, kwSet: kws, cat };
+        });
+
+        let s2sMerged = 0;
+        for (let i = 0; i < s2sData.length; i++) {
+            const si = s2sData[i];
+            if (mergedAway.has(si.cluster.id)) continue;
+
+            // Find candidates via inverted index
+            const candidateIdx = new Set<number>();
+            for (const e of si.entitySet) {
+                const idxs = s2sEntityIndex.get(e);
+                if (idxs) for (const j of idxs) if (j !== i) candidateIdx.add(j);
+            }
+            if (candidateIdx.size === 0) {
+                for (const kw of si.kwSet) {
+                    const idxs = s2sKwIndex.get(kw);
+                    if (idxs) for (const j of idxs) if (j !== i) candidateIdx.add(j);
+                }
+            }
+
+            for (const j of candidateIdx) {
+                const sj = s2sData[j];
+                if (mergedAway.has(sj.cluster.id)) continue;
+                if (si.cluster.category !== sj.cluster.category) continue; // Same category only for s2s
+
+                // Score: entity overlap
+                const sharedEntities = [...si.entitySet].filter(e => sj.entitySet.has(e) && e.length >= 2);
+                const sharedKw = [...si.kwSet].filter(k => sj.kwSet.has(k));
+
+                let score = 0;
+                if (sharedEntities.length >= 1) {
+                    score = 0.35 + sharedEntities.length * 0.15; // 0.50 for 1 entity, 0.65 for 2
+                } else if (sharedKw.length >= 3) {
+                    score = 0.30 + sharedKw.length * 0.05;
+                } else if (sharedKw.length >= 2) {
+                    score = 0.28;
+                }
+
+                if (score >= 0.35) {
+                    // Merge j into i (keep the one with higher heat or earlier creation)
+                    const target = si.cluster.heatScore >= sj.cluster.heatScore ? si.cluster : sj.cluster;
+                    const source = si.cluster.heatScore >= sj.cluster.heatScore ? sj.cluster : si.cluster;
+
+                    try {
+                        if (!(await storyClusterStoreEnhanced.clusterExists(target.id)) ||
+                            !(await storyClusterStoreEnhanced.clusterExists(source.id))) {
+                            continue;
+                        }
+                        const result = await storyClusterStoreEnhanced.mergeClusters(target.id, source.id);
+                        if (result.moved > 0) {
+                            s2sMerged++;
+                            mergedAway.add(source.id);
+                            await storyClusterStoreEnhanced.createHierarchy(target.id, source.id, 'MERGED_INTO');
+                        }
+                    } catch (e) {
+                        logger.warn(`[EnhancedClusterNode] S2S merge failed: ${source.id.slice(0, 8)} -> ${target.id.slice(0, 8)}`, e);
+                    }
+                }
+            }
+        }
+
+        if (s2sMerged > 0) {
+            logger.info(`[EnhancedClusterNode] PHASE 5b-II: Merged ${s2sMerged} singleton pairs into ${s2sMerged} multi-article clusters`);
+            mergedCount += s2sMerged;
+        }
+    }
+
     return { mergedCount };
 }
 

@@ -144,12 +144,12 @@ class FundingArbitrageJob {
         // Filter for high urgency alerts
         const highUrgency = opportunities.filter(o => Math.abs(o.annualizedRate) >= HIGH_URGENCY_THRESHOLD_APR);
         if (highUrgency.length > 0) {
-            logger_1.default.warn(`[FundingJob] ${highUrgency.length} HIGH URGENCY funding opportunities detected!`);
+            logger_1.default.info(`[FundingJob] ${highUrgency.length} HIGH URGENCY funding opportunities detected`);
             for (const opp of highUrgency) {
-                const direction = opp.type === 'long' ? '🟢 LONG' : '🔴 SHORT';
+                const direction = opp.type === 'long' ? 'LONG' : 'SHORT';
                 const urgency = opp.urgency.toUpperCase();
-                logger_1.default.warn(`[FundingJob] ALERT [${urgency}] ${direction} ${opp.symbol}: ${opp.annualizedRate.toFixed(2)}% APR`);
-                logger_1.default.warn(`[FundingJob] Reason: ${opp.reason}`);
+                logger_1.default.info(`[FundingJob] Funding [${urgency}] ${direction} ${opp.symbol}: ${opp.annualizedRate.toFixed(2)}% APR`);
+                logger_1.default.info(`[FundingJob] Reason: ${opp.reason}`);
                 // Here you could add:
                 // - Telegram notifications
                 // - Discord webhooks
@@ -168,15 +168,15 @@ class FundingArbitrageJob {
         // Filter for high urgency cross-exchange opportunities
         const highUrgency = opportunities.filter(o => o.urgency === 'high' && o.confidence >= 70);
         if (highUrgency.length > 0) {
-            logger_1.default.warn(`[FundingJob] ${highUrgency.length} HIGH URGENCY cross-exchange opportunities detected!`);
+            logger_1.default.info(`[FundingJob] ${highUrgency.length} HIGH URGENCY cross-exchange opportunities detected`);
             for (const opp of highUrgency) {
                 const action = opp.longExchange && opp.shortExchange
                     ? `Long ${this.formatExchangeName(opp.longExchange)} / Short ${this.formatExchangeName(opp.shortExchange)}`
                     : opp.recommendedAction || 'Monitor';
-                logger_1.default.warn(`[FundingJob] CROSS-EXCHANGE ALERT [${opp.urgency.toUpperCase()}] ` +
+                logger_1.default.info(`[FundingJob] Cross-exchange [${opp.urgency.toUpperCase()}] ` +
                     `${opp.symbol} ${this.formatExchangeName(opp.exchangeA)}/${this.formatExchangeName(opp.exchangeB)}: ` +
                     `${opp.annualizedSpread.toFixed(2)}% spread`);
-                logger_1.default.warn(`[FundingJob] Action: ${action} (Confidence: ${opp.confidence.toFixed(0)}%)`);
+                logger_1.default.info(`[FundingJob] Action: ${action} (Confidence: ${opp.confidence.toFixed(0)}%)`);
                 await this.sendCrossExchangeNotification(opp);
             }
         }

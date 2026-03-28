@@ -290,6 +290,19 @@ class BondingCurveService {
                 timestamp,
             };
         }
+        // Prevent re-entry: skip if already holding this token
+        if (this.paperPositions.has(tokenMint)) {
+            logger_1.default.warn(`[DUPLICATE BUY] Skipping re-entry on ${tokenSymbol} (${tokenMint.slice(0, 8)}) — already holding position`);
+            return {
+                success: false,
+                tokenAddress: tokenMint,
+                solSpent: 0,
+                tokensReceived: 0,
+                error: 'already_holding',
+                paperMode: true,
+                timestamp,
+            };
+        }
         this.paperSolBalance -= solAmount;
         this.paperPositions.set(tokenMint, {
             tokenMint,
