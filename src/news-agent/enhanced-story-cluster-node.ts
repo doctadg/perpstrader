@@ -1381,9 +1381,44 @@ function extractEntitiesFromTopicAndKeywords(topic: string, keywords: string[]):
         }
     }
     // Extract keywords as entities (they're already uppercase topic words)
+    // Expanded blacklist for generic financial/news terms that aren't real entities
+    const keywordBlacklist = new Set([
+        // Generic finance/news words (NOT specific entities)
+        'crypto', 'stock', 'stocks', 'share', 'shares', 'invest', 'investor', 'investors',
+        'price', 'prices', 'rate', 'rates', 'stable', 'table', 'today', 'daily', 'weekly',
+        'market', 'markets', 'trading', 'trade', 'bull', 'bear', 'trend', 'trends',
+        'analysis', 'report', 'update', 'news', 'data', 'forecast', 'outlook',
+        'buy', 'sell', 'hold', 'gain', 'loss', 'profit', 'revenue', 'growth',
+        'risk', 'volatility', 'liquid', 'supply', 'demand', 'capital', 'fund', 'funds',
+        'portfolio', 'asset', 'assets', 'index', 'sector', 'industry', 'economy',
+        'regulation', 'compliance', 'audit', 'enforcement', 'penalty', 'fine',
+        'blockchain', 'smart', 'contract', 'network', 'protocol', 'platform', 'exchange',
+        'wallet', 'mining', 'staking', 'yield', 'apy', 'tvl', 'defi', 'nft', 'dao',
+        'ceo', 'cto', 'ipo', 'fda', 'sec', 'fomc', 'gdp', 'cpi', 'ppi', 'pce',
+        'tariff', 'tariffs', 'sanction', 'sanctions', 'embargo', 'boycott',
+        'hiring', 'jobs', 'employment', 'unemployment', 'wage', 'wages',
+        'inflation', 'deflation', 'recession', 'expansion', 'recovery', 'crisis',
+        'federal', 'central', 'government', 'parliament', 'congress', 'senate',
+        'democratic', 'republican', 'conservative', 'liberal', 'election',
+        'sanctions', 'conflict', 'war', 'peace', 'treaty', 'summit', 'meeting',
+        'signal', 'breakout', 'breakdown', 'resistance', 'support', 'pivot',
+        'btc', 'eth', 'usd', 'eur', 'gbp', 'jpy', // Use full names, not codes
+        'tech', 'technology', 'software', 'hardware', 'semiconductor',
+        'ai', 'ml', 'artificial', 'intelligence', 'robot', 'robotics',
+        'energy', 'oil', 'gas', 'solar', 'wind', 'nuclear', 'renewable',
+        'bank', 'banks', 'banking', 'insurance', 'real', 'estate', 'mortgage',
+        'high', 'low', 'open', 'close', 'closed', 'near', 'far', 'top', 'bottom',
+        'surge', 'crash', 'slip', 'drop', 'jump', 'rally', 'dip', 'dump', 'pump',
+        'ahead', 'impact', 'face', 'move', 'expect', 'predict', 'forecast', 'track',
+        'ended', 'tour', 'statistical', 'agency', 'finally', 'remains', 'seen',
+        'expert', 'analyst', 'watch', 'monitor', 'guide', 'review', 'insight',
+        'latam', 'fafsa', 'safe', 'haven', 'depth', 'rising', 'bullish', 'bearish',
+        'volatile', 'expanded', 'easing', 'cycle', 'decision', 'jones', 'europe',
+        'headlines', 'remain', 'amid', 'despite', 'following', 'according',
+    ]);
     for (const kw of (keywords || [])) {
         const lower = kw.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (lower.length > 2) {
+        if (lower.length > 2 && !keywordBlacklist.has(lower) && !stopwords.has(lower)) {
             entities.push(lower);
         }
     }

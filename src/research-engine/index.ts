@@ -361,6 +361,7 @@ export class ResearchEngine {
             `).run(
               paramsHash,
               JSON.stringify({
+                source: 'backtest',
                 totalTrades: perf.totalTrades,
                 winningTrades: Math.round(perf.totalTrades * perf.winRate),
                 losingTrades: Math.round(perf.totalTrades * (1 - perf.winRate)),
@@ -379,6 +380,7 @@ export class ResearchEngine {
                   : 0,
                 profitFactor: perf.profitFactor,
               }),
+              paramsHash,
               new Date().toISOString(),
               existing.id
             );
@@ -406,6 +408,7 @@ export class ResearchEngine {
               idea.exit_conditions,
               idea.risk_parameters,
               JSON.stringify({
+                source: 'backtest',
                 totalTrades: perf.totalTrades,
                 winningTrades: Math.round(perf.totalTrades * perf.winRate),
                 losingTrades: Math.round(perf.totalTrades * (1 - perf.winRate)),

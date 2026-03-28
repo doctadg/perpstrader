@@ -332,6 +332,7 @@ class ResearchEngine {
                 updatedAt = ?
               WHERE id = ?
             `).run(paramsHash, JSON.stringify({
+                            source: 'backtest',
                             totalTrades: perf.totalTrades,
                             winningTrades: Math.round(perf.totalTrades * perf.winRate),
                             losingTrades: Math.round(perf.totalTrades * (1 - perf.winRate)),
@@ -349,7 +350,7 @@ class ResearchEngine {
                                 ? Math.abs(perf.pnl) / (Math.round(perf.totalTrades * perf.winRate) * perf.profitFactor + Math.round(perf.totalTrades * (1 - perf.winRate)))
                                 : 0,
                             profitFactor: perf.profitFactor,
-                        }), new Date().toISOString(), existing.id);
+                        }), paramsHash, new Date().toISOString(), existing.id);
                         promotedHashes.add(paramsHash);
                         promoted++;
                     }
@@ -364,6 +365,7 @@ class ResearchEngine {
                 performance, params_hash, createdAt, updatedAt
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
             `).run(strategyId, idea.name, idea.description || `Promoted from research pipeline. Sharpe: ${perf.sharpe.toFixed(2)}`, idea.type, idea.symbols, idea.timeframe, idea.parameters, idea.entry_conditions, idea.exit_conditions, idea.risk_parameters, JSON.stringify({
+                            source: 'backtest',
                             totalTrades: perf.totalTrades,
                             winningTrades: Math.round(perf.totalTrades * perf.winRate),
                             losingTrades: Math.round(perf.totalTrades * (1 - perf.winRate)),

@@ -499,6 +499,101 @@ class StoryClusterStoreEnhanced {
     // ============================================================
 
     /**
+     * Safety-net garbage entity filter at the DB layer.
+     * Prevents generic financial/news words from being stored as named entities.
+     */
+    // Known crypto tokens allowlist — ONLY these can be stored as type TOKEN
+    private static readonly KNOWN_CRYPTO_TOKENS = new Set([
+        'btc', 'eth', 'bnb', 'sol', 'xrp', 'ada', 'dot', 'avax', 'matic', 'link', 'uni',
+        'aave', 'crv', 'mkr', 'comp', 'snx', 'yfi', 'dai', 'sushi', 'balancer', '1inch',
+        'gmx', 'dydx', 'perp', 'lido', 'rpl', 'ldo', 'usdt', 'usdc', 'usdd', 'tusd', 'fdusd',
+        'wbtc', 'weth', 'steth', 'wsteth', 'wbeth', 'weeth', 'cbbtc', 'susds', 'susde', 'rseth', 'bnsol',
+        'ltc', 'bch', 'xlm', 'atom', 'xtz', 'algo', 'eos', 'vet', 'neo', 'ftm', 'near', 'apt', 'sui',
+        'sei', 'arb', 'op', 'tia', 'inj', 'osmo', 'jup', 'hype', 'kas', 'hbar', 'mina',
+        'doge', 'shib', 'pepe', 'floki', 'bonk', 'wif', 'dogwifhat', 'pengu', 'popcat',
+        'moodeng', 'bome', 'fartcoin', 'pepeto', 'trump', 'maga', 'melania',
+        'render', 'grt', 'rune', 'flr', 'eigen', 'grass', 'flux', 'safe', 'celo', 'zk', 'lrc', 'metis',
+        'skl', 'celr', 'rose', 'mask', 'theta', 'fet', 'agix', 'ocean', 'imx', 'enj', 'high',
+        'morpho', 'raydium', 'serum', 'orca', 'anchor', 'pendle', 'jto', 'blur', 'eng', 'rndr',
+        'rlusd', 'pyusd', 'bfusd', 'crvusd', 'usdai', 'usdtb', 'eutbl',
+        'spot', 'virtual', 'ai16z', 'aixbt', 'toncoin', 'ton',
+        'icx', 'zil', 'ont', 'iost', 'hot', 'btt', 'ckb', 'nexo',
+        'matic', 'matic', 'matic', 'matic', 'base',
+        'shiba inu', 'dogecoin', 'bitcoin cash', 'bitcoin', 'ethereum', 'solana',
+        'cardano', 'polkadot', 'avalanche', 'chainlink', 'polygon', 'uniswap', 'ripple',
+        'stellar', 'hyperliquid', 'book of meme', 'pudgy penguins', 'rocket pool', 'dogwifhat',
+        'official trump', 'pudgy', 'penguin',
+    ]);
+
+    private isGarbageEntityName(normalizedName: string): boolean {
+        // Too short (single/two-letter words are almost never real entities)
+        if (normalizedName.length < 4) return true;
+        // Pure numbers
+        if (/^\d+$/.test(normalizedName)) return true;
+        // Looks like a stock ticker (all caps, 3-5 chars, ends in common suffix)
+        if (/^[a-z]{3,5}[uyx][sf]$/.test(normalizedName)) return true; // e.g. nyseaf, otcqx
+        // Looks like forex pair
+        if (/[a-z]{3}usd$|[a-z]{3}jpy$|[a-z]{3}eur$|[a-z]{3}gbp$/.test(normalizedName)) return true;
+        // Generic financial/news words that commonly leak through LLM keyword extraction
+        const genericTerms = new Set([
+            // Finance/trading
+            'crypto', 'stock', 'stocks', 'share', 'shares', 'invest', 'investor', 'investors',
+            'price', 'prices', 'rate', 'rates', 'stable', 'table', 'today', 'daily', 'weekly',
+            'market', 'markets', 'trading', 'trade', 'bull', 'bear', 'trend', 'trends',
+            'analysis', 'report', 'update', 'news', 'data', 'forecast', 'outlook',
+            'buy', 'sell', 'hold', 'gain', 'loss', 'profit', 'revenue', 'growth',
+            'risk', 'volatility', 'liquid', 'supply', 'demand', 'capital', 'fund', 'funds',
+            'portfolio', 'asset', 'assets', 'index', 'sector', 'industry', 'economy',
+            'regulation', 'compliance', 'enforcement', 'penalty', 'fine',
+            'blockchain', 'network', 'protocol', 'platform', 'exchange',
+            'wallet', 'mining', 'staking', 'yield', 'apy', 'tvl', 'defi', 'nft', 'dao',
+            'tariff', 'tariffs', 'sanction', 'sanctions', 'embargo', 'boycott',
+            'hiring', 'jobs', 'employment', 'unemployment', 'wage', 'wages',
+            'inflation', 'deflation', 'recession', 'expansion', 'recovery', 'crisis',
+            'federal', 'central', 'government', 'parliament', 'congress', 'senate',
+            'conflict', 'peace', 'treaty', 'summit', 'meeting', 'election',
+            'breakout', 'breakdown', 'resistance', 'support', 'pivot',
+            'tech', 'technology', 'software', 'hardware', 'semiconductor',
+            'energy', 'solar', 'wind', 'nuclear', 'renewable',
+            'bank', 'banks', 'banking', 'insurance', 'estate', 'mortgage',
+            'surge', 'crash', 'dip', 'dump', 'pump', 'rally', 'drop', 'jump',
+            'expert', 'analyst', 'watch', 'monitor', 'guide', 'review', 'insight',
+            'latam', 'fafsa', 'haven', 'rising', 'bullish', 'bearish',
+            'volatile', 'easing', 'cycle', 'headlines', 'remain', 'amid',
+            'closed', 'ended', 'finally', 'ahead', 'impact', 'face', 'move',
+            'expect', 'predict', 'track', 'expanded', 'depth', 'tour',
+            // Sports (leaks from news feeds)
+            'nfl', 'nba', 'mlb', 'nhl', 'mls', 'ncaa', 'fifa', 'ufc', 'wwe', 'nascar',
+            'laliga', 'serie', 'ligue', 'bundesliga', 'ncaaf', 'ncaab', 'ncaaw', 'ncaam',
+            'soccer', 'sports', 'football', 'basketball', 'baseball', 'hockey',
+            // Common English words (leak from LLM keyword extraction)
+            'press', 'again', 'cloud', 'ounce', 'raise', 'cyber', 'nasdaq', 'ebitda',
+            'video', 'videos', 'photo', 'photos', 'search', 'follow', 'login', 'email',
+            'click', 'globe', 'events', 'policy', 'terms', 'source', 'topics',
+            'story', 'media', 'paper', 'mobile', 'games', 'never', 'rights',
+            'hours', 'times', 'march', 'south', 'states', 'united', 'giant',
+            'really', 'below', 'faang', 'bafta', 'kospi', 'login', 'email',
+            'submit', 'forum', 'access', 'genius', 'lgbtq', 'finra', 'ieepa',
+            'event', 'pimco', 'geneva', 'usmnt', 'united', 'unesco',
+            // Names/people words (not tokens)
+            'trump', 'biden', 'harris', 'obama', 'putin', 'modi', 'macron',
+            // Misc non-entity words
+            'export', 'stats', 'ratios', 'dollar', 'pound', 'copper', 'crude', 'brent',
+            'silver', 'metal', 'metals', 'steel', 'lumber', 'rubber', 'cotton', 'cocoa',
+            'comex', 'nymex', 'forex', 'oanda', 'kitco', 'stoxx', 'topix',
+        ]);
+        return genericTerms.has(normalizedName);
+    }
+
+    /**
+     * Validate that a TOKEN entity is actually a known crypto token.
+     * Rejects any TOKEN entity not on the allowlist.
+     */
+    private isValidTokenEntity(normalizedName: string): boolean {
+        return StoryClusterStoreEnhanced.KNOWN_CRYPTO_TOKENS.has(normalizedName);
+    }
+
+    /**
      * Find or create entity
      */
     async findOrCreateEntity(
@@ -511,6 +606,16 @@ class StoryClusterStoreEnhanced {
         try {
             const normalizedName = entityName.toLowerCase().trim();
             const now = new Date().toISOString();
+
+            // Safety net: reject garbage entities at the DB layer
+            if (this.isGarbageEntityName(normalizedName)) {
+                return 0;
+            }
+
+            // TOKEN entities MUST be on the known tokens allowlist
+            if (entityType === 'TOKEN' && !this.isValidTokenEntity(normalizedName)) {
+                return 0;
+            }
 
             // Try to find existing
             const existing = this.db.prepare('SELECT id, occurrence_count FROM named_entities WHERE normalized_name = ?')

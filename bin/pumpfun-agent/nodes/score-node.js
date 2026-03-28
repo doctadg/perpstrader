@@ -11,12 +11,12 @@ const config_1 = __importDefault(require("../../shared/config"));
 const logger_1 = __importDefault(require("../../shared/logger"));
 const state_1 = require("../state");
 const DEFAULT_WEIGHTS = {
-    social: 0.35, // -0.03 — was over-inflating scores to 0.75+ where WR drops to 85%
-    freshness: 0.20, // -0.02 — stable early entry signal, slight trim for rebalance
-    websiteQuality: 0.05, // -0.01 — weakest signal, minor trim
-    aiAnalysis: 0.25, // +0.03 — strongest differentiator for real pumps vs dead tokens
-    tokenQuality: 0.15, // +0.03 — better filtering of false positives (TIME_EXIT dead tokens)
-    redFlagPenalty: 0.10, // unchanged — zero rugs, no change needed
+    social: 0.32, // -0.03 — social still inflates dead-token scores (0.86 TIME_EXIT); push scores down to filter
+    freshness: 0.18, // -0.02 — slight trim; freshness alone doesn't predict pumps
+    websiteQuality: 0.05, // unchanged — weakest signal but nonzero for marginal filtering
+    aiAnalysis: 0.30, // +0.05 — strongest differentiator: 0.70-0.74 bucket has 100% WR vs 89% at 0.65-0.69
+    tokenQuality: 0.15, // unchanged — stable signal for false positive filtering
+    redFlagPenalty: 0.12, // +0.02 — TIME_EXIT trades (even at score 0.86) show red flags being missed
 };
 const DEFAULT_MIN_SCORE = 0.35;
 // ── Main Entry ─────────────────────────────────────────────────────────────

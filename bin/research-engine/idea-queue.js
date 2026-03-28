@@ -339,11 +339,18 @@ class IdeaQueue {
             await this.initialize();
         if (!this.db)
             return [];
+        // Exclude strategy types that the execution pipeline cannot handle.
+        // ARBITRAGE requires options/funding-rate execution paths not wired to LangGraph.
+        // MARKET_MAKING requires passive order placement not supported by executor node.
+        // AI_PREDICTION has no entry/exit condition logic for order generation.
+        const EXECUTABLE_TYPES = ['MEAN_REVERSION', 'TREND_FOLLOWING', 'BREAKOUT', 'SCALPING'];
+        const placeholders = EXECUTABLE_TYPES.map(() => '?').join(', ');
         const rows = this.db.prepare(`
       SELECT p.*, i.name as strategy_name, i.type, i.symbols
       FROM strategy_performance p
       JOIN strategy_ideas i ON p.strategy_id = i.id
-      WHERE p.sharpe > 0.5
+      WHERE i.type IN (${placeholders})
+        AND p.sharpe > 0.5
         AND p.sharpe <= 5.0
         AND p.win_rate >= 0.45
         AND p.win_rate <= 0.80
@@ -355,7 +362,7 @@ class IdeaQueue {
         AND (p.profit_factor = 0 OR p.profit_factor <= 10.0)
       ORDER BY p.sharpe DESC, p.win_rate DESC
       LIMIT ?
-    `).all(limit);
+    `).all(...EXECUTABLE_TYPES, limit);
         return rows.map(row => ({
             id: row.id,
             strategyId: row.strategy_id,
