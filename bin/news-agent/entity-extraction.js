@@ -7,10 +7,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 class EntityExtractor {
     // Crypto tokens and protocols (regex patterns)
     static TOKEN_PATTERNS = [
-        // Major tokens
-        /\b(Bitcoin|BTC|Ethereum|ETH|Solana|SOL|Cardano|ADA|Polkadot|DOT|Avalanche|AVAX|Dogecoin|DOGE|Shiba Inu|SHIB|Chainlink|LINK|Polygon|MATIC|Uniswap|UNI|Aave|AAVE|Curve|CRV|Maker|MKR|Compound|COMP|Synthetix|SNX|Yearn|YFI|Pepeto|Hyperliquid|HYPE|Sui|SUI|Sei|SEI|Aptos|APT|Arbitrum|ARB|Optimism|OP|Celestia|TIA|Injective|INJ|Osmosis|OSMO|Jupiter|JUP)\b/gi,
-        // Common token symbols
-        /\b[A-Z]{2,6}(?=\s|$|,|\.)/g, // All caps 2-6 chars (likely token symbols)
+        // Major tokens (curated list — NO catch-all regex)
+        /\b(Bitcoin|BTC|Ethereum|ETH|Solana|SOL|Cardano|ADA|Polkadot|DOT|Avalanche|AVAX|Dogecoin|DOGE|Shiba Inu|SHIB|Chainlink|LINK|Polygon|MATIC|Uniswap|UNI|Aave|AAVE|Curve|CRV|Maker|MKR|Compound|COMP|Synthetix|SNX|Yearn|YFI|Pepeto|Hyperliquid|HYPE|Sui|SUI|Sei|SEI|Aptos|APT|Arbitrum|ARB|Optimism|OP|Celestia|TIA|Injective|INJ|Osmosis|OSMO|Jupiter|JUP|Pepe|PEPE|Floki|FLOKI|Bonk|BONK|WIF|dogwifhat|Trump|MAGA|TRUMP|Melania|MELANIA|Fartcoin|FARTCOIN)\b/gi,
     ];
     static PROTOCOL_PATTERNS = [
         /\b(Uniswap|Aave|Compound|Curve|Maker|Synthetix|Yearn|Sushi|Pancake|Balancer|1inch|GMX|dYdX|Perpetual|Opyn|Hegic|Keeper|Lido|Rocket|Anchor|Terra|Luna|Osmosis|Jupiter|Orca|Raydium)\b/gi,
@@ -165,15 +163,63 @@ class EntityExtractor {
     }
     // Entities to exclude - too generic or garbage
     static ENTITY_BLACKLIST = new Set([
+        // English words from uppercase headlines
+        'the', 'and', 'for', 'with', 'from', 'this', 'that', 'not', 'you', 'all',
+        'more', 'new', 'our', 'but', 'are', 'was', 'has', 'had', 'its', 'his',
+        'her', 'she', 'they', 'them', 'who', 'how', 'why', 'can', 'out', 'now',
+        'get', 'got', 'may', 'set', 'put', 'see', 'way', 'day', 'top', 'one',
+        'two', 'per', 'via', 'due', 'yet', 'let', 'say', 'use', 'own', 'any',
+        'back', 'well', 'only', 'just', 'over', 'into', 'also', 'than', 'then',
+        'some', 'will', 'make', 'like', 'long', 'look', 'most', 'been', 'much',
+        'many', 'even', 'still', 'each', 'every', 'after', 'before', 'should',
+        'could', 'would', 'these', 'those', 'other', 'about', 'which', 'their',
+        'what', 'when', 'where', 'here', 'there', 'very', 'too', 'same', 'under',
+        // Verbs/adjectives/adverbs common in headlines
+        'save', 'read', 'sign', 'live', 'free', 'next', 'run', 'fly', 'buy',
+        'sell', 'hold', 'keep', 'move', 'grow', 'rise', 'fall', 'drop', 'jump',
+        'push', 'pull', 'cut', 'hit', 'beat', 'miss', 'meet', 'lead', 'win',
+        'lose', 'pay', 'add', 'end', 'big', 'key', 'hot', 'low', 'high',
+        'old', 'far', 'near', 'off', 'up', 'down', 'plan', 'rule', 'law',
+        'ban', 'tax', 'gap', 'risk', 'goal', 'force', 'power', 'market',
+        'trade', 'price', 'rate', 'time', 'year', 'week', 'month', 'data',
+        'report', 'news', 'update', 'alert', 'break', 'final', 'total',
+        'global', 'world', 'national', 'local', 'public', 'private', 'federal',
+        'central', 'major', 'latest', 'first', 'last', 'best', 'worst',
         // Generic abbreviations
-        'us', 'pm', 'am', 'ai', 'tv', 'rss', 'api', 'ceo', 'cfo', 'cto',
+        'us', 'pm', 'am', 'ai', 'tv', 'rss', 'api', 'ceo', 'cfo', 'cto', 'coo', 'hr', 'pr', 'qa',
+        'faq', 'ii', 'iii', 'vip', 'gop', 'dem', 'rep', 'sen', 'gov',
         // Timezone/time expressions
-        'utc', 'est', 'pst', 'gmt', 'et', 'pt',
-        // Generic terms
-        'inc', 'llc', 'ltd', 'corp', 'co',
+        'utc', 'est', 'pst', 'gmt', 'et', 'pt', 'ct', 'mt', 'edt', 'cdt', 'mdt', 'pdt',
+        // Generic business/legal terms
+        'inc', 'llc', 'ltd', 'corp', 'co', 'plc',
         // Date patterns
         'january', 'february', 'march', 'april', 'may', 'june',
         'july', 'august', 'september', 'october', 'november', 'december',
+        'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+        // Country/city codes
+        'ny', 'la', 'dc', 'sf', 'uk', 'eu', 'cn', 'jp', 'kr', 'au', 'ca',
+        'de', 'fr', 'it', 'es', 'nl', 'se', 'no', 'fi', 'dk', 'pl', 'br', 'mx', 'in', 'id', 'th', 'vn', 'ph',
+        // Quarters
+        'q1', 'q2', 'q3', 'q4',
+        // Financial products
+        'etf', 'ico', 'ido', 'ieo', 'ipo', 'spac',
+        // Sports leagues
+        'nfl', 'nba', 'mlb', 'nhl', 'mls', 'ncaa', 'fifa', 'ufc', 'wwe', 'nascar', 'pga', 'ufl', 'nwsl',
+        // Fiat currencies
+        'usd', 'eur', 'gbp', 'jpy', 'cad', 'aud', 'chf', 'cny', 'inr', 'krw', 'sgd', 'hkd', 'twd', 'thb', 'mxn',
+        // Stock tickers (not crypto)
+        'aapl', 'msft', 'amzn', 'goog', 'meta', 'tsla', 'nvda', 'intc', 'xom', 'jpm',
+        'dis', 'nflx', 'adbe', 'crm', 'pypl', 'pltr', 'rivn', 'nke', 'gs', 'spy', 'vix', 'dji', 'qqq',
+        // Media
+        'cnn', 'bbc', 'nbc', 'cbs', 'abc', 'fox', 'cnbc', 'reuters', 'ap', 'afp', 'espn',
+        // Financial metrics
+        'gdp', 'cpi', 'ppi', 'pmi', 'eps', 'pce', 'ytd', 'gaap',
+        // Tech terms
+        'vpn', 'dns', 'ssl', 'app', 'saas', 'ram', 'cpu', 'gpu', 'oled', 'led', 'ar', 'vr', 'pc', 'cd',
+        // Event terms
+        'inflation', 'earnings', 'recession', 'summit', 'conference',
+        // Word fragments
+        'ing', 'ion', 'ter', 'tic', 'bitc', 'tco', 'itc', 'est', 'ati', 'lat', 'ear', 'mar', 'sto', 'ent', 'lin', 'nal', 'ment',
     ]);
     // Patterns for garbage entities (dollar amounts, timestamps, etc.)
     static GARBAGE_PATTERNS = [

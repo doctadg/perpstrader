@@ -19,10 +19,9 @@ class EnhancedEntityExtractor {
     cacheMaxSize = 500;
     // Entity patterns (enhanced from original)
     PATTERNS = {
-        // Cryptocurrencies and tokens
+        // Cryptocurrencies and tokens (curated list — NO catch-all regex)
         TOKEN: [
-            /\b(Bitcoin|BTC|Ethereum|ETH|Solana|SOL|Cardano|ADA|Polkadot|DOT|Avalanche|AVAX|Dogecoin|DOGE|Shiba Inu|SHIB|Chainlink|LINK|Polygon|MATIC|Uniswap|UNI|Aave|AAVE|Curve|CRV|Maker|MKR|Compound|COMP|Synthetix|SNX|Yearn|YFI|Sushi|Pancake|Balancer|1inch|GMX|dYdX|Perpetual|Lido|Rocket Pool|LDO|RPL|Toncoin|TON|Ripple|XRP|Stellar|XLM|Litecoin|LTC|Bitcoin Cash|BCH)\b/gi,
-            /\b[A-Z]{2,6}(?:\s*(?:Token|Coin))?\b/g, // Generic token symbols
+            /\b(Bitcoin|BTC|Ethereum|ETH|Solana|SOL|Cardano|ADA|Polkadot|DOT|Avalanche|AVAX|Dogecoin|DOGE|Shiba Inu|SHIB|Chainlink|LINK|Polygon|MATIC|Uniswap|UNI|Aave|AAVE|Curve|CRV|Maker|MKR|Compound|COMP|Synthetix|SNX|Yearn|YFI|Sushi|Pancake|Balancer|1inch|GMX|dYdX|Perpetual|Lido|Rocket Pool|LDO|RPL|Toncoin|TON|Ripple|XRP|Stellar|XLM|Litecoin|LTC|Bitcoin Cash|BCH|Pepeto|Hyperliquid|HYPE|Sui|SUI|Sei|SEI|Aptos|APT|Arbitrum|ARB|Optimism|OP|Celestia|TIA|Injective|INJ|Osmosis|OSMO|Jupiter|JUP|Pepe|PEPE|Floki|FLOKI|Bonk|BONK|WIF|dogwifhat|Trump|MAGA|Official Trump|TRUMP|Melania|MELANIA|Base|BOME|Book of Meme|Pudgy Penguins|PENGU|Popcat|POPCAT|Moo Deng|MOODENG|Spotify|SPOT|Virtuals Protocol|VIRTUAL|ai16z|AIXBT|Fartcoin|FARTCOIN)\b/gi,
         ],
         // DeFi protocols and platforms
         PROTOCOL: [
@@ -84,29 +83,90 @@ class EnhancedEntityExtractor {
             /\b(earnings|merger|acquisition|IPO|SPAC|delisting|halving|fork|airdrop|staking|yield|governance vote|proposal|regulation|sanction|tariff|trade war|recession|inflation|deflation|interest rate|fed decision)\b/gi,
         ],
     };
-    // Entities to exclude - too generic or garbage
+    // Entities to exclude - too generic, garbage, or wrong type
     ENTITY_BLACKLIST = new Set([
-        // Generic abbreviations that get misidentified as TOKENs
-        'us', 'pm', 'am', 'ai', 'tv', 'rss', 'api', 'ceo', 'cfo', 'cto', 'coo', 'hr', 'pr', 'qa',
-        // Timezone/time expressions
-        'utc', 'est', 'pst', 'gmt', 'et', 'pt', 'ct', 'mt',
-        // Generic business/legal terms
-        'inc', 'llc', 'ltd', 'corp', 'co', 'corp',
-        // Month names (should not be entities)
+        // === ENGLISH WORDS (common false positives from uppercase headlines) ===
+        // Articles/prepositions/pronouns
+        'the', 'and', 'for', 'with', 'from', 'this', 'that', 'not', 'you', 'all',
+        'more', 'new', 'our', 'but', 'are', 'was', 'has', 'had', 'its', 'his',
+        'her', 'she', 'they', 'them', 'who', 'how', 'why', 'can', 'out', 'now',
+        'get', 'got', 'may', 'set', 'put', 'see', 'way', 'day', 'top', 'one',
+        'two', 'per', 'via', 'due', 'yet', 'let', 'say', 'use', 'own', 'any',
+        'back', 'well', 'only', 'just', 'over', 'into', 'also', 'than', 'then',
+        'some', 'will', 'make', 'like', 'long', 'look', 'most', 'been', 'much',
+        'many', 'even', 'still', 'each', 'every', 'after', 'before', 'should',
+        'could', 'would', 'these', 'those', 'other', 'about', 'which', 'their',
+        'what', 'when', 'where', 'here', 'there', 'very', 'too', 'same', 'under',
+        // Common verbs/adjectives/adverbs that appear uppercase in headlines
+        'save', 'read', 'sign', 'live', 'free', 'next', 'run', 'fly', 'buy',
+        'sell', 'hold', 'keep', 'move', 'grow', 'rise', 'fall', 'drop', 'jump',
+        'push', 'pull', 'cut', 'hit', 'beat', 'miss', 'meet', 'lead', 'win',
+        'lose', 'pay', 'add', 'end', 'big', 'key', 'hot', 'low', 'high',
+        'old', 'far', 'near', 'off', 'up', 'down', 'plan', 'rule', 'law',
+        'ban', 'tax', 'gap', 'risk', 'goal', 'force', 'power', 'market',
+        'trade', 'price', 'rate', 'time', 'year', 'week', 'month', 'data',
+        'report', 'news', 'update', 'alert', 'break', 'closed', 'open',
+        'final', 'total', 'global', 'world', 'national', 'local', 'public',
+        'private', 'federal', 'central', 'major', 'latest', 'first', 'last',
+        'best', 'worst', 'real', 'main', 'core', 'net', 'gross',
+        // === GENERIC ABBREVIATIONS ===
+        'pm', 'am', 'ai', 'tv', 'rss', 'api', 'ceo', 'cfo', 'cto', 'coo', 'hr', 'pr', 'qa',
+        'faq', 'ii', 'iii', 'vip', 'gop', 'dem', 'rep', 'sen', 'gov',
+        // === TIMEZONE/TIME ===
+        'utc', 'est', 'pst', 'gmt', 'et', 'pt', 'ct', 'mt', 'edt', 'cdt', 'mdt', 'pdt',
+        'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun',
+        // === BUSINESS/LEGAL ===
+        'inc', 'llc', 'ltd', 'corp', 'co', 'plc', 'ag', 'sa', 'nv', 'bv',
+        // === MONTHS ===
         'january', 'february', 'march', 'april', 'may', 'june',
         'july', 'august', 'september', 'october', 'november', 'december',
-        // Common false positives
+        'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+        // === COUNTRY/CITY CODES (too ambiguous as entities) ===
         'ny', 'la', 'dc', 'sf', 'uk', 'eu', 'cn', 'jp', 'kr', 'au', 'ca',
+        'de', 'fr', 'it', 'es', 'nl', 'se', 'no', 'fi', 'dk', 'pl', 'br', 'mx',
+        'in', 'id', 'th', 'vn', 'ph', 'my', 'sg', 'hk', 'tw', 'ae', 'sa',
+        // === QUARTERS ===
         'q1', 'q2', 'q3', 'q4', 'q1 2026', 'q2 2026', 'q3 2026', 'q4 2026',
+        // === FINANCIAL FORMS/PRODUCTS ===
         'sec filing', 'form', '8-k', '10-k', '10-q',
-        // Sports leagues (not relevant for crypto trading)
-        'nfl', 'nba', 'mlb', 'nhl', 'mls', 'ncaa',
-        // Generic event terms
-        'inflation', 'earnings', 'recession', 'summit', 'conference',
-        // Financial product abbreviations
-        'etf', 'ico', 'ido', 'ieo',
-        // Common 2-letter country codes that get misidentified
-        'de', 'fr', 'it', 'es', 'nl', 'se', 'no', 'fi', 'dk', 'pl', 'br', 'mx', 'in', 'id', 'th', 'vn', 'ph',
+        'etf', 'ico', 'ido', 'ieo', 'ipo', 'spac', 'cdo', 'mbs',
+        // === SPORTS (not relevant for crypto) ===
+        'nfl', 'nba', 'mlb', 'nhl', 'mls', 'ncaa', 'fifa', 'ufc', 'wwe',
+        'nba', 'wnba', 'nflx', 'nascar', 'pga', 'lpga', 'pga', 'ufl',
+        'mls', 'nws', 'nwsl', 'mls', 'epl', 'laliga', 'serie', 'bundesliga',
+        // === FIAT CURRENCIES (not crypto tokens) ===
+        'usd', 'eur', 'gbp', 'jpy', 'cad', 'aud', 'chf', 'cny', 'inr', 'krw',
+        'sgd', 'hkd', 'twd', 'thb', 'mxn', 'brl', 'zar', 'rub', 'try',
+        // === STOCK TICKERS (equities, not crypto) ===
+        'aapl', 'msft', 'amzn', 'goog', 'googl', 'meta', 'tsla', 'nvda', 'amd',
+        'intc', 'xom', 'jpm', 'v', 'ma', 'brk', 'unh', 'jnj', 'wmt', 'pg',
+        'dis', 'nflx', 'adbe', 'crm', 'orcl', 'crm', 'pypl', 'sq', 'shop',
+        'coin', 'pltr', 'rivn', 'lcid', 'nke', 'ba', 'gs', 'ms', 'axp',
+        'tmo', 'lin', 'lmt', 'rtx', 'de', 'cat', 'ups', 'fdx',
+        'cvx', 'cop', 'slb', 'eog', 'oxy', ' MPC', 'wfc', 'bac', 'c',
+        'spdr', 'dia', 'qqq', 'spy', 'iwm', 'vix', 'dji', 'gspc', 'ixic',
+        'dax', 'ftse', 'cac', 'hsi', 'nikkei', 'spx',
+        // === MEDIA ORGANIZATIONS ===
+        'cnn', 'bbc', 'nbc', 'cbs', 'abc', 'fox', 'msnbc', 'cnbc', 'reuters',
+        'bloomberg', 'ap', 'afp', 'esp', 'espn', 'sky', 'nyt', 'washington post',
+        // === GENERIC EVENT TERMS ===
+        'inflation', 'earnings', 'recession', 'summit', 'conference', 'meeting',
+        'hearing', 'vote', 'election', 'rally', 'protest', 'crash', 'bubble',
+        'correction', 'bear', 'bull', 'hawk', 'dove', 'pivot',
+        // === FINANCIAL METRICS ===
+        'gdp', 'cpi', 'ppi', 'pmi', 'eps', 'roe', 'roa', 'ebitda', 'pce',
+        'ytd', 'h1', 'h2', 'fy', 'ttm', 'ltm', 'gaap', 'non-gaap',
+        // === TECH TERMS (not entities) ===
+        'vpn', 'dns', 'ssl', 'tls', 'http', 'https', 'html', 'css', 'sql',
+        'ios', 'ios', 'app', 'saas', 'paas', 'iaas', 'ram', 'cpu', 'gpu',
+        'ssd', 'hdd', 'oled', 'lcd', 'led', 'ar', 'vr', 'mr', 'pc',
+        'tv', 'cd', 'dvd', 'usb', 'bluetooth', 'wifi', 'nft',
+        // === WORD FRAGMENTS (from partial word matches) ===
+        'ing', 'ion', 'ter', 'tic', 'bitc', 'tco', 'itc', 'est', 'ati',
+        'lat', 'ear', 'mar', 'sto', 'ent', 'lin', 'nal', 'ment',
+        // === MISC GARBAGE ===
+        'yes', 'ok', 'no', 'na', 'n/a', 'tba', 'fyi', 'lol', 'omg',
+        'ama', 'dmca', 'ped', 'kl', 'sd', 'sm', 'dm', 'sfw', 'nsfw',
     ]);
     // Patterns for garbage entities (dollar amounts, timestamps, etc.)
     GARBAGE_PATTERNS = [

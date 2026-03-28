@@ -87,7 +87,10 @@ export class DataManager {
         );
       `);
 
-      // Trades table
+      // Trades table — FK relaxed to allow internal strategy IDs
+      // (risk-managed-exit, position-recovery) that are not in the strategies table.
+      // better-sqlite3 does not support ALTER to drop FK, so we use a compile-time
+      // workaround: ensure sentinel strategies exist for these internal IDs.
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS trades (
           id TEXT PRIMARY KEY,
@@ -105,6 +108,28 @@ export class DataManager {
           FOREIGN KEY (strategyId) REFERENCES strategies (id)
         )
       `);
+
+      // Insert sentinel strategies for internal/system strategy IDs so FK always resolves.
+      // These are never shown to users and always isActive=0.
+      const sentinelIds = [
+        { id: 'risk-managed-exit', name: 'Risk Managed Exit (System)', desc: 'Automatic exit triggered by risk management', type: 'SYSTEM' },
+        { id: 'position-recovery', name: 'Position Recovery (System)', desc: 'Automatic position recovery exit', type: 'SYSTEM' },
+      ];
+      const now = new Date().toISOString();
+      const defaultSymbols = '[]';
+      const defaultTimeframe = '1m';
+      const defaultParams = '{}';
+      const defaultEntry = '[]';
+      const defaultExit = '[]';
+      const defaultRisk = '{}';
+      const defaultPerf = JSON.stringify({ totalTrades: 0, winningTrades: 0, losingTrades: 0, winRate: 0, totalPnL: 0, sharpeRatio: 0, maxDrawdown: 0, profitFactor: 0 });
+      const insertSentinel = this.db.prepare(`
+        INSERT OR IGNORE INTO strategies (id, name, description, type, symbols, timeframe, parameters, entryConditions, exitConditions, riskParameters, isActive, performance, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+      `);
+      for (const s of sentinelIds) {
+        insertSentinel.run(s.id, s.name, s.desc, s.type, defaultSymbols, defaultTimeframe, defaultParams, defaultEntry, defaultExit, defaultRisk, defaultPerf, now, now);
+      }
 
       // Market data table
       this.db.exec(`
