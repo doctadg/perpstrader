@@ -1218,22 +1218,36 @@ function extractEntitiesFromTopicAndKeywords(topic: string, keywords: string[]):
     const entities: string[] = [];
 
     // Match known organizations, institutions, and economic entities
-    const orgPattern = /\b((?:jpmorgan|goldman|morgan stanley|blackrock|fidelity|binance|coinbase|kraken|openai|google|meta|apple|microsoft|amazon|nvidia|tesla|federal reserve|fed|sec|cftc|imf|world bank|ecb|boj|pboc|trump administration|white house|congress|senate|supreme court|opec|china|russia|iran|ukraine|israel|treasury|dollar|eu|europe))\b/gi;
+    const orgPattern = /\b((?:jpmorgan|goldman|morgan stanley|blackrock|fidelity|binance|coinbase|kraken|openai|google|meta|apple|microsoft|amazon|nvidia|tesla|federal reserve|fed|sec|cftc|imf|world bank|ecb|boj|pboc|trump administration|white house|congress|senate|supreme court|opec|china|russia|iran|ukraine|israel|treasury|dollar|eu|europe|dow jones|s&p|nasdaq|ftse|dax|nikkei|hang seng))\b/gi;
     const orgMatches = topic.match(orgPattern);
     if (orgMatches) {
         for (const m of orgMatches) entities.push(m.toLowerCase());
     }
 
     // Match known commodities and precious metals
-    const commodityPattern = /\b((?:gold|silver|copper|platinum|palladium|oil|crude|natural gas|uranium|lithium|cobalt|nickel))\b/gi;
+    const commodityPattern = /\b((?:gold|silver|copper|platinum|palladium|oil|crude|natural gas|uranium|lithium|cobalt|nickel|bitcoin|ethereum|solana|btc|eth))\b/gi;
     const commodityMatches = topic.match(commodityPattern);
     if (commodityMatches) {
         for (const m of commodityMatches) entities.push(m.toLowerCase());
     }
 
+    // Match economic concepts and policy terms (strong merge signal for Economics)
+    const econConceptPattern = /\b((?:inflation|deflation|gdp|recession|tariff|sanctions|interest rate|mortgage|yield curve|bond market|stimulus|quantitative easing|rate cut|rate hike|fomc|monetary policy|fiscal policy|trade war|currency war))\b/gi;
+    const econMatches = topic.match(econConceptPattern);
+    if (econMatches) {
+        for (const m of econMatches) entities.push(m.toLowerCase());
+    }
+
+    // Match key economic figures (Powell, Yellen, Bessent, Lagarde, etc.)
+    const econFigurePattern = /\b((?:Powell|Yellen|Bessent|Lagarde|Kuroda|Mishkin|Bernanke|Greenspan))\b/g;
+    const econFigureMatches = topic.match(econFigurePattern);
+    if (econFigureMatches) {
+        for (const m of econFigureMatches) entities.push(m.toLowerCase());
+    }
+
     // Extract proper nouns from topic (capitalized words, 2+ chars)
     const properNouns = topic.match(/\b[A-Z][a-z]{2,}\b/g) || [];
-    const stopwords = new Set(['this','that','with','from','after','while','when','where','what','which','their','there','they','these','those','than','into','over','under','before','about','between','during','without','within','through','against','first','last','next','best','worst','some','many','much','more','most','less','very','just','also','even','still','only','then','each','every','both','other','such','being','have','will','would','could','should','might','shall','can','need','must','news','crypto','update','updates','new','latest','daily','weekly','what',' analysts',' experts']);
+    const stopwords = new Set(['this','that','with','from','after','while','when','where','what','which','their','there','they','these','those','than','into','over','under','before','about','between','during','without','within','through','against','first','last','next','best','worst','some','many','much','more','most','less','very','just','also','even','still','only','then','each','every','both','other','such','being','have','will','would','could','should','might','shall','can','need','must','news','crypto','update','updates','new','latest','daily','weekly','what',' analysts',' experts','powell','yellen','bessent','lagarde','kuroda','mishkin','bernanke','greenspan','analysis','depth','rising','bullish','bearish','surge','crash','slips','ahead','impact','market','trends','investors','headlines','central','banks','face','policy','trap','rate','move','mortgage','interest','rates','expect','remainder','price','volatile','expanded','track','finally','predicts','growth','easing','cycle','ended','tour','statistical','agency','hiring','inflation','data','decision','safe','haven','jones','europe']);
     for (const pn of properNouns) {
         const lower = pn.toLowerCase();
         if (!stopwords.has(lower)) {
