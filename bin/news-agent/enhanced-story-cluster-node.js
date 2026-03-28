@@ -377,6 +377,12 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                 // Skip known missing clusters
                 if (missingClusterIds.has(clusterId))
                     continue;
+                // Skip mega-clusters early — don't waste time scoring them
+                const sizeInfo = knownClusterIds.has(clusterId)
+                    ? await story_cluster_store_enhanced_1.default.getClusterById(clusterId)
+                    : null;
+                if (sizeInfo && sizeInfo.article_count >= MAX_CLUSTER_ARTICLES)
+                    continue;
                 // Calculate Jaccard overlap: intersection / union
                 const intersection = [...matchingEntities].filter(e => articleEntitySet.has(e)).length;
                 const unionSet = new Set([...articleEntitySet, ...matchingEntities]);
@@ -386,8 +392,26 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                     bestEntityCluster = clusterId;
                 }
             }
-            // If entity overlap >= 0.20 (lowered from 0.25), assign immediately
-            if (bestEntityCluster && bestEntityOverlap >= 0.20) {
+            // Size-aware entity overlap threshold:
+            // - Small clusters (<50 articles): 0.20 — absorb freely
+            // - Medium clusters (50-200): 0.30 — require stronger entity signal
+            // - Large clusters (200-500): 0.40 — must share significant entities
+            // - Mega clusters (>500): 0.50 — only highly-specific entity matches
+            // This prevents catch-all clusters from absorbing every article in their category.
+            let entityOverlapThreshold = 0.20;
+            if (knownClusterIds.has(bestEntityCluster)) {
+                const sizeCheck = await story_cluster_store_enhanced_1.default.getClusterById(bestEntityCluster);
+                if (sizeCheck) {
+                    const size = sizeCheck.article_count || 0;
+                    if (size >= 500)
+                        entityOverlapThreshold = 0.50;
+                    else if (size >= 200)
+                        entityOverlapThreshold = 0.40;
+                    else if (size >= 50)
+                        entityOverlapThreshold = 0.30;
+                }
+            }
+            if (bestEntityCluster && bestEntityOverlap >= entityOverlapThreshold) {
                 // Verify cluster exists — category check relaxed for entity matches
                 if (knownClusterIds.has(bestEntityCluster)) {
                     const cluster = await story_cluster_store_enhanced_1.default.getClusterById(bestEntityCluster);
@@ -395,7 +419,7 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                     if (cluster && (cluster.category === article.categories[0] || bestEntityOverlap >= 0.40)) {
                         assignedClusterId = bestEntityCluster;
                         semanticMatch = true;
-                        logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)}, cat: ${cluster.category})`);
+                        logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)}, threshold: ${entityOverlapThreshold}, cat: ${cluster.category})`);
                     }
                 }
                 else if (!missingClusterIds.has(bestEntityCluster)) {
@@ -406,7 +430,7 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                             assignedClusterId = bestEntityCluster;
                             semanticMatch = true;
                             knownClusterIds.add(bestEntityCluster);
-                            logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)}, cat: ${cluster.category})`);
+                            logger_1.default.debug(`[EnhancedClusterNode] Entity-first match: "${article.title.slice(0, 40)}..." -> cluster ${bestEntityCluster.slice(0, 8)}... (overlap: ${bestEntityOverlap.toFixed(2)}, threshold: ${entityOverlapThreshold}, cat: ${cluster.category})`);
                         }
                     }
                     else {
@@ -908,6 +932,10 @@ async function mergeSingletonClusters() {
         const entityThreshold = 0.18;
         const kwThreshold = 0.22;
         const threshold = bestScore >= 0.30 ? entityThreshold : kwThreshold;
+        // Skip mega-clusters — don't feed them more articles
+        if (bestTarget && bestTarget.article_count >= MAX_CLUSTER_ARTICLES) {
+            continue;
+        }
         if (bestTarget && bestScore >= threshold) {
             if (!(await story_cluster_store_enhanced_1.default.clusterExists(singleton.id)) ||
                 !(await story_cluster_store_enhanced_1.default.clusterExists(bestTarget.id))) {

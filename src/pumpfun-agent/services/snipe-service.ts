@@ -400,8 +400,8 @@ class SnipeService {
     }
 
     // ── BUY DECISION ──────────────────────────────────────────────────────────
-    // Require higher threshold for heuristic-only scores
-    const effectiveThreshold = hasStoredAnalysis ? this.minScoreToBuy : 0.65;
+    // Use configured threshold for all scores (respect PUMPFUN_MIN_BUY_SCORE from .env)
+    const effectiveThreshold = this.minScoreToBuy;
     const shouldBuy = score >= effectiveThreshold && redFlags.length < 3;
 
     const candidate: SnipeCandidate = {

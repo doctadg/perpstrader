@@ -184,6 +184,25 @@ def mutate_weights(current_weights, analysis, quick_rugs, dry_run=False):
                 f"RAISE PUMPFUN_MIN_BUY_SCORE to 0.60 to cut bleeding"
             )
 
+    # Rule 6: High-score PnL advantage with perfect WR → boost discriminators
+    # When both high (0.70+) and mid (0.60-0.69) are highly profitable,
+    # but high-score has significantly higher avg PnL, boost the factors
+    # that push tokens into the high-score range (social, aiAnalysis).
+    high_70 = analysis.get("0.70-1.00", {})
+    mid_60 = analysis.get("0.60-0.69", {})
+    if (high_70.get("count", 0) >= 10 and mid_60.get("count", 0) >= 10
+            and high_70.get("win_rate", 0) >= 90 and mid_60.get("win_rate", 0) >= 90):
+        pnl_delta = high_70.get("avg_pnl_pct", 0) - mid_60.get("avg_pnl_pct", 0)
+        if pnl_delta > 15:
+            weights["social"] = min(WEIGHT_BOUNDS["social"][1], weights["social"] + MUTATION_STEP)
+            weights["aiAnalysis"] = min(WEIGHT_BOUNDS["aiAnalysis"][1], weights["aiAnalysis"] + MUTATION_STEP)
+            weights["websiteQuality"] = max(WEIGHT_BOUNDS["websiteQuality"][0], weights["websiteQuality"] - MUTATION_STEP)
+            weights["tokenQuality"] = max(WEIGHT_BOUNDS["tokenQuality"][0], weights["tokenQuality"] - MUTATION_STEP)
+            rationale.append(
+                f"High-score PnL delta +{pnl_delta:.1f}pp (both >90% WR): "
+                f"+social +aiAnalysis -websiteQuality -tokenQuality"
+            )
+
     # Renormalize positive weights to sum to 1.0
     pos_keys = ["social", "freshness", "websiteQuality", "aiAnalysis", "tokenQuality"]
     pos_sum = sum(weights[k] for k in pos_keys)

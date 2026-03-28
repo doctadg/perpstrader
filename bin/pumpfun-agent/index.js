@@ -102,7 +102,7 @@ async function main() {
             mode: bonding_curve_1.default.isPaperMode() ? 'PAPER' : 'LIVE',
             config: {
                 subscribeDurationMs: config.pumpfun?.subscribeDurationMs,
-                minScoreThreshold: config.pumpfun?.minScoreThreshold,
+                minScoreThreshold, // actual effective threshold from PUMPFUN_MIN_BUY_SCORE env
             },
         });
     }
