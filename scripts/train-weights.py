@@ -148,11 +148,30 @@ def mutate_weights(current_weights, analysis, quick_rugs, dry_run=False):
 
     # Rule 3: Quick rugs → increase pre-screening weight
     if len(quick_rugs) >= 3:
-        weights["websiteQuality"] = min(WEIGHT_BOUNDS["websiteQuality"][1], weights["websiteQuality"] + MUTATION_STEP)
-        weights["redFlagPenalty"] = min(WEIGHT_BOUNDS["redFlagPenalty"][1], weights["redFlagPenalty"] + MUTATION_STEP)
-        rationale.append(
-            f"{len(quick_rugs)} quick rugs detected: +websiteQuality +redFlagPenalty"
-        )
+        # Proportional mutation: more rugs = bigger step
+        rug_ratio = len(quick_rugs) / max(sum(v.get("count", 0) for v in analysis.values()), 1)
+        step = min(MUTATION_STEP * max(1, int(rug_ratio * 3)), 0.15)
+
+        # If websiteQuality or redFlagPenalty at bounds, redistribute
+        wq_at_max = weights["websiteQuality"] >= WEIGHT_BOUNDS["websiteQuality"][1] - 0.001
+        rfp_at_max = weights["redFlagPenalty"] >= WEIGHT_BOUNDS["redFlagPenalty"][1] - 0.001
+
+        if wq_at_max and rfp_at_max:
+            # Both maxed — shift weight from social/tokenQuality to aiAnalysis (better screening)
+            weights["aiAnalysis"] = min(WEIGHT_BOUNDS["aiAnalysis"][1], weights["aiAnalysis"] + step)
+            weights["social"] = max(WEIGHT_BOUNDS["social"][0], weights["social"] - step * 0.5)
+            rationale.append(
+                f"{len(quick_rugs)} quick rugs ({rug_ratio:.0%}): websiteQuality+redFlagPenalty at max → "
+                f"+aiAnalysis -social (better LLM screening)"
+            )
+        else:
+            if not wq_at_max:
+                weights["websiteQuality"] = min(WEIGHT_BOUNDS["websiteQuality"][1], weights["websiteQuality"] + step)
+            if not rfp_at_max:
+                weights["redFlagPenalty"] = min(WEIGHT_BOUNDS["redFlagPenalty"][1], weights["redFlagPenalty"] + step)
+            rationale.append(
+                f"{len(quick_rugs)} quick rugs ({rug_ratio:.0%}): +websiteQuality +redFlagPenalty"
+            )
 
     # Rule 4: Good WR but negative PnL → TP too early
     all_outcomes = [v for v in analysis.values() if isinstance(v.get("avg_pnl_pct"), (int, float))]

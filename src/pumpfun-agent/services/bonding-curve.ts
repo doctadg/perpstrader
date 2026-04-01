@@ -2,11 +2,13 @@
 // Supports both paper and live modes
 // Uses Helius RPC for on-chain transactions
 
-import { Connection, PublicKey, Transaction, VersionedTransaction, Keypair, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, VersionedTransaction, Keypair, SystemProgram, LAMPORTS_PER_SOL, ComputeBudgetProgram, TransactionMessage } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress,
   getAccount,
+  createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
 import bs58 from 'bs58';
 import nacl from 'tweetnacl';
@@ -18,6 +20,8 @@ const PUMPFUN_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkjon8nkdqXHDr3EbmLB4TqRAS
 
 // pump.fun Global state (holds fee recipient)
 const PUMPFUN_GLOBAL = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf');
+// pump.fun Fee recipient (derived from global state, but hardcoded for speed)
+const PUMPFUN_FEE_RECIPIENT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbCfKUrXB2v6Mc');
 
 // Associated token program
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
@@ -107,6 +111,27 @@ const STOP_LOSS_MULTIPLIER = 0.6; // Exit at 40% down (was 0.4 = 60% down)
 export const TIME_EXIT_MINUTES = 45;     // Kill stale positions after 45 min flat
 const MAX_CONCURRENT_POSITIONS = parseInt(process.env.PUMPFUN_MAX_POSITIONS || '5');
 const DAILY_LOSS_LIMIT_SOL = parseFloat(process.env.PUMPFUN_DAILY_LOSS_LIMIT || '2.0'); // Kill switch
+
+// ── Live Trading Constants ──
+const COMMITMENT_LEVEL = 'confirmed' as any; // same as paper mode uses
+const TX_CONFIRM_TIMEOUT_S = 15; // seconds to wait for tx confirmation
+const COMPUTE_UNIT_LIMIT = 200_000; // compute units for buy/sell
+const COMPUTE_UNIT_PRICE_MICROLAMPORTS = 100_000; // priority fee ~0.0001 SOL per tx
+const JITO_TIP_LAMPORTS = 100_000; // Jito tip amount (0.0001 SOL) for MEV protection
+const JITO_TIP_ACCOUNTS = [
+  '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
+  'HFqU5x63VTqvQss8hp11i4bVqkfRtQ7NmXwkiNPLNiVZ',
+  'Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY',
+  'ADaUMid9yfUC67HyGY2avCA952rrXy1RLKmH6iW6eNsL',
+  'DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh',
+  'ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt',
+  'DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL',
+  '3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT',
+];
+
+// ── Anchor Instruction Discriminators ──
+const BUY_DISCRIMINATOR = Buffer.from([102, 6, 61, 18, 1, 218, 235, 234]);
+const SELL_DISCRIMINATOR = Buffer.from([51, 230, 133, 164, 1, 127, 131, 173]);
 
 function simulateSlippage(min: number, max: number): number {
   // More slippage = more common (exponential distribution weighted toward min)
@@ -395,10 +420,8 @@ class BondingCurveService {
       return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
     }
 
-    // Live buy not implemented yet (requires transaction building)
-    // Will be added when going live
-    logger.warn('[BondingCurve] Live buy not yet implemented, using paper fallback');
-    return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
+    // Live buy
+    return this.liveBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
   }
 
   /**
@@ -504,6 +527,362 @@ class BondingCurveService {
     };
   }
 
+  // ==========================================
+  // LIVE TRADING — Real On-Chain Execution
+  // ==========================================
+
+  /**
+   * Live buy: execute a real pump.fun bonding curve buy transaction.
+   * Builds the transaction with compute budget, Jito tip, and pump.fun buy instruction.
+   */
+  private async liveBuy(
+    tokenMint: string,
+    tokenSymbol: string,
+    solAmount: number,
+    tpLevels: TpLevel[],
+    timestamp: Date,
+    entryScore?: number,
+  ): Promise<SnipeResult> {
+    if (!this.connection || !this.wallet) {
+      logger.error('[LIVE] No connection or wallet, falling back to paper');
+      return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
+    }
+
+    const mint = new PublicKey(tokenMint);
+
+    // ── 1. Read real bonding curve state ──
+    const state = await this.readBondingCurveState(tokenMint);
+    if (!state) {
+      logger.warn(`[LIVE] Cannot read bonding curve for ${tokenSymbol}, falling back to paper`);
+      return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
+    }
+
+    if (state.complete) {
+      return { success: false, tokenAddress: tokenMint, solSpent: 0, tokensReceived: 0, error: 'Bonding curve complete', paperMode: false, timestamp };
+    }
+
+    // ── 2. Calculate quote from real state ──
+    const quote = this.getBuyQuote(state, solAmount);
+    if (!quote || quote.tokenAmount <= 0) {
+      return { success: false, tokenAddress: tokenMint, solSpent: 0, tokensReceived: 0, error: 'Quote returned zero tokens', paperMode: false, timestamp };
+    }
+
+    // ── 3. Derive PDAs ──
+    const bondingCurve = await this.getBondingCurvePDA(mint);
+    const associatedBondingCurve = await this.getAssociatedBondingCurve(mint);
+    const buyerAta = getAssociatedTokenAddressSync(mint, this.wallet.publicKey);
+    const buyerPubkey = this.wallet.publicKey;
+
+    // ── 4. Build transaction instructions ──
+    const instructions: any[] = [];
+
+    // Compute budget
+    instructions.push(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: COMPUTE_UNIT_LIMIT }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: COMPUTE_UNIT_PRICE_MICROLAMPORTS }),
+    );
+
+    // Create ATA if it doesn't exist
+    try {
+      await getAccount(this.connection, buyerAta, 'confirmed');
+      logger.debug(`[LIVE] ATA already exists for ${tokenSymbol}`);
+    } catch {
+      logger.info(`[LIVE] Creating ATA for ${tokenSymbol}`);
+      instructions.push(
+        createAssociatedTokenAccountInstruction(
+          buyerPubkey,   // payer
+          buyerAta,      // ata
+          buyerPubkey,   // owner
+          mint,          // mint
+        ),
+      );
+    }
+
+    // ── 5. Build pump.fun buy instruction ──
+    // Anchor discriminator + amount (u64) + maxSolCost (u64) with 15% slippage buffer
+    const maxSolCost = BigInt(Math.floor(solAmount * 1.15 * LAMPORTS_PER_SOL));
+    const amount = BigInt(Math.floor(solAmount * LAMPORTS_PER_SOL));
+    const buyData = Buffer.alloc(8 + 8 + 8);
+    BUY_DISCRIMINATOR.copy(buyData, 0);
+    buyData.writeBigUInt64LE(amount, 8);
+    buyData.writeBigUInt64LE(maxSolCost, 16);
+
+    const buyIx = {
+      programId: PUMPFUN_PROGRAM_ID,
+      keys: [
+        { pubkey: buyerPubkey, isSigner: true, isWritable: true },          // global
+        { pubkey: PUMPFUN_FEE_RECIPIENT, isSigner: false, isWritable: true }, // fee_recipient
+        { pubkey: mint, isSigner: false, isWritable: false },                // mint
+        { pubkey: bondingCurve, isSigner: false, isWritable: true },         // bonding_curve
+        { pubkey: associatedBondingCurve, isSigner: false, isWritable: true }, // associated_bonding_curve
+        { pubkey: buyerAta, isSigner: false, isWritable: true },             // associated_user
+        { pubkey: buyerPubkey, isSigner: true, isWritable: true },           // user
+        { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },   // system_program
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },    // token_program
+        { pubkey: RENT_SYSVAR, isSigner: false, isWritable: false },         // rent
+        { pubkey: PUMPFUN_EVENT_AUTHORITY, isSigner: false, isWritable: false }, // event_authority
+        { pubkey: PUMPFUN_PROGRAM_ID, isSigner: false, isWritable: false },  // program
+      ],
+      data: buyData,
+    };
+    instructions.push(buyIx);
+
+    // ── 6. Jito tip (random tip account for MEV protection) ──
+    const tipAccount = JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
+    instructions.push(
+      SystemProgram.transfer({
+        fromPubkey: buyerPubkey,
+        toPubkey: new PublicKey(tipAccount),
+        lamports: JITO_TIP_LAMPORTS,
+      }),
+    );
+
+    // ── 7. Build, sign, and send transaction ──
+    try {
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash(COMMITMENT_LEVEL);
+
+      const tx = new Transaction();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = buyerPubkey;
+      tx.add(...instructions);
+
+      tx.sign(this.wallet);
+      const serialized = tx.serialize();
+
+      logger.info(`[LIVE BUY] ${tokenSymbol} | ${solAmount.toFixed(3)} SOL | tx size: ${serialized.length} bytes | sending...`);
+
+      const txid = await this.connection.sendRawTransaction(serialized, {
+        skipPreflight: true,
+        maxRetries: 2,
+      });
+
+      logger.info(`[LIVE BUY] ${tokenSymbol} | tx: ${txid} | confirming...`);
+
+      // ── 8. Confirm transaction ──
+      const confirmation = await this.connection.confirmTransaction({
+        signature: txid,
+        blockhash,
+        lastValidBlockHeight,
+      }, COMMITMENT_LEVEL);
+
+      if (confirmation.value.err) {
+        logger.error(`[LIVE BUY] ${tokenSymbol} FAILED: ${JSON.stringify(confirmation.value.err)}`);
+        return {
+          success: false, tokenAddress: tokenMint, solSpent: 0, tokensReceived: 0,
+          error: `Transaction failed: ${JSON.stringify(confirmation.value.err)}`,
+          paperMode: false, timestamp,
+        };
+      }
+
+      const actualCost = (await this.connection.getTransaction(txid, { commitment: 'confirmed' }))?.meta?.preBalances?.[0]
+        ? 0 // We'll compute from balance diff
+        : solAmount;
+
+      logger.info(`[LIVE BUY] CONFIRMED ${tokenSymbol} | tx: ${txid} | ~${quote.tokenAmount.toFixed(0)} tokens`);
+
+      // ── 9. Track position in memory (same as paper) ──
+      this.paperPositions.set(tokenMint, {
+        tokenMint,
+        tokenSymbol,
+        tokensOwned: quote.tokenAmount,
+        solSpent: solAmount,
+        entryPrice: quote.pricePerToken,
+        buyTimestamp: timestamp,
+        tpLevels: tpLevels.map(tp => ({ ...tp, triggered: false })),
+        partialSells: [],
+      });
+
+      if (entryScore !== undefined) {
+        this.entryScores.set(tokenMint, entryScore);
+      }
+      this.maxMultipliers.set(tokenMint, 1.0);
+
+      // Persist to DB
+      const txFee = (COMPUTE_UNIT_PRICE_MICROLAMPORTS * COMPUTE_UNIT_LIMIT + JITO_TIP_LAMPORTS) / LAMPORTS_PER_SOL;
+      this.persistBuyToDb(tokenMint, tokenSymbol, solAmount, quote, tpLevels, timestamp, entryScore, 0, txFee).catch(() => {});
+
+      return {
+        success: true,
+        tokenAddress: tokenMint,
+        solSpent: solAmount,
+        tokensReceived: quote.tokenAmount,
+        txSignature: txid,
+        paperMode: false,
+        timestamp,
+      };
+    } catch (err: any) {
+      logger.error(`[LIVE BUY] ${tokenSymbol} ERROR: ${err?.message || err}`);
+      return {
+        success: false, tokenAddress: tokenMint, solSpent: 0, tokensReceived: 0,
+        error: `Live buy error: ${err?.message || String(err)}`,
+        paperMode: false, timestamp,
+      };
+    }
+  }
+
+  /**
+   * Live sell: execute a real pump.fun bonding curve sell transaction.
+   */
+  private async liveSellAll(
+    tokenMint: string,
+    tokenSymbol: string,
+    position: PaperPosition,
+    currentMultiplier: number,
+    reason: string,
+  ): Promise<SellResult | null> {
+    if (!this.connection || !this.wallet) return null;
+
+    const mint = new PublicKey(tokenMint);
+    const buyerAta = getAssociatedTokenAddressSync(mint, this.wallet.publicKey);
+    const buyerPubkey = this.wallet.publicKey;
+
+    // Check token balance in ATA
+    let tokenBalance: number;
+    try {
+      const account = await getAccount(this.connection, buyerAta, 'confirmed');
+      tokenBalance = Number(account.amount) / 1e6;
+    } catch {
+      logger.warn(`[LIVE SELL] No ATA found for ${tokenSymbol}, may already be sold`);
+      return null;
+    }
+
+    if (tokenBalance < 1) {
+      logger.warn(`[LIVE SELL] ${tokenSymbol} has zero token balance, skipping`);
+      return null;
+    }
+
+    // Derive PDAs
+    const bondingCurve = await this.getBondingCurvePDA(mint);
+    const associatedBondingCurve = await this.getAssociatedBondingCurve(mint);
+
+    // Build instructions
+    const instructions: any[] = [];
+
+    // Compute budget
+    instructions.push(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: COMPUTE_UNIT_LIMIT }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: COMPUTE_UNIT_PRICE_MICROLAMPORTS }),
+    );
+
+    // ── Build pump.fun sell instruction ──
+    // Anchor discriminator + amount (u64)
+    const tokenAmountLamports = BigInt(Math.floor(tokenBalance * 1e6));
+    const sellData = Buffer.alloc(8 + 8);
+    SELL_DISCRIMINATOR.copy(sellData, 0);
+    sellData.writeBigUInt64LE(tokenAmountLamports, 8);
+
+    const sellIx = {
+      programId: PUMPFUN_PROGRAM_ID,
+      keys: [
+        { pubkey: buyerPubkey, isSigner: true, isWritable: true },          // global
+        { pubkey: PUMPFUN_FEE_RECIPIENT, isSigner: false, isWritable: true }, // fee_recipient
+        { pubkey: mint, isSigner: false, isWritable: false },                // mint
+        { pubkey: bondingCurve, isSigner: false, isWritable: true },         // bonding_curve
+        { pubkey: associatedBondingCurve, isSigner: false, isWritable: true }, // associated_bonding_curve
+        { pubkey: buyerAta, isSigner: false, isWritable: true },             // associated_user
+        { pubkey: buyerPubkey, isSigner: true, isWritable: true },           // user
+        { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },   // system_program
+        { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // associated_token_program
+        { pubkey: PUMPFUN_EVENT_AUTHORITY, isSigner: false, isWritable: false }, // event_authority
+        { pubkey: PUMPFUN_PROGRAM_ID, isSigner: false, isWritable: false },  // program
+      ],
+      data: sellData,
+    };
+    instructions.push(sellIx);
+
+    // Jito tip
+    const tipAccount = JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
+    instructions.push(
+      SystemProgram.transfer({
+        fromPubkey: buyerPubkey,
+        toPubkey: new PublicKey(tipAccount),
+        lamports: JITO_TIP_LAMPORTS,
+      }),
+    );
+
+    // Build, sign, send
+    try {
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash(COMMITMENT_LEVEL);
+
+      const tx = new Transaction();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = buyerPubkey;
+      tx.add(...instructions);
+
+      tx.sign(this.wallet);
+      const serialized = tx.serialize();
+
+      logger.info(`[LIVE SELL] ${tokenSymbol} | ${tokenBalance.toFixed(0)} tokens (${reason}) | sending...`);
+
+      const txid = await this.connection.sendRawTransaction(serialized, {
+        skipPreflight: true,
+        maxRetries: 2,
+      });
+
+      logger.info(`[LIVE SELL] ${tokenSymbol} | tx: ${txid} | confirming...`);
+
+      const confirmation = await this.connection.confirmTransaction({
+        signature: txid,
+        blockhash,
+        lastValidBlockHeight,
+      }, COMMITMENT_LEVEL);
+
+      if (confirmation.value.err) {
+        logger.error(`[LIVE SELL] ${tokenSymbol} FAILED: ${JSON.stringify(confirmation.value.err)}`);
+        return null;
+      }
+
+      // Calculate actual SOL received from the transaction
+      const txDetails = await this.connection.getTransaction(txid, { commitment: 'confirmed' });
+      const preBalance = txDetails?.meta?.preBalances?.[0] ?? 0;
+      const postBalance = txDetails?.meta?.postBalances?.[0] ?? 0;
+      const solReceived = Math.max(0, (postBalance - preBalance)) / LAMPORTS_PER_SOL;
+
+      logger.info(`[LIVE SELL] CONFIRMED ${tokenSymbol} | tx: ${txid} | ${solReceived.toFixed(4)} SOL received`);
+
+      // Save values before cleaning up tracking maps
+      const entryScore = this.entryScores.get(tokenMint);
+      const positionMaxMultiplier = this.maxMultipliers.get(tokenMint) || currentMultiplier;
+
+      // Clean up position tracking
+      this.paperPositions.delete(tokenMint);
+      this.entryScores.delete(tokenMint);
+      this.maxMultipliers.delete(tokenMint);
+
+      // Persist to DB
+      const totalPnl = solReceived + position.partialSells.reduce((s, p) => s + p.solReceived, 0) - position.solSpent;
+      const exitSol = solReceived + position.partialSells.reduce((s, p) => s + p.solReceived, 0);
+      const holdTimeMinutes = (Date.now() - position.buyTimestamp.getTime()) / 60000;
+      const pnlPct = position.solSpent > 0 ? ((exitSol - position.solSpent) / position.solSpent) * 100 : 0;
+      const tpLevelsHit = position.partialSells.map(p => p.tpLevel);
+
+      // Determine outcome
+      let outcome: string;
+      if (pnlPct > 0) outcome = 'PROFIT_' + reason;
+      else if (position.partialSells.length > 0) outcome = 'PROFIT_PARTIAL';
+      else if (reason === 'TIME_EXIT' || reason === 'STALE_EXIT') outcome = reason;
+      else outcome = 'LOSS_STOP';
+
+      this.persistSellToDb(tokenMint, tokenSymbol, tokenBalance, solReceived, reason, totalPnl, entryScore, currentMultiplier).catch(() => {});
+      this.persistPositionUpdate(tokenMint, position, 'CLOSED', positionMaxMultiplier, currentMultiplier, entryScore).catch(() => {});
+      this.persistOutcomeToDb(tokenMint, tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, outcome, holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => {});
+      this.recordDailyPnl(totalPnl);
+
+      return {
+        success: true,
+        tokenAddress: tokenMint,
+        tokensSold: tokenBalance,
+        solReceived,
+        txSignature: txid,
+        paperMode: false,
+        timestamp: new Date(),
+      };
+    } catch (err: any) {
+      logger.error(`[LIVE SELL] ${tokenSymbol} ERROR: ${err?.message || err}`);
+      return null;
+    }
+  }
+
   /**
    * Sell tokens (or partial) from a position
    * Checks TP levels and sells the appropriate portion
@@ -512,6 +891,24 @@ class BondingCurveService {
     const position = this.paperPositions.get(tokenMint);
     if (!position) return [];
 
+    // ── LIVE MODE: sell all remaining tokens when any TP triggers ──
+    // pump.fun bonding curve sell-all is simpler and safer than partial sells
+    if (!this.paperMode && this.wallet && this.connection) {
+      for (const tp of position.tpLevels) {
+        if (tp.triggered) continue;
+        if (currentPriceMultiplier < tp.multiplier) continue;
+
+        tp.triggered = true;
+        const result = await this.liveSellAll(tokenMint, position.tokenSymbol, position, currentPriceMultiplier, `TP_${tp.name}`);
+        if (result) return [result];
+        // If live sell failed, fall through to paper to keep tracking
+        logger.warn(`[LIVE] TP sell failed for ${position.tokenSymbol}, falling to paper tracking`);
+        return [];
+      }
+      return [];
+    }
+
+    // ── PAPER MODE: simulated partial TP sells ──
     const results: SellResult[] = [];
     const entryScore = this.entryScores.get(tokenMint);
     const positionMaxMultiplier = this.maxMultipliers.get(tokenMint) || 1.0;
@@ -591,6 +988,12 @@ class BondingCurveService {
     const position = this.paperPositions.get(tokenMint);
     if (!position || position.tokensOwned < 1) return null;
 
+    // ── LIVE MODE: execute real on-chain sell ──
+    if (!this.paperMode && this.wallet && this.connection) {
+      return this.liveSellAll(tokenMint, position.tokenSymbol, position, currentPriceMultiplier, reason);
+    }
+
+    // ── PAPER MODE: simulate sell ──
     const grossSol = position.tokensOwned * currentPriceMultiplier * position.entryPrice;
     const sellSlippage = simulateSlippage(SLIPPAGE_SELL_MIN, SLIPPAGE_SELL_MAX);
     const solToReceive = Math.max(0, grossSol * (1 - sellSlippage) - PRIORITY_FEE_SOL);

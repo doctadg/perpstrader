@@ -114,6 +114,15 @@ declare class BondingCurveService {
      */
     private paperBuy;
     /**
+     * Live buy: execute a real pump.fun bonding curve buy transaction.
+     * Builds the transaction with compute budget, Jito tip, and pump.fun buy instruction.
+     */
+    private liveBuy;
+    /**
+     * Live sell: execute a real pump.fun bonding curve sell transaction.
+     */
+    private liveSellAll;
+    /**
      * Sell tokens (or partial) from a position
      * Checks TP levels and sells the appropriate portion
      */

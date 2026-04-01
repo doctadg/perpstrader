@@ -109,21 +109,23 @@ class ResearchEngine {
             // Step 1: Analyze current market conditions
             const marketRegime = await this.marketAnalyzer.analyze();
             logger_1.default.info(`[ResearchEngine] Market regime: ${marketRegime.regime}, volatility: ${marketRegime.volatility.toFixed(2)}`);
-            // Step 2: Check queue capacity
+            // Step 2: Check queue capacity (only gates new idea generation, not backtest processing)
             const queueSize = await this.ideaQueue.getPendingCount();
-            if (queueSize >= this.config.maxQueueSize) {
+            const canGenerateIdeas = queueSize < this.config.maxQueueSize;
+            if (!canGenerateIdeas) {
                 logger_1.default.warn(`[ResearchEngine] Queue full (${queueSize}/${this.config.maxQueueSize}), skipping generation`);
-                return;
             }
-            // Step 3: Generate strategy ideas based on market conditions
-            const ideas = await this.strategyGenerator.generateIdeas(marketRegime, this.config.ideasPerRun);
-            logger_1.default.info(`[ResearchEngine] Generated ${ideas.length} strategy ideas`);
-            // Step 4: Filter high-confidence ideas and add to queue
-            const validIdeas = ideas.filter(idea => idea.confidence >= this.config.minConfidence);
-            logger_1.default.info(`[ResearchEngine] ${validIdeas.length} ideas meet confidence threshold (${this.config.minConfidence})`);
-            // Step 5: Add ideas to queue
-            const addedCount = await this.ideaQueue.addIdeas(validIdeas);
-            logger_1.default.info(`[ResearchEngine] Added ${addedCount} ideas to backtest queue`);
+            if (canGenerateIdeas) {
+                // Step 3: Generate strategy ideas based on market conditions
+                const ideas = await this.strategyGenerator.generateIdeas(marketRegime, this.config.ideasPerRun);
+                logger_1.default.info(`[ResearchEngine] Generated ${ideas.length} strategy ideas`);
+                // Step 4: Filter high-confidence ideas and add to queue
+                const validIdeas = ideas.filter(idea => idea.confidence >= this.config.minConfidence);
+                logger_1.default.info(`[ResearchEngine] ${validIdeas.length} ideas meet confidence threshold (${this.config.minConfidence})`);
+                // Step 5: Add ideas to queue
+                const addedCount = await this.ideaQueue.addIdeas(validIdeas);
+                logger_1.default.info(`[ResearchEngine] Added ${addedCount} ideas to backtest queue`);
+            }
             // Step 6: Process any pending backtest jobs
             await this.processPendingBacktests();
             const duration = Date.now() - startTime;
