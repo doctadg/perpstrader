@@ -503,7 +503,18 @@ async function riskGateNode(state) {
         };
         let riskAssessment;
         if (isExitSignal && openPosition) {
-            signal.size = Math.abs(openPosition.size);
+            const exitRawSize = Math.abs(openPosition.size);
+            signal.size = Number.isFinite(exitRawSize) && exitRawSize > 0 ? exitRawSize : 0;
+            if (signal.size <= 0) {
+                logger_1.default.error(`[RiskGateNode] ${state.symbol}: corrupted position size=${openPosition.size}, rejecting exit`);
+                return {
+                    currentStep: 'RISK_GATE_REJECTED',
+                    signal: null,
+                    riskAssessment: null,
+                    shouldExecute: false,
+                    thoughts: [...state.thoughts, `Rejected exit for ${state.symbol}: corrupted position size`],
+                };
+            }
             riskAssessment = {
                 approved: true,
                 suggestedSize: signal.size,

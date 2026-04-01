@@ -597,11 +597,23 @@ class ExecutionEngine {
                     this.pendingManagedExitSymbols.add(symbolKey);
                     try {
                         logger_1.default.warn(`[PaperExit] ${symbolKey}: ${exitReason}`);
+                        const closeSize = Math.abs(position.size);
+                        // Guard: clamp corrupted position sizes to prevent Infinity cascades
+                        const safeCloseSize = Number.isFinite(closeSize) && closeSize > 0 ? closeSize : 0;
+                        if (safeCloseSize <= 0) {
+                            logger_1.default.error(`[PaperExit] ${symbolKey}: corrupted position size=${position.size}, removing`);
+                            try {
+                                paperPortfolio.removePosition(position.symbol);
+                            }
+                            catch (_) { /* non-critical */ }
+                            this.positionExitPlans.delete(symbolKey);
+                            return;
+                        }
                         const closeSignal = {
                             id: `paper-exit-${Date.now()}`,
                             symbol: position.symbol,
                             action: plan.side === 'LONG' ? 'SELL' : 'BUY',
-                            size: Math.abs(position.size),
+                            size: safeCloseSize,
                             price: resolvedPrice,
                             type: 'MARKET',
                             timestamp: new Date(),
@@ -702,11 +714,19 @@ class ExecutionEngine {
                 this.pendingManagedExitSymbols.add(symbolKey);
                 try {
                     logger_1.default.warn(`[ExecutionEngine] Managed exit for ${position.symbol}: ${exitReason}`);
+                    // Guard: clamp corrupted position sizes
+                    const liveCloseSize = Math.abs(position.size);
+                    const safeLiveCloseSize = Number.isFinite(liveCloseSize) && liveCloseSize > 0 ? liveCloseSize : 0;
+                    if (safeLiveCloseSize <= 0) {
+                        logger_1.default.error(`[ExecutionEngine] ${symbolKey}: corrupted live position size=${position.size}, skipping exit`);
+                        this.pendingManagedExitSymbols.delete(symbolKey);
+                        continue;
+                    }
                     const closeSignal = {
                         id: `managed-exit-${Date.now()}`,
                         symbol: position.symbol,
                         action: position.side === 'LONG' ? 'SELL' : 'BUY',
-                        size: Math.abs(position.size),
+                        size: safeLiveCloseSize,
                         price: position.markPrice,
                         type: 'MARKET',
                         timestamp: new Date(),
@@ -753,7 +773,12 @@ class ExecutionEngine {
         const now = Date.now();
         // PAPER TRADING MODE: bypass Hyperliquid entirely
         if (process.env.PAPER_TRADING === 'true') {
-            logger_1.default.info(`[PAPER] Executing ${signal.action} ${signal.size} ${signal.symbol} @ ${signal.price} (confidence: ${signal.confidence?.toFixed(2)})`);
+            // HARD GUARD: Reject non-finite trade sizes (Infinity, NaN) before any processing.
+            if (!Number.isFinite(signal.size) || signal.size <= 0) {
+                logger_1.default.warn(`[PAPER] Rejecting ${signal.action} ${signal.symbol}: invalid size=${signal.size}`);
+                throw new Error(`Invalid paper trade size for ${signal.symbol}: ${signal.size}`);
+            }
+            logger_1.default.info(`[PAPER] Executing ${signal.action} ${signal.size.toFixed(4)} ${signal.symbol} @ ${signal.price} (confidence: ${signal.confidence?.toFixed(2)})`);
             if (signal.price) {
                 currentPrices.set(signal.symbol, signal.price);
             }
