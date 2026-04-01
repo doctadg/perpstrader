@@ -78,12 +78,28 @@ const VALID_ACTIONS = new Set([
   'crashes', 'crashed', 'crashing',
 ]);
 
+// Simple in-memory cache to skip topic generation if run recently
+let lastTopicGenerationTime = 0;
+const TOPIC_GENERATION_CACHE_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Topic Generation Node
  * Generates topics with strict validation for categorized articles
  */
 export async function topicGenerationNode(state: NewsAgentState): Promise<Partial<NewsAgentState>> {
   const startTime = Date.now();
+
+  // Cache check: skip if topics were generated recently
+  if (Date.now() - lastTopicGenerationTime < TOPIC_GENERATION_CACHE_MS) {
+    logger.info(`[TopicGenerationNode] Skipping - topics generated ${(Date.now() - lastTopicGenerationTime) / 1000}s ago (< 5min cache)`);
+    return {
+      currentStep: 'TOPIC_GENERATION_COMPLETE',
+      labeledArticles: state.labeledArticles as any[],
+      stats: { ...state.stats, labeled: (state.stats?.labeled || 0) },
+      thoughts: [...state.thoughts, 'Topic generation skipped (5min cache active)'],
+    };
+  }
+
   logger.info(`[TopicGenerationNode] Starting topic generation for ${state.labeledArticles.length} articles`);
 
   const labeledArticles: LabeledArticle[] = [];
@@ -157,6 +173,7 @@ export async function topicGenerationNode(state: NewsAgentState): Promise<Partia
   }
 
   const elapsed = Date.now() - startTime;
+  lastTopicGenerationTime = Date.now();
   logger.info(
     `[TopicGenerationNode] Completed in ${elapsed}ms. ` +
     `Generated: ${generated}, Skipped: ${skipped}`
@@ -196,7 +213,7 @@ async function generateTopic(article: FilteredArticle): Promise<{
     const response = await axios.post(
       `${config.openrouter.baseUrl}/chat/completions`,
       {
-        model: 'openai/gpt-oss-20b',
+        model: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
         messages: [
           {
             role: 'system',

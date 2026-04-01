@@ -26,14 +26,15 @@ METRICS_FILE = PROJECT_ROOT / "data" / "pumpfun-metrics-latest.json"
 MIN_TRADES_FOR_MUTATION = 20
 MUTATION_STEP = 0.05
 
-# Default weights (must match score-node.ts)
+# Default weights (must match score-node.ts DEFAULT_WEIGHTS)
+# Last updated: 2026-03-28 — aligned with score-node.ts hardcoded defaults
 DEFAULT_WEIGHTS = {
-    "social": 0.30,
-    "freshness": 0.20,
-    "websiteQuality": 0.10,
-    "aiAnalysis": 0.15,
+    "social": 0.32,
+    "freshness": 0.18,
+    "websiteQuality": 0.05,
+    "aiAnalysis": 0.30,
     "tokenQuality": 0.15,
-    "redFlagPenalty": 0.10,
+    "redFlagPenalty": 0.12,
 }
 
 WEIGHT_BOUNDS = {

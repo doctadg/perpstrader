@@ -67,7 +67,8 @@ class SnipeService {
     solPerSnipe = 0.5;
     cooldownMs = 3000; // 3s between snipes to avoid spam
     lastSnipeTime = 0;
-    // Paper mode pricing simulation
+    permanentBlacklist = new Set(); // Tokens we've traded and exited (never re-buy)
+    // Paper mode pricing - NO LONGER USED, kept for reference only
     tokenPrices = new Map(); // tokenMint -> price multiplier vs entry
     constructor() {
         this.minScoreToBuy = parseFloat(process.env.PUMPFUN_MIN_BUY_SCORE || '0.4');
@@ -437,8 +438,9 @@ class SnipeService {
         }
     }
     /**
-     * Paper mode: monitor real on-chain price movements for open positions.
-     * Falls back to random-walk simulation if RPC connection fails.
+     * Monitor open positions using REAL on-chain bonding curve data.
+     * No more random walk simulation — prices come from the actual blockchain.
+     * Applies slippage on sells, stop loss, and time-based exits.
      */
     startPriceSimulation() {
         const simulate = async () => {
@@ -451,55 +453,42 @@ class SnipeService {
                 setTimeout(simulate, 5000);
                 return;
             }
+            // Always use real on-chain price sampling
             let realMultipliers = null;
-            // Try real on-chain price sampling first
             try {
                 realMultipliers = await bonding_curve_1.default.sampleAndUpdatePositions();
             }
             catch (err) {
-                logger_1.default.debug(`[PriceSimulation] On-chain sampling failed, falling back to random-walk: ${err}`);
+                logger_1.default.warn(`[PriceMonitor] On-chain sampling failed: ${err}`);
             }
             for (const position of positions) {
-                // Use real multiplier if available, otherwise fall back to random-walk
-                let newMultiplier;
+                const newMultiplier = realMultipliers?.get(position.tokenMint) ?? 1.0;
                 if (realMultipliers && realMultipliers.has(position.tokenMint)) {
-                    // Use real on-chain price
-                    newMultiplier = realMultipliers.get(position.tokenMint);
-                    logger_1.default.debug(`[PriceSimulation] ${position.tokenSymbol} real price: ${newMultiplier.toFixed(3)}x`);
+                    logger_1.default.debug(`[PriceMonitor] ${position.tokenSymbol} on-chain: ${newMultiplier.toFixed(3)}x`);
                 }
-                else {
-                    // Fallback: random-walk simulation
-                    const currentMultiplier = this.tokenPrices.get(position.tokenMint) || 1.0;
-                    const rand = Math.random();
-                    let change;
-                    if (rand < 0.3) {
-                        // Pump: 5-20% increase
-                        change = 1 + (Math.random() * 0.15 + 0.05);
-                    }
-                    else if (rand < 0.8) {
-                        // Decline: 1-5% decrease
-                        change = 1 - (Math.random() * 0.04 + 0.01);
-                    }
-                    else {
-                        // Flat/slight up: -1% to +3%
-                        change = 1 + (Math.random() * 0.04 - 0.01);
-                    }
-                    // 0.2% chance of rug (instant crash)
-                    if (Math.random() < 0.002) {
-                        change = 0.01; // 99% loss
-                        logger_1.default.warn(`[PAPER SIM] RUG DETECTED: ${position.tokenSymbol}`);
-                    }
-                    newMultiplier = currentMultiplier * change;
-                    this.tokenPrices.set(position.tokenMint, newMultiplier);
-                    logger_1.default.debug(`[PriceSimulation] ${position.tokenSymbol} simulated price: ${newMultiplier.toFixed(3)}x`);
+                // ── STOP LOSS at 0.6x (40% down) ──
+                if (newMultiplier <= 0.6) {
+                    logger_1.default.warn(`[PriceMonitor] STOP LOSS: ${position.tokenSymbol} at ${newMultiplier.toFixed(2)}x`);
+                    await bonding_curve_1.default.emergencySell(position.tokenMint, newMultiplier, 'STOP_LOSS');
+                    this.permanentBlacklist.add(position.tokenMint);
+                    continue;
                 }
-                // Always keep tokenPrices in sync with the latest multiplier
-                this.tokenPrices.set(position.tokenMint, newMultiplier);
-                // Check stop loss at 0.4x (60% down)
-                if (newMultiplier <= 0.4) {
-                    logger_1.default.warn(`[PriceSimulation] STOP LOSS: ${position.tokenSymbol} at ${newMultiplier.toFixed(2)}x`);
-                    await bonding_curve_1.default.emergencySell(position.tokenMint, newMultiplier);
-                    this.tokenPrices.delete(position.tokenMint);
+                // ── TIME EXIT: kill stale positions ──
+                const ageMinutes = (Date.now() - position.buyTimestamp.getTime()) / 60000;
+                // Check if position never pumped (max mult from partial sells history or current)
+                const hasPumped = position.partialSells.length > 0; // Already hit a TP
+                const isFlat = newMultiplier < 0.8 && !hasPumped; // Underwater with no TP hits
+                if (ageMinutes >= bonding_curve_1.TIME_EXIT_MINUTES && isFlat) {
+                    logger_1.default.warn(`[PriceMonitor] TIME_EXIT: ${position.tokenSymbol} at ${newMultiplier.toFixed(2)}x after ${ageMinutes.toFixed(0)}min (never pumped)`);
+                    await bonding_curve_1.default.emergencySell(position.tokenMint, newMultiplier, 'TIME_EXIT');
+                    this.permanentBlacklist.add(position.tokenMint);
+                    continue;
+                }
+                // ── BONDING CURVE GONE + NO PUMP = rug ──
+                if (newMultiplier <= 0.05 && ageMinutes > 2) {
+                    logger_1.default.warn(`[PriceMonitor] RUG DETECTED: ${position.tokenSymbol} at ${newMultiplier.toFixed(3)}x after ${ageMinutes.toFixed(0)}min`);
+                    await bonding_curve_1.default.emergencySell(position.tokenMint, newMultiplier, 'RUG');
+                    this.permanentBlacklist.add(position.tokenMint);
                     continue;
                 }
                 // Check TP levels
@@ -515,7 +504,9 @@ class SnipeService {
         if (now - this.lastHourReset > 3600000) {
             this.snipeCountThisHour = 0;
             this.lastHourReset = now;
-            this.processedMints.clear(); // Clear seen mints to re-evaluate
+            // Do NOT clear processedMints — tokens are processed once, never re-evaluated
+            // Permanent blacklist prevents re-buying tokens we've already exited
+            logger_1.default.info(`[SnipeService] Hourly snipe counter reset. Seen: ${this.processedMints.size}, Blacklisted: ${this.permanentBlacklist.size}`);
         }
     }
     stop() {

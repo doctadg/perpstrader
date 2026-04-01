@@ -97,6 +97,23 @@ export interface TpLevel {
 /**
  * Bonding Curve execution service
  */
+// Realistic cost simulation for paper trading
+const SLIPPAGE_BUY_MIN = 0.03;   // 3% minimum buy slippage (MEV bots)
+const SLIPPAGE_BUY_MAX = 0.12;   // 12% worst case buy slippage
+const SLIPPAGE_SELL_MIN = 0.05;  // 5% minimum sell slippage
+const SLIPPAGE_SELL_MAX = 0.25;  // 25% worst case sell slippage (illiquid exits)
+const PRIORITY_FEE_SOL = 0.0005; // Priority fee per tx (~0.0005 SOL)
+const STOP_LOSS_MULTIPLIER = 0.6; // Exit at 40% down (was 0.4 = 60% down)
+export const TIME_EXIT_MINUTES = 45;     // Kill stale positions after 45 min flat
+const MAX_CONCURRENT_POSITIONS = parseInt(process.env.PUMPFUN_MAX_POSITIONS || '5');
+const DAILY_LOSS_LIMIT_SOL = parseFloat(process.env.PUMPFUN_DAILY_LOSS_LIMIT || '2.0'); // Kill switch
+
+function simulateSlippage(min: number, max: number): number {
+  // More slippage = more common (exponential distribution weighted toward min)
+  const raw = Math.random();
+  return min + (max - min) * (raw * raw); // Quadratic bias toward lower end
+}
+
 class BondingCurveService {
   private connection: Connection | null = null;
   private wallet: Keypair | null = null;
@@ -106,6 +123,9 @@ class BondingCurveService {
   private initialized = false;
   private entryScores: Map<string, number> = new Map();
   private maxMultipliers: Map<string, number> = new Map(); // track max multiplier per position
+  private dailyPnl: number = 0;           // Track daily P&L for kill switch
+  private lastDailyReset: number = Date.now();
+  private killSwitchTriggered = false;
 
   constructor() {
     this.paperMode = process.env.PUMPFUN_PAPER_MODE !== 'false'; // default paper
@@ -167,6 +187,41 @@ class BondingCurveService {
 
   isInitialized(): boolean {
     return this.initialized;
+  }
+
+  isKillSwitchActive(): boolean {
+    this.resetDailyIfNeeded();
+    return this.killSwitchTriggered;
+  }
+
+  getOpenPositionCount(): number {
+    return this.paperPositions.size;
+  }
+
+  getDailyPnl(): number {
+    this.resetDailyIfNeeded();
+    return this.dailyPnl;
+  }
+
+  private resetDailyIfNeeded(): void {
+    const now = Date.now();
+    if (now - this.lastDailyReset > 24 * 60 * 60 * 1000) {
+      this.dailyPnl = 0;
+      this.killSwitchTriggered = false;
+      this.lastDailyReset = now;
+      logger.info('[BondingCurve] Daily P&L reset. Kill switch deactivated.');
+    }
+  }
+
+  private recordDailyPnl(amount: number): void {
+    this.resetDailyIfNeeded();
+    this.dailyPnl += amount;
+    if (this.dailyPnl <= -DAILY_LOSS_LIMIT_SOL && !this.killSwitchTriggered) {
+      this.killSwitchTriggered = true;
+      logger.error(`[BondingCurve] DAILY LOSS LIMIT HIT: ${this.dailyPnl.toFixed(4)} SOL <= -${DAILY_LOSS_LIMIT_SOL} SOL. Kill switch ON.`);
+      // Emergency close all open positions
+      this.emergencyCloseAll('DAILY_LOSS_LIMIT');
+    }
   }
 
   /**
@@ -310,6 +365,32 @@ class BondingCurveService {
   ): Promise<SnipeResult> {
     const timestamp = new Date();
 
+    // Kill switch check
+    if (this.isKillSwitchActive()) {
+      return {
+        success: false,
+        tokenAddress: tokenMint,
+        solSpent: 0,
+        tokensReceived: 0,
+        error: 'Daily loss limit reached, buy blocked',
+        paperMode: this.paperMode,
+        timestamp,
+      };
+    }
+
+    // Max concurrent position check
+    if (this.paperPositions.size >= MAX_CONCURRENT_POSITIONS) {
+      return {
+        success: false,
+        tokenAddress: tokenMint,
+        solSpent: 0,
+        tokensReceived: 0,
+        error: `Max positions reached (${MAX_CONCURRENT_POSITIONS}), buy blocked`,
+        paperMode: this.paperMode,
+        timestamp,
+      };
+    }
+
     if (this.paperMode) {
       return this.paperBuy(tokenMint, tokenSymbol, solAmount, tpLevels, timestamp, entryScore);
     }
@@ -331,6 +412,11 @@ class BondingCurveService {
     timestamp: Date,
     entryScore?: number,
   ): SnipeResult {
+    // Simulate realistic buy slippage
+    const slippage = simulateSlippage(SLIPPAGE_BUY_MIN, SLIPPAGE_BUY_MAX);
+    const effectiveSol = solAmount * (1 - slippage);
+    const txCost = PRIORITY_FEE_SOL;
+
     if (this.paperSolBalance < solAmount) {
       return {
         success: false,
@@ -355,7 +441,7 @@ class BondingCurveService {
       complete: false,
     };
 
-    const quote = this.getBuyQuote(mockState, solAmount);
+    const quote = this.getBuyQuote(mockState, effectiveSol);
     if (!quote) {
       return {
         success: false,
@@ -382,13 +468,13 @@ class BondingCurveService {
       };
     }
 
-    this.paperSolBalance -= solAmount;
+    this.paperSolBalance -= (solAmount + txCost);
 
     this.paperPositions.set(tokenMint, {
       tokenMint,
       tokenSymbol,
       tokensOwned: quote.tokenAmount,
-      solSpent: solAmount,
+      solSpent: solAmount, // Track full amount for P&L calculation (slippage is "real cost")
       entryPrice: quote.pricePerToken,
       buyTimestamp: timestamp,
       tpLevels: tpLevels.map(tp => ({ ...tp, triggered: false })),
@@ -402,10 +488,10 @@ class BondingCurveService {
     this.maxMultipliers.set(tokenMint, 1.0);
 
     // Persist to DB (additive, non-blocking)
-    this.persistBuyToDb(tokenMint, tokenSymbol, solAmount, quote, tpLevels, timestamp, entryScore).catch(() => {});
+    this.persistBuyToDb(tokenMint, tokenSymbol, solAmount, quote, tpLevels, timestamp, entryScore, slippage, txCost).catch(() => {});
 
     logger.info(
-      `[PAPER BUY] ${tokenSymbol} | ${solAmount.toFixed(3)} SOL -> ${quote.tokenAmount.toFixed(0)} tokens @ ${quote.pricePerToken.toFixed(12)} SOL/token | MC: ${quote.marketCapSol.toFixed(2)} SOL`
+      `[PAPER BUY] ${tokenSymbol} | ${solAmount.toFixed(3)} SOL -> ${quote.tokenAmount.toFixed(0)} tokens @ ${quote.pricePerToken.toFixed(12)} SOL/token | MC: ${quote.marketCapSol.toFixed(2)} SOL | SLIPPAGE: ${(slippage * 100).toFixed(1)}% | FEE: ${txCost.toFixed(4)} SOL`
     );
 
     return {
@@ -436,7 +522,10 @@ class BondingCurveService {
 
       tp.triggered = true;
       const tokensToSell = position.tokensOwned * tp.pctToSell;
-      const solToReceive = tokensToSell * currentPriceMultiplier * position.entryPrice;
+      const grossSol = tokensToSell * currentPriceMultiplier * position.entryPrice;
+      // Apply sell slippage + priority fee
+      const sellSlippage = simulateSlippage(SLIPPAGE_SELL_MIN, SLIPPAGE_SELL_MAX);
+      const solToReceive = grossSol * (1 - sellSlippage) - PRIORITY_FEE_SOL;
 
       position.tokensOwned -= tokensToSell;
       position.partialSells.push({
@@ -474,6 +563,9 @@ class BondingCurveService {
       const totalPnl = position.partialSells.reduce((s, p) => s + p.solReceived, 0) - position.solSpent;
       logger.info(`[POSITION CLOSED] ${position.tokenSymbol} | PnL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)} SOL | ${position.partialSells.length} partial sells`);
 
+      // Record daily P&L
+      this.recordDailyPnl(totalPnl);
+
       // Persist position update and outcome to DB (additive, non-blocking)
       const holdTimeMinutes = (Date.now() - position.buyTimestamp.getTime()) / 60000;
       const exitSol = position.partialSells.reduce((s, p) => s + p.solReceived, 0);
@@ -499,7 +591,9 @@ class BondingCurveService {
     const position = this.paperPositions.get(tokenMint);
     if (!position || position.tokensOwned < 1) return null;
 
-    const solToReceive = position.tokensOwned * currentPriceMultiplier * position.entryPrice;
+    const grossSol = position.tokensOwned * currentPriceMultiplier * position.entryPrice;
+    const sellSlippage = simulateSlippage(SLIPPAGE_SELL_MIN, SLIPPAGE_SELL_MAX);
+    const solToReceive = Math.max(0, grossSol * (1 - sellSlippage) - PRIORITY_FEE_SOL);
 
     this.paperPositions.delete(tokenMint);
 
@@ -508,7 +602,7 @@ class BondingCurveService {
     }
 
     logger.info(
-      `[EMERGENCY SELL] ${position.tokenSymbol} | ${position.tokensOwned.toFixed(0)} tokens -> ${solToReceive.toFixed(4)} SOL`
+      `[EMERGENCY SELL] ${position.tokenSymbol} | ${position.tokensOwned.toFixed(0)} tokens -> ${solToReceive.toFixed(4)} SOL | SLIPPAGE: ${(sellSlippage * 100).toFixed(1)}% | Reason: ${reason}`
     );
 
     // Persist emergency sell to DB (additive, non-blocking)
@@ -547,7 +641,10 @@ class BondingCurveService {
     this.persistPositionUpdate(tokenMint, position, 'CLOSED', positionMaxMultiplier, currentPriceMultiplier, entryScore).catch(() => {});
     this.persistOutcomeToDb(tokenMint, position.tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, outcome, holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => {});
 
-    // Clean up tracking maps
+    // Record daily P&L for emergency exits too
+    this.recordDailyPnl(totalPnl);
+
+    // Clean up tracking maps (emergency sell)
     this.entryScores.delete(tokenMint);
     this.maxMultipliers.delete(tokenMint);
 
@@ -608,52 +705,30 @@ class BondingCurveService {
 
     for (const [tokenMint, position] of this.paperPositions) {
       try {
-        // ── PAPER MODE: Simulate price movement instead of reading on-chain ──
-        if (this.paperMode) {
-          // Simulate realistic memecoin price action:
-          // - Initial phase: random walk with upward bias (pump potential)
-          // - After 10 min: introduce rug probability
-          // - High volatility: 5-15% swings per sample
-          const ageMs = Date.now() - position.buyTimestamp.getTime();
-          const ageMinutes = ageMs / 60000;
-          const lastMult = this.maxMultipliers.get(tokenMint) || 1.0;
-
-          // Random walk with trend based on entry score (higher score = better trend)
-          const entryScore = this.entryScores.get(tokenMint) || 0.5;
-          const volatility = 0.08 + Math.random() * 0.07; // 8-15% volatility
-          const trendBias = (entryScore - 0.4) * 0.02; // Higher score = slight upward bias
-
-          // Add rug probability after 5 minutes (especially for low-score tokens)
-          let rugProbability = 0;
-          if (ageMinutes > 5 && entryScore < 0.45) {
-            rugProbability = (ageMinutes - 5) * 0.01 * (0.5 - entryScore); // Up to 10% rug chance
-          }
-
-          // Random price change
-          const randomChange = (Math.random() - 0.5 + trendBias) * volatility;
-          let newMult = lastMult * (1 + randomChange);
-
-          // Apply rug crash if triggered
-          if (Math.random() < rugProbability) {
-            newMult = lastMult * 0.3; // 70% crash
-            logger.info(`[PAPER SIM] ${position.tokenSymbol} RUG simulated at ${ageMinutes.toFixed(1)}min`);
-          }
-
-          // Clamp to reasonable range
-          newMult = Math.max(0.1, Math.min(20.0, newMult));
+        // ── PAPER MODE WITH REAL ON-CHAIN PRICES ──
+        // Instead of biased random walk, sample real on-chain bonding curve data.
+        // This makes paper results reflect actual market conditions.
+        const state = await this.readBondingCurveState(tokenMint);
+        if (state) {
+          // Calculate current price from real bonding curve state
+          const k = Number(state.virtualTokenReserves) * Number(state.virtualSolReserves);
+          const virtualSol = Number(state.virtualSolReserves) / LAMPORTS_PER_SOL;
+          const totalTokens = Number(state.tokenTotalSupply) / 1e6;
+          const currentPricePerToken = virtualSol / (Number(state.virtualTokenReserves) / 1e6);
+          const currentMultiplier = position.entryPrice > 0 ? currentPricePerToken / position.entryPrice : 1.0;
 
           // Track max multiplier
           const prevMax = this.maxMultipliers.get(tokenMint) || 1.0;
-          const newMax = Math.max(prevMax, newMult);
+          const newMax = Math.max(prevMax, currentMultiplier);
           this.maxMultipliers.set(tokenMint, newMax);
-          multipliers.set(tokenMint, newMult);
+          multipliers.set(tokenMint, currentMultiplier);
 
           // Calculate market cap
-          const marketCapSol = newMult * position.solSpent * 30; // Rough approximation
+          const marketCapSol = currentPricePerToken * totalTokens;
 
           // Persist price sample
           if (store) {
-            store.recordPriceSample(tokenMint, newMult, marketCapSol, false).catch(() => {});
+            store.recordPriceSample(tokenMint, currentMultiplier, marketCapSol, state.complete).catch(() => {});
           }
 
           // Update position in DB
@@ -670,68 +745,31 @@ class BondingCurveService {
               partialSells: position.partialSells,
               status: 'OPEN',
               maxMultiplier: newMax,
-              currentMultiplier: newMult,
+              currentMultiplier: currentMultiplier,
             }).catch(() => {});
           }
 
-          logger.debug(`[PAPER SIM] ${position.tokenSymbol}: ${newMult.toFixed(3)}x (max: ${newMax.toFixed(3)}x, age: ${ageMinutes.toFixed(1)}min)`);
+          logger.debug(`[PAPER REAL] ${position.tokenSymbol}: ${currentMultiplier.toFixed(3)}x (max: ${newMax.toFixed(3)}x, MC: ${marketCapSol.toFixed(2)} SOL${state.complete ? ', GRADUATED' : ''})`);
           continue;
         }
 
-        const state = await this.readBondingCurveState(tokenMint);
-        if (!state) {
-          // Bonding curve not readable (may have graduated or been rugs)
-          // Use last known multiplier or 1.0
-          const lastKnown = this.maxMultipliers.get(tokenMint) || 1.0;
-          multipliers.set(tokenMint, lastKnown);
-          logger.debug(`[BondingCurve] No bonding curve state for ${position.tokenSymbol}, using last known: ${lastKnown.toFixed(2)}x`);
+        // Bonding curve gone (graduated or rugged) - use last known with decay
+        const lastKnown = this.maxMultipliers.get(tokenMint) || 1.0;
+        const ageMs = Date.now() - position.buyTimestamp.getTime();
+        const ageMinutes = ageMs / 60000;
+
+        // If bonding curve disappeared and we never pumped, likely a rug
+        if (lastKnown < 1.05 && ageMinutes > 3) {
+          // Treat as rug - bonding curve gone with no price movement
+          multipliers.set(tokenMint, 0.01);
+          logger.warn(`[PAPER REAL] ${position.tokenSymbol}: bonding curve gone with no pump, treating as rug`);
           continue;
         }
 
-        // Calculate current price from bonding curve state
-        const k = Number(state.virtualTokenReserves) * Number(state.virtualSolReserves);
-        const virtualSol = Number(state.virtualSolReserves) / LAMPORTS_PER_SOL;
-        const totalTokens = Number(state.tokenTotalSupply) / 1e6;
-        // price per token = virtualSolReserves / virtualTokenReserves (in SOL, tokens are 6 decimals)
-        const currentPricePerToken = virtualSol / (Number(state.virtualTokenReserves) / 1e6);
-        const currentMultiplier = position.entryPrice > 0 ? currentPricePerToken / position.entryPrice : 1.0;
-
-        // Track max multiplier
-        const prevMax = this.maxMultipliers.get(tokenMint) || 1.0;
-        const newMax = Math.max(prevMax, currentMultiplier);
-        this.maxMultipliers.set(tokenMint, newMax);
-
-        multipliers.set(tokenMint, currentMultiplier);
-
-        // Calculate market cap
-        const marketCapSol = currentPricePerToken * totalTokens;
-
-        // Persist price sample to DB
-        if (store) {
-          store.recordPriceSample(tokenMint, currentMultiplier, marketCapSol, state.complete).catch(() => {});
-        }
-
-        // Update position in DB with current multiplier
-        if (store) {
-          store.upsertPosition({
-            mintAddress: tokenMint,
-            tokenSymbol: position.tokenSymbol,
-            tokensOwned: position.tokensOwned,
-            solSpent: position.solSpent,
-            entryPrice: position.entryPrice,
-            entryScore: this.entryScores.get(tokenMint),
-            buyTimestamp: position.buyTimestamp,
-            tpLevels: position.tpLevels,
-            partialSells: position.partialSells,
-            status: 'OPEN',
-            maxMultiplier: newMax,
-            currentMultiplier: currentMultiplier,
-          }).catch(() => {});
-        }
-
-        logger.debug(
-          `[BondingCurve] Sampled ${position.tokenSymbol}: ${currentMultiplier.toFixed(3)}x (max: ${newMax.toFixed(3)}x, MC: ${marketCapSol.toFixed(2)} SOL${state.complete ? ', GRADUATED' : ''})`
-        );
+        // Otherwise graduated - use last known price
+        multipliers.set(tokenMint, lastKnown);
+        logger.debug(`[PAPER REAL] ${position.tokenSymbol}: bonding curve graduated, using last known: ${lastKnown.toFixed(2)}x`);
+        continue;
       } catch (err) {
         logger.debug(`[BondingCurve] Failed to sample ${position.tokenSymbol}: ${err}`);
         // Use last known multiplier as fallback
@@ -741,6 +779,18 @@ class BondingCurveService {
     }
 
     return multipliers;
+  }
+
+  /**
+   * Emergency close ALL open positions (used by kill switch)
+   */
+  private async emergencyCloseAll(reason: string): Promise<void> {
+    const positions = Array.from(this.paperPositions.keys());
+    for (const tokenMint of positions) {
+      const lastKnown = this.maxMultipliers.get(tokenMint) || 1.0;
+      await this.emergencySell(tokenMint, lastKnown, reason);
+    }
+    logger.warn(`[BondingCurve] Emergency closed ${positions.length} positions. Reason: ${reason}`);
   }
 
   // ==========================================
@@ -755,6 +805,8 @@ class BondingCurveService {
     tpLevels: TpLevel[],
     timestamp: Date,
     entryScore?: number,
+    slippage?: number,
+    txFee?: number,
   ): Promise<void> {
     const store = await this.getStore();
     if (!store) return;
@@ -769,7 +821,7 @@ class BondingCurveService {
         tokenAmount: quote.tokenAmount,
         pricePerToken: quote.pricePerToken,
         entryScore,
-        tradeReason: 'SNIPER',
+        tradeReason: `SNIPER${slippage ? ` SLIP:${(slippage*100).toFixed(1)}%` : ''}${txFee ? ` FEE:${txFee.toFixed(4)}` : ''}`,
         paperMode: this.paperMode,
         timestamp,
       });

@@ -588,6 +588,8 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
         for (const entity of entities) {
             try {
                 const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
+                if (!entityId)
+                    continue;
                 await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
                 // Only link entity to cluster if it's relevant to the cluster topic/keywords
                 if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), clusterTopic, clusterKeywords)) {
@@ -631,6 +633,8 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                         for (const entity of entities) {
                             try {
                                 const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
+                                if (!entityId)
+                                    continue;
                                 await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
                                 if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), target.topic, target.keywords || [])) {
                                     await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
@@ -674,6 +678,8 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
         for (const entity of entities) {
             try {
                 const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
+                if (!entityId)
+                    continue;
                 await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
                 // For NEW clusters, entity relevance is implicit (topic derived from article)
                 // but still apply the filter to prevent noise entities (LOCATION, DATE) from accumulating
@@ -1377,6 +1383,8 @@ async function createFallbackClustersForCategory(articles, category) {
                     const entityResult = await enhanced_entity_extraction_1.default.extractHybrid(art.title, art.content || art.snippet || '', art.id);
                     for (const entity of entityResult.entities) {
                         const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);
+                        if (!entityId)
+                            continue;
                         await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, art.id, entity.confidence);
                         await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, newClusterId, 1.0);
                     }

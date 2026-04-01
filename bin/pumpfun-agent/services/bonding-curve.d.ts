@@ -59,9 +59,7 @@ export interface TpLevel {
     pctToSell: number;
     triggered: boolean;
 }
-/**
- * Bonding Curve execution service
- */
+export declare const TIME_EXIT_MINUTES = 45;
 declare class BondingCurveService {
     private connection;
     private wallet;
@@ -71,10 +69,18 @@ declare class BondingCurveService {
     private initialized;
     private entryScores;
     private maxMultipliers;
+    private dailyPnl;
+    private lastDailyReset;
+    private killSwitchTriggered;
     constructor();
     initialize(): Promise<void>;
     isPaperMode(): boolean;
     isInitialized(): boolean;
+    isKillSwitchActive(): boolean;
+    getOpenPositionCount(): number;
+    getDailyPnl(): number;
+    private resetDailyIfNeeded;
+    private recordDailyPnl;
     /**
      * Lazy-import pumpfunStore (may not be available if module loaded standalone)
      */
@@ -138,6 +144,10 @@ declare class BondingCurveService {
      * a map of tokenMint -> currentMultiplier for use by TP/SL logic.
      */
     sampleAndUpdatePositions(): Promise<Map<string, number>>;
+    /**
+     * Emergency close ALL open positions (used by kill switch)
+     */
+    private emergencyCloseAll;
     private persistBuyToDb;
     private persistSellToDb;
     private persistPositionUpdate;

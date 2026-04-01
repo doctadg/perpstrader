@@ -406,8 +406,8 @@ Return JSON in this format:
         if (!this.canUseService()) {
             return new Map();
         }
-        const batchSize = 100;
-        const concurrency = Number.parseInt(process.env.OPENROUTER_CONCURRENCY || '8', 10);
+        const batchSize = 50;
+        const concurrency = Number.parseInt(process.env.OPENROUTER_CONCURRENCY || '2', 10);
         const allResults = new Map();
         // Split into batches
         const batches = [];

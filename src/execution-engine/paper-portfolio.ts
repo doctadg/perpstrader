@@ -65,9 +65,17 @@ export class PaperPortfolioManager {
                 this.realizedPnL = state.realizedPnL || 0;
                 this.dailyStartValue = state.dailyStartValue || this.initialBalance;
 
-                // Restore positions
+                // Restore positions — skip entries with corrupted data
                 if (state.positions) {
                     for (const pos of state.positions) {
+                        if (!pos.symbol || !pos.side || !pos.entryPrice || !pos.size
+                            || !Number.isFinite(pos.entryPrice) || !Number.isFinite(pos.size) || pos.size <= 0) {
+                            logger.warn(
+                                `[PaperPortfolio] Skipping corrupted position during load: ${pos.symbol} ` +
+                                `size=${pos.size}, entryPrice=${pos.entryPrice}, side=${pos.side}`
+                            );
+                            continue;
+                        }
                         this.positions.set(pos.symbol, {
                             ...pos,
                             entryTime: new Date(pos.entryTime),
@@ -118,6 +126,16 @@ export class PaperPortfolioManager {
     }
 
     /**
+     * Remove a position from the portfolio (e.g., corrupted data cleanup)
+     */
+    removePosition(symbol: string): void {
+        const symbolKey = symbol.toUpperCase();
+        this.positions.delete(symbolKey);
+        logger.warn(`[PaperPortfolio] Removed position for ${symbolKey} (cleanup)`);
+        void this.saveState();
+    }
+
+    /**
      * Execute a paper trade
      */
     async executeTrade(
@@ -128,6 +146,14 @@ export class PaperPortfolioManager {
         strategyId?: string,
         leverage: number = 10
     ): Promise<Trade> {
+        // Guard: reject non-finite sizes (Infinity, NaN, negative)
+        if (!Number.isFinite(size) || size <= 0) {
+            throw new Error(`[PaperPortfolio] Invalid trade size for ${symbol}: ${size}. Rejecting.`);
+        }
+        if (!Number.isFinite(price) || price <= 0) {
+            throw new Error(`[PaperPortfolio] Invalid price for ${symbol}: ${price}. Rejecting.`);
+        }
+
         const existingPosition = this.positions.get(symbol);
         let pnl = 0;
         let entryExit: 'ENTRY' | 'EXIT' = 'ENTRY';

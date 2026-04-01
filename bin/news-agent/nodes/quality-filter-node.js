@@ -146,7 +146,7 @@ async function applyQualityGate(article) {
         const axios = (await Promise.resolve().then(() => __importStar(require('axios')))).default;
         const config = (await Promise.resolve().then(() => __importStar(require('../../shared/config')))).default.get();
         const response = await axios.post(`${config.openrouter.baseUrl}/chat/completions`, {
-            model: 'openai/gpt-oss-20b',
+            model: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
             messages: [
                 {
                     role: 'system',

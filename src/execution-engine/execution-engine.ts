@@ -457,7 +457,7 @@ export class ExecutionEngine {
     stopLossPct: number,
     takeProfitPct: number
   ): void {
-    if (entryPrice <= 0 || stopLossPct <= 0 || takeProfitPct <= 0) return;
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0 || stopLossPct <= 0 || takeProfitPct <= 0) return;
 
     const symbolKey = symbol.toUpperCase();
     this.positionExitPlans.set(symbolKey, {
@@ -677,14 +677,33 @@ export class ExecutionEngine {
 
           if (this.pendingManagedExitSymbols.has(symbolKey)) continue;
 
+          // Guard: skip positions with missing or invalid entry data
+          if (!position.entryPrice || !Number.isFinite(position.entryPrice) || position.entryPrice <= 0
+              || !position.size || !Number.isFinite(position.size) || position.size <= 0) {
+            logger.warn(
+              `[PaperExit] Skipping ${symbolKey}: invalid position data ` +
+              `(entryPrice=${position.entryPrice}, size=${position.size}). Removing from portfolio.`
+            );
+            // Remove corrupted position to prevent repeated logging
+            try {
+              paperPortfolio.removePosition(position.symbol);
+            } catch (_) { /* non-critical */ }
+            continue;
+          }
+
           // Auto-register exit plans for paper positions loaded from DB on restart
           let plan = this.positionExitPlans.get(symbolKey);
           if (!plan) {
             const stopLossPct = 0.02; // default 2% SL
             const takeProfitPct = 0.06; // default 6% TP
             this.registerManagedExitPlan(symbolKey, position.side, position.entryPrice, stopLossPct, takeProfitPct);
-            logger.info(`[PaperExit] Auto-registered exit plan for restored position ${symbolKey} ${position.side} @ ${position.entryPrice}`);
-            plan = this.positionExitPlans.get(symbolKey)!;
+            plan = this.positionExitPlans.get(symbolKey);
+          }
+
+          // Skip if no valid plan (entryPrice was missing/invalid during registration)
+          if (!plan) {
+            logger.warn(`[PaperExit] No exit plan for ${symbolKey}, skipping (missing entryPrice?)`);
+            continue;
           }
 
           // Check if position side matches plan (paper portfolio may track differently)
@@ -730,11 +749,23 @@ export class ExecutionEngine {
           try {
             logger.warn(`[PaperExit] ${symbolKey}: ${exitReason}`);
 
+            const closeSize = Math.abs(position.size);
+            // Guard: clamp corrupted position sizes to prevent Infinity cascades
+            const safeCloseSize = Number.isFinite(closeSize) && closeSize > 0 ? closeSize : 0;
+            if (safeCloseSize <= 0) {
+              logger.error(
+                `[PaperExit] ${symbolKey}: corrupted position size=${position.size}, removing`
+              );
+              try { paperPortfolio.removePosition(position.symbol); } catch (_) { /* non-critical */ }
+              this.positionExitPlans.delete(symbolKey);
+              return;
+            }
+
             const closeSignal: TradingSignal = {
               id: `paper-exit-${Date.now()}`,
               symbol: position.symbol,
               action: plan.side === 'LONG' ? 'SELL' : 'BUY',
-              size: Math.abs(position.size),
+              size: safeCloseSize,
               price: resolvedPrice,
               type: 'MARKET',
               timestamp: new Date(),
@@ -853,11 +884,20 @@ export class ExecutionEngine {
         try {
           logger.warn(`[ExecutionEngine] Managed exit for ${position.symbol}: ${exitReason}`);
 
+          // Guard: clamp corrupted position sizes
+          const liveCloseSize = Math.abs(position.size);
+          const safeLiveCloseSize = Number.isFinite(liveCloseSize) && liveCloseSize > 0 ? liveCloseSize : 0;
+          if (safeLiveCloseSize <= 0) {
+            logger.error(`[ExecutionEngine] ${symbolKey}: corrupted live position size=${position.size}, skipping exit`);
+            this.pendingManagedExitSymbols.delete(symbolKey);
+            continue;
+          }
+
           const closeSignal: TradingSignal = {
             id: `managed-exit-${Date.now()}`,
             symbol: position.symbol,
             action: position.side === 'LONG' ? 'SELL' : 'BUY',
-            size: Math.abs(position.size),
+            size: safeLiveCloseSize,
             price: position.markPrice,
             type: 'MARKET',
             timestamp: new Date(),
@@ -908,8 +948,16 @@ export class ExecutionEngine {
 
     // PAPER TRADING MODE: bypass Hyperliquid entirely
     if (process.env.PAPER_TRADING === 'true') {
+      // HARD GUARD: Reject non-finite trade sizes (Infinity, NaN) before any processing.
+      if (!Number.isFinite(signal.size) || signal.size <= 0) {
+        logger.warn(
+          `[PAPER] Rejecting ${signal.action} ${signal.symbol}: invalid size=${signal.size}`
+        );
+        throw new Error(`Invalid paper trade size for ${signal.symbol}: ${signal.size}`);
+      }
+
       logger.info(
-        `[PAPER] Executing ${signal.action} ${signal.size} ${signal.symbol} @ ${signal.price} (confidence: ${signal.confidence?.toFixed(2)})`
+        `[PAPER] Executing ${signal.action} ${signal.size.toFixed(4)} ${signal.symbol} @ ${signal.price} (confidence: ${signal.confidence?.toFixed(2)})`
       );
 
       if (signal.price) {

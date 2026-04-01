@@ -657,6 +657,9 @@ class StoryClusterStoreEnhanced {
         await this.initialize();
         if (!this.db) return;
 
+        // Guard: skip if entityId is invalid (findOrCreateEntity returns 0 for rejected entities)
+        if (!entityId) return;
+
         try {
             const now = new Date().toISOString();
             this.db.prepare(`
@@ -679,6 +682,9 @@ class StoryClusterStoreEnhanced {
     ): Promise<void> {
         await this.initialize();
         if (!this.db) return;
+
+        // Guard: skip if entityId is invalid (findOrCreateEntity returns 0 for rejected entities)
+        if (!entityId) return;
 
         try {
             const now = new Date().toISOString();

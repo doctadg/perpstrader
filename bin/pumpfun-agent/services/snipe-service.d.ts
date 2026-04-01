@@ -37,6 +37,7 @@ declare class SnipeService {
     private solPerSnipe;
     private cooldownMs;
     private lastSnipeTime;
+    private permanentBlacklist;
     private tokenPrices;
     constructor();
     onToken(callback: TokenCallback): void;
@@ -83,8 +84,9 @@ declare class SnipeService {
      */
     private processSnipeQueue;
     /**
-     * Paper mode: monitor real on-chain price movements for open positions.
-     * Falls back to random-walk simulation if RPC connection fails.
+     * Monitor open positions using REAL on-chain bonding curve data.
+     * No more random walk simulation — prices come from the actual blockchain.
+     * Applies slippage on sells, stop loss, and time-based exits.
      */
     private startPriceSimulation;
     private resetHourlyCountIfNeeded;

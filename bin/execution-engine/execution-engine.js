@@ -366,7 +366,7 @@ class ExecutionEngine {
             || (position.side === 'SHORT' && action === 'BUY');
     }
     registerManagedExitPlan(symbol, side, entryPrice, stopLossPct, takeProfitPct) {
-        if (entryPrice <= 0 || stopLossPct <= 0 || takeProfitPct <= 0)
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0 || stopLossPct <= 0 || takeProfitPct <= 0)
             return;
         const symbolKey = symbol.toUpperCase();
         this.positionExitPlans.set(symbolKey, {
@@ -533,14 +533,30 @@ class ExecutionEngine {
                     activeSymbols.add(symbolKey);
                     if (this.pendingManagedExitSymbols.has(symbolKey))
                         continue;
+                    // Guard: skip positions with missing or invalid entry data
+                    if (!position.entryPrice || !Number.isFinite(position.entryPrice) || position.entryPrice <= 0
+                        || !position.size || !Number.isFinite(position.size) || position.size <= 0) {
+                        logger_1.default.warn(`[PaperExit] Skipping ${symbolKey}: invalid position data ` +
+                            `(entryPrice=${position.entryPrice}, size=${position.size}). Removing from portfolio.`);
+                        // Remove corrupted position to prevent repeated logging
+                        try {
+                            paperPortfolio.removePosition(position.symbol);
+                        }
+                        catch (_) { /* non-critical */ }
+                        continue;
+                    }
                     // Auto-register exit plans for paper positions loaded from DB on restart
                     let plan = this.positionExitPlans.get(symbolKey);
                     if (!plan) {
                         const stopLossPct = 0.02; // default 2% SL
                         const takeProfitPct = 0.06; // default 6% TP
                         this.registerManagedExitPlan(symbolKey, position.side, position.entryPrice, stopLossPct, takeProfitPct);
-                        logger_1.default.info(`[PaperExit] Auto-registered exit plan for restored position ${symbolKey} ${position.side} @ ${position.entryPrice}`);
                         plan = this.positionExitPlans.get(symbolKey);
+                    }
+                    // Skip if no valid plan (entryPrice was missing/invalid during registration)
+                    if (!plan) {
+                        logger_1.default.warn(`[PaperExit] No exit plan for ${symbolKey}, skipping (missing entryPrice?)`);
+                        continue;
                     }
                     // Check if position side matches plan (paper portfolio may track differently)
                     const entryPrice = plan.entryPrice;

@@ -43,6 +43,10 @@ export declare class PaperPortfolioManager {
      */
     getPositions(): PaperPosition[];
     /**
+     * Remove a position from the portfolio (e.g., corrupted data cleanup)
+     */
+    removePosition(symbol: string): void;
+    /**
      * Execute a paper trade
      */
     executeTrade(symbol: string, side: 'BUY' | 'SELL', size: number, price: number, strategyId?: string, leverage?: number): Promise<Trade>;

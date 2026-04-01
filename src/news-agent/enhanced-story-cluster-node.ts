@@ -752,6 +752,7 @@ async function processArticleEnhanced(
         for (const entity of entities) {
             try {
                 const entityId = await storyClusterStoreEnhanced.findOrCreateEntity(entity.name, entity.type as any);
+                if (!entityId) continue;
                 await storyClusterStoreEnhanced.linkEntityToArticle(entityId, article.id, entity.confidence);
                 // Only link entity to cluster if it's relevant to the cluster topic/keywords
                 if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), clusterTopic, clusterKeywords)) {
@@ -808,6 +809,7 @@ async function processArticleEnhanced(
                         for (const entity of entities) {
                             try {
                                 const entityId = await storyClusterStoreEnhanced.findOrCreateEntity(entity.name, entity.type as any);
+                                if (!entityId) continue;
                                 await storyClusterStoreEnhanced.linkEntityToArticle(entityId, article.id, entity.confidence);
                                 if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), target.topic, target.keywords || [])) {
                                     await storyClusterStoreEnhanced.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
@@ -863,6 +865,7 @@ async function processArticleEnhanced(
         for (const entity of entities) {
             try {
                 const entityId = await storyClusterStoreEnhanced.findOrCreateEntity(entity.name, entity.type as any);
+                if (!entityId) continue;
                 await storyClusterStoreEnhanced.linkEntityToArticle(entityId, article.id, entity.confidence);
                 // For NEW clusters, entity relevance is implicit (topic derived from article)
                 // but still apply the filter to prevent noise entities (LOCATION, DATE) from accumulating
@@ -1653,6 +1656,7 @@ async function createFallbackClustersForCategory(articles: NewsItem[], category:
                     );
                     for (const entity of entityResult.entities) {
                         const entityId = await storyClusterStoreEnhanced.findOrCreateEntity(entity.name, entity.type as any);
+                        if (!entityId) continue;
                         await storyClusterStoreEnhanced.linkEntityToArticle(entityId, art.id, entity.confidence);
                         await storyClusterStoreEnhanced.updateEntityClusterHeat(entityId, newClusterId, 1.0);
                     }

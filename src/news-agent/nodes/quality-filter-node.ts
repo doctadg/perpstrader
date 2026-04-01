@@ -136,7 +136,7 @@ async function applyQualityGate(article: RawArticle): Promise<QualityGateResult>
     const response = await axios.post(
       `${config.openrouter.baseUrl}/chat/completions`,
       {
-        model: 'openai/gpt-oss-20b',
+        model: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
         messages: [
           {
             role: 'system',

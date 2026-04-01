@@ -1,26 +1,6 @@
 {
   "apps": [
     {
-      "name": "perps-trader",
-      "script": "bin/main.js",
-      "cwd": "/home/d/PerpsTrader",
-      "instances": 1,
-      "exec_mode": "fork",
-      "watch": false,
-      "max_memory_restart": "1G",
-      "env": {
-        "NODE_ENV": "production",
-        "ENHANCED_CLUSTERING_ENABLED": "true"
-      },
-      "log_date_format": "YYYY-MM-DD HH:mm:ss",
-      "error_file": "/home/d/PerpsTrader/logs/perps-error.log",
-      "out_file": "/home/d/PerpsTrader/logs/perps-out.log",
-      "merge_logs": true,
-      "autorestart": true,
-      "max_restarts": 10,
-      "restart_delay": 10000
-    },
-    {
       "name": "perps-dashboard",
       "script": "bin/dashboard/dashboard-server.js",
       "cwd": "/home/d/PerpsTrader",
@@ -37,24 +17,6 @@
       "out_file": "/home/d/PerpsTrader/logs/dashboard-out.log",
       "autorestart": true,
       "max_restarts": 10
-    },
-    {
-      "name": "perps-pumpfun",
-      "script": "bin/pumpfun-agent/index.js",
-      "cwd": "/home/d/PerpsTrader",
-      "instances": 1,
-      "exec_mode": "fork",
-      "watch": false,
-      "max_memory_restart": "512M",
-      "env": {
-        "NODE_ENV": "production"
-      },
-      "log_date_format": "YYYY-MM-DD HH:mm:ss",
-      "error_file": "/home/d/PerpsTrader/logs/pumpfun-error.log",
-      "out_file": "/home/d/PerpsTrader/logs/pumpfun-out.log",
-      "autorestart": true,
-      "max_restarts": 10,
-      "restart_delay": 10000
     }
   ]
 }

@@ -107,12 +107,25 @@ const VALID_ACTIONS = new Set([
     'recovers', 'recovered', 'recovery',
     'crashes', 'crashed', 'crashing',
 ]);
+// Simple in-memory cache to skip topic generation if run recently
+let lastTopicGenerationTime = 0;
+const TOPIC_GENERATION_CACHE_MS = 5 * 60 * 1000; // 5 minutes
 /**
  * Topic Generation Node
  * Generates topics with strict validation for categorized articles
  */
 async function topicGenerationNode(state) {
     const startTime = Date.now();
+    // Cache check: skip if topics were generated recently
+    if (Date.now() - lastTopicGenerationTime < TOPIC_GENERATION_CACHE_MS) {
+        logger_1.default.info(`[TopicGenerationNode] Skipping - topics generated ${(Date.now() - lastTopicGenerationTime) / 1000}s ago (< 5min cache)`);
+        return {
+            currentStep: 'TOPIC_GENERATION_COMPLETE',
+            labeledArticles: state.labeledArticles,
+            stats: { ...state.stats, labeled: (state.stats?.labeled || 0) },
+            thoughts: [...state.thoughts, 'Topic generation skipped (5min cache active)'],
+        };
+    }
     logger_1.default.info(`[TopicGenerationNode] Starting topic generation for ${state.labeledArticles.length} articles`);
     const labeledArticles = [];
     let generated = 0;
@@ -178,6 +191,7 @@ async function topicGenerationNode(state) {
         }
     }
     const elapsed = Date.now() - startTime;
+    lastTopicGenerationTime = Date.now();
     logger_1.default.info(`[TopicGenerationNode] Completed in ${elapsed}ms. ` +
         `Generated: ${generated}, Skipped: ${skipped}`);
     return {
@@ -203,7 +217,7 @@ async function generateTopic(article) {
         const axios = (await Promise.resolve().then(() => __importStar(require('axios')))).default;
         const config = (await Promise.resolve().then(() => __importStar(require('../../shared/config')))).default.get();
         const response = await axios.post(`${config.openrouter.baseUrl}/chat/completions`, {
-            model: 'openai/gpt-oss-20b',
+            model: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
             messages: [
                 {
                     role: 'system',

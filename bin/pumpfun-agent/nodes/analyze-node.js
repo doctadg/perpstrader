@@ -69,7 +69,7 @@ const NON_WEBSITE_HOSTS = new Set([
     'www.reddit.com',
 ]);
 // Rate limiter: max AI calls per cycle
-const MAX_AI_CALLS_PER_CYCLE = 10; // was 5
+const MAX_AI_CALLS_PER_CYCLE = 5;
 let aiCallCount = 0;
 // Inter-call delay to prevent GLM rate limiting (serialized calls)
 const AI_INTER_CALL_DELAY_MS = 500;
@@ -78,18 +78,31 @@ const AI_INTER_CALL_DELAY_MS = 500;
  * Relaxed: any single social link OR a website qualifies.
  */
 function passesAIPrefilter(metadata, websiteUrl) {
-    let socialCount = 0;
-    if (metadata.twitter)
-        socialCount++;
-    if (metadata.telegram)
-        socialCount++;
-    if (metadata.discord)
-        socialCount++;
-    if (socialCount >= 1)
-        return true; // was >= 2
-    if (websiteUrl)
-        return true;
-    return false;
+    // Require at least 1 social link (twitter/telegram/discord)
+    const socialLinks = [metadata.twitter, metadata.telegram, metadata.discord].filter(Boolean);
+    if (socialLinks.length < 1) {
+        return false;
+    }
+    // Skip AI if description is empty AND no website exists
+    const hasDescription = metadata.description && metadata.description.trim().length > 10;
+    if (!hasDescription && !websiteUrl) {
+        return false;
+    }
+    // Skip AI if token name contains obvious spam patterns
+    const name = metadata.name || '';
+    if (name.length > 30)
+        return false;
+    // All caps with special chars (e.g., "TOKEN!!!$$$")
+    if (name === name.toUpperCase() && name.length > 5 && /[^A-Z0-9\s\.]/.test(name))
+        return false;
+    // Repeated chars (e.g., "COOOOIN")
+    if (/(.)\1{4,}/.test(name))
+        return false;
+    // Mostly emoji/special chars
+    const alphaCount = (name.match(/[a-zA-Z]/g) || []).length;
+    if (name.length > 5 && alphaCount < name.length * 0.3)
+        return false;
+    return true;
 }
 /**
  * Collect on-chain bonding curve data for a token.
@@ -296,7 +309,7 @@ async function runOpenRouterAnalysis(data) {
     // Use GLM service via OpenRouter
     const apiKey = config.glm.apiKey;
     const baseUrl = config.glm.baseUrl;
-    const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.glm.model || 'z-ai/glm-4.7-flash';
+    const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.glm.model || 'z-ai/glm-5';
     if (!apiKey || apiKey.length === 0 || apiKey === 'your-api-key-here') {
         logger_1.default.warn('[AnalyzeNode] GLM API key not configured, using heuristic fallback');
         return null;
@@ -412,13 +425,14 @@ WEBSITE ANALYSIS:
 - Has Roadmap: ${website.hasRoadmap ? 'Yes' : 'No'}
 - Has Tokenomics: ${website.hasTokenomics ? 'Yes' : 'No'}
 
-Provide a comprehensive investment assessment. Return JSON ONLY (no markdown, no explanation):
-{
-  "rationale": "1 short sentence (max 14 words)",
-  "redFlags": ["flag1"],
-  "greenFlags": ["flag1"],
-  "recommendation": "STRONG_BUY" | "BUY" | "HOLD" | "AVOID" | "STRONG_AVOID"
-}
+Provide a comprehensive investment assessment.
+
+CRITICAL: Your entire response must be valid JSON. No markdown. No explanation. No code blocks. Just the raw JSON object.
+
+Return this exact format:
+{"rationale":"1 short sentence (max 14 words)","redFlags":["flag1"],"greenFlags":["flag1"],"recommendation":"STRONG_BUY"}
+
+Valid recommendations: STRONG_BUY, BUY, HOLD, AVOID, STRONG_AVOID
 
 Important:
 - Be critical and conservative. pump.fun tokens are high-risk by default.
@@ -433,40 +447,69 @@ function parseAIResponse(response) {
         if (!response || typeof response !== 'string') {
             throw new Error('Empty or non-string response');
         }
+        let cleaned = response;
         // Strip markdown code blocks if present
-        let cleaned = response.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-        // Try direct JSON parse first
+        cleaned = cleaned.replace(/```(?:json|JSON)?\s*/gi, '').replace(/```\s*/g, '');
+        // Strip explanatory text before/after JSON - find first { and last }
+        const firstBrace = cleaned.indexOf('{');
+        const lastBrace = cleaned.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+        }
+        // Fix single quotes to double quotes for keys/values
+        cleaned = cleaned.replace(/'/g, '"');
+        // Fix unquoted keys: add quotes around word characters before :
+        cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
+        // Remove trailing commas before } or ]
+        cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+        // Attempt 1: Direct parse
         try {
             const parsed = JSON.parse(cleaned);
-            if (parsed) {
-                return {
-                    rationale: parsed.rationale || parsed.r || 'No rationale provided',
-                    redFlags: Array.isArray(parsed.redFlags) ? parsed.redFlags : (Array.isArray(parsed.rf) ? parsed.rf : []),
-                    greenFlags: Array.isArray(parsed.greenFlags) ? parsed.greenFlags : (Array.isArray(parsed.gf) ? parsed.gf : []),
-                    recommendation: validateRecommendation(parsed.recommendation || parsed.rec),
-                };
+            return extractFields(parsed);
+        }
+        catch (_) { }
+        // Attempt 2: Try finding any valid JSON object with our keys
+        const jsonPattern = /\{[^{}]*\}/g;
+        let match;
+        while ((match = jsonPattern.exec(response)) !== null) {
+            try {
+                let candidate = match[0];
+                candidate = candidate.replace(/'/g, '"');
+                candidate = candidate.replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
+                candidate = candidate.replace(/,\s*([}\]])/g, '$1');
+                const parsed = JSON.parse(candidate);
+                if (parsed.recommendation || parsed.rec || parsed.rationale || parsed.r) {
+                    return extractFields(parsed);
+                }
             }
+            catch (_) { }
         }
-        catch (_) {
-            // Not valid JSON as-is, try regex extraction
+        // Attempt 3: Regex fallback - extract recommendation from anywhere in text
+        const recMatch = response.match(/\b(STRONG_BUY|BUY|HOLD|AVOID|STRONG_AVOID)\b/);
+        if (recMatch) {
+            return {
+                rationale: 'Parsed from partial response',
+                redFlags: [],
+                greenFlags: [],
+                recommendation: validateRecommendation(recMatch[1]),
+            };
         }
-        // Extract JSON object containing recommendation-related keys
-        const jsonMatch = cleaned.match(/\{[\s\S]*?(?:recommendation|rec|rationale)[\s\S]*\}/);
-        if (!jsonMatch) {
-            throw new Error('No JSON found in response');
-        }
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-            rationale: parsed.rationale || parsed.r || 'No rationale provided',
-            redFlags: Array.isArray(parsed.redFlags) ? parsed.redFlags : (Array.isArray(parsed.rf) ? parsed.rf : []),
-            greenFlags: Array.isArray(parsed.greenFlags) ? parsed.greenFlags : (Array.isArray(parsed.gf) ? parsed.gf : []),
-            recommendation: validateRecommendation(parsed.recommendation || parsed.rec),
-        };
+        throw new Error('No parseable content found');
     }
     catch (error) {
         logger_1.default.debug('[AnalyzeNode] Failed to parse AI response: ' + (response || '').substring(0, 200));
         return null;
     }
+}
+function extractFields(parsed) {
+    if (!parsed || typeof parsed !== 'object')
+        return null;
+    return {
+        rationale: parsed.rationale || parsed.r || 'No rationale provided',
+        redFlags: Array.isArray(parsed.redFlags) ? parsed.redFlags : (Array.isArray(parsed.rf) ? parsed.rf : []),
+        greenFlags: Array.isArray(parsed.greenFlags) ? parsed.greenFlags : (Array.isArray(parsed.gf) ? parsed.gf : []),
+        recommendation: validateRecommendation(parsed.recommendation || parsed.rec),
+    };
 }
 /**
  * Validate recommendation
