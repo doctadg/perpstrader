@@ -319,6 +319,17 @@ export class ResearchEngine {
         // Collect all params_hashes appearing in the batch (deduped)
         const batchHashes = [...new Set(batchEntries.map(e => e.paramsHash))];
 
+        // Options strategy detector — must be defined before promotion loops
+        const optionsIndicators = ['IV Rank', 'IV (Implied Volatility)', 'Delta', 'Gamma', 'Vega', 'Theta', 'Time Decay', 'HV (Historical Volatility)'];
+        const isOptionsStrategy = (strategy: any) => {
+          const params = typeof strategy.parameters === 'string' ? strategy.parameters : '';
+          const conditions = typeof strategy.entry_conditions === 'string' ? strategy.entry_conditions : typeof strategy.entryConditions === 'string' ? strategy.entryConditions : '';
+          const combined = `${params} ${conditions}`.toLowerCase();
+          const optionsKeywords = ['straddle', 'strangle', 'iron condor', 'butterfly', 'short put', 'short call', 'long put', 'long call', 'delta neutral', 'gamma scalp'];
+          return optionsIndicators.some(ind => combined.includes(ind.toLowerCase())) ||
+            optionsKeywords.some(kw => combined.includes(kw));
+        };
+
         // Only deactivate strategies that are being replaced by a newer version
         // in this promotion batch (matched by params_hash). All others stay active.
         if (batchHashes.length > 0) {
@@ -336,6 +347,12 @@ export class ResearchEngine {
           // Skip if already promoted in this batch
           if (promotedHashes.has(paramsHash)) {
             logger.debug(`[ResearchEngine] Skipping duplicate strategy (same name+params): ${idea.name}`);
+            continue;
+          }
+
+          // Skip options-only strategies (can't execute on perps exchange)
+          if (isOptionsStrategy(idea)) {
+            logger.warn(`[ResearchEngine] Skipping options strategy "${idea.name}" (perps-only exchange)`);
             continue;
           }
 
@@ -435,16 +452,7 @@ export class ResearchEngine {
         }
 
         // --- Phase 2: Diversity enforcement ---
-        // Block options-only strategies from promotion (Hyperliquid is perps-only)
-        const optionsIndicators = ['IV Rank', 'IV (Implied Volatility)', 'Delta', 'Gamma', 'Vega', 'Theta', 'Time Decay', 'HV (Historical Volatility)'];
-        const isOptionsStrategy = (strategy: any) => {
-          const params = typeof strategy.parameters === 'string' ? strategy.parameters : '';
-          const conditions = typeof strategy.entry_conditions === 'string' ? strategy.entry_conditions : '';
-          const combined = `${params} ${conditions}`.toLowerCase();
-          const optionsKeywords = ['straddle', 'strangle', 'iron condor', 'butterfly', 'short put', 'short call', 'long put', 'long call', 'delta neutral', 'gamma scalp'];
-          return optionsIndicators.some(ind => combined.includes(ind.toLowerCase())) ||
-                 optionsKeywords.some(kw => combined.includes(kw));
-        };
+        // isOptionsStrategy() already defined above (line 324) — shared across both phases
 
         // Ensure at least TREND_FOLLOWING is represented among active strategies
         const activeTypes = (db.prepare(
