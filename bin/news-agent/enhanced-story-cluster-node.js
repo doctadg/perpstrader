@@ -769,8 +769,8 @@ async function mergeSimilarClustersEnhanced(useVectorMode) {
                     if (result.moved > 0) {
                         mergedCount++;
                         targetCount++;
-                        // Create hierarchy record
-                        await story_cluster_store_enhanced_1.default.createHierarchy(target.id, source.id, 'MERGED_INTO');
+                        // Hierarchy record already created inside mergeClusters() — no need to call again
+                        // (calling after mergeClusters would fail with FK constraint since source is deleted)
                     }
                 }
             }
@@ -1045,7 +1045,7 @@ async function mergeSingletonClusters() {
                         if (result.moved > 0) {
                             s2sMerged++;
                             mergedAway.add(source.id);
-                            await story_cluster_store_enhanced_1.default.createHierarchy(target.id, source.id, 'MERGED_INTO');
+                            // Hierarchy record already created inside mergeClusters() — no need to call again
                         }
                     }
                     catch (e) {

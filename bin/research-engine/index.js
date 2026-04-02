@@ -352,7 +352,7 @@ class ResearchEngine {
                                 ? Math.abs(perf.pnl) / (Math.round(perf.totalTrades * perf.winRate) * perf.profitFactor + Math.round(perf.totalTrades * (1 - perf.winRate)))
                                 : 0,
                             profitFactor: perf.profitFactor,
-                        }), paramsHash, new Date().toISOString(), existing.id);
+                        }), new Date().toISOString(), existing.id);
                         promotedHashes.add(paramsHash);
                         promoted++;
                     }

@@ -6,6 +6,8 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import logger from '../../shared/logger';
 import configManager from '../../shared/config';
 import bondingCurveService, { DEFAULT_TP_LEVELS, TIME_EXIT_MINUTES } from './bonding-curve';
+import { getSummary as getRugCheckSummary, evaluateToken as evaluateRugCheck } from './rugcheck-service';
+import { evaluateMarket as evaluateDexScreener } from './dexscreener-service';
 
 // pump.fun Program ID
 const PUMPFUN_PROGRAM_ID = '6EF8rrecthR5Dkjon8nkdqXHDr3EbmLB4TqRASFjZxb';
@@ -400,10 +402,72 @@ class SnipeService {
       logger.info(`[SnipeService] Red flags for ${event.tokenSymbol}: ${redFlags.join(', ')} (-${redFlagPenalty.toFixed(2)})`);
     }
 
-    // ── BUY DECISION ──────────────────────────────────────────────────────────
-    // Use configured threshold for all scores (respect PUMPFUN_MIN_BUY_SCORE from .env)
+    // ── RUGCHECK + DEXSCREENER PRE-BUY GATE ──────────────────────────────────
+    // Multi-layered on-chain safety check before committing capital.
+    // Layer 1: RugCheck (holder concentration, insider networks, LP locks, mint/freeze auth)
+    // Layer 2: DexScreener (sell pressure, price dumps, liquidity)
+    // Brand new tokens (<30s) may not be indexed yet — let them through (optimistic).
     const effectiveThreshold = this.minScoreToBuy;
-    const shouldBuy = score >= effectiveThreshold && redFlags.length < 3;
+    const tokenAgeMs = Date.now() - event.timestamp.getTime();
+    let rugGatePassed = true;
+    let dexGatePassed = true;
+    const preliminaryScore = score >= effectiveThreshold;
+
+    if (tokenAgeMs > 30_000 && preliminaryScore) {
+      // Layer 1: RugCheck
+      try {
+        const rcResult = await evaluateRugCheck(event.tokenMint);
+        if (rcResult.verdict === 'RUGGED') {
+          rugGatePassed = false;
+          redFlags.push('rugcheck:RUGGED');
+          logger.warn(`[SnipeService] RUGCHECK RUGGED: ${event.tokenSymbol} — confirmed rug pull`);
+        } else if (rcResult.verdict === 'HIGH_RISK') {
+          rugGatePassed = false;
+          redFlags.push(`rugcheck:HIGH_RISK`);
+          logger.warn(
+            `[SnipeService] RUGCHECK BLOCK: ${event.tokenSymbol} — ${rcResult.rejectReasons.slice(0, 3).join('; ')}`
+          );
+        } else if (rcResult.scorePenalty > 0.5) {
+          rugGatePassed = false;
+          redFlags.push(`rugcheck:score_penalty`);
+          logger.warn(`[SnipeService] RUGCHECK BLOCK: ${event.tokenSymbol} — penalty ${rcResult.scorePenalty.toFixed(2)}`);
+        } else if (rcResult.rejectReasons.length > 0) {
+          // Soft warnings — don't block but add to red flags
+          for (const reason of rcResult.rejectReasons.slice(0, 3)) {
+            redFlags.push(`rugcheck:${reason.split(':')[0]}`);
+          }
+          logger.info(`[SnipeService] RugCheck warnings for ${event.tokenSymbol}: ${rcResult.rejectReasons.join('; ')}`);
+        }
+      } catch (err) {
+        logger.debug(`[SnipeService] RugCheck pre-buy error for ${event.tokenSymbol}: ${err}`);
+        // Don't block on RugCheck failures — network errors shouldn't prevent trades
+      }
+
+      // Layer 2: DexScreener (only if RugCheck passed)
+      if (rugGatePassed) {
+        try {
+          const dsResult = await evaluateDexScreener(event.tokenMint);
+          if (dsResult.dumpDetected) {
+            dexGatePassed = false;
+            redFlags.push('dexscreener:DUMP');
+            logger.warn(`[SnipeService] DEXSCREENER BLOCK: ${event.tokenSymbol} — price dump ${dsResult.metrics.priceChange1h.toFixed(1)}%`);
+          } else if (dsResult.sellPressureDetected) {
+            dexGatePassed = false;
+            redFlags.push('dexscreener:SELL_PRESSURE');
+            logger.warn(`[SnipeService] DEXSCREENER BLOCK: ${event.tokenSymbol} — sell pressure (buy/sell ratio: ${(dsResult.metrics.buySellRatio1h * 100).toFixed(0)}%)`);
+          } else if (dsResult.rejectReasons.length > 0) {
+            for (const reason of dsResult.rejectReasons.slice(0, 2)) {
+              redFlags.push(`dexscreener:${reason.split(':')[0]}`);
+            }
+          }
+        } catch (err) {
+          logger.debug(`[SnipeService] DexScreener pre-buy error for ${event.tokenSymbol}: ${err}`);
+        }
+      }
+    }
+
+    // ── BUY DECISION ──────────────────────────────────────────────────────────
+    const shouldBuy = score >= effectiveThreshold && redFlags.length < 3 && rugGatePassed && dexGatePassed;
 
     const candidate: SnipeCandidate = {
       event,
@@ -539,6 +603,75 @@ class SnipeService {
           await bondingCurveService.emergencySell(position.tokenMint, newMultiplier, 'RUG');
           this.permanentBlacklist.add(position.tokenMint);
           continue;
+        }
+
+        // ── RUGCHECK LIVE MONITORING (every ~2 min via 5s loop interval) ──
+        // Only check RugCheck if position is older than 1 min and check every ~24th iteration
+        // This avoids hammering the API while still catching rugs in real-time
+        if (ageMinutes > 1 && position.rugChecksPerformed === undefined) {
+          (position as any).rugChecksPerformed = 0;
+        }
+        const rugCheckInterval = 24; // Every ~2 minutes at 5s polling
+        const rugChecksDone = (position as any).rugChecksPerformed || 0;
+        if (ageMinutes > 1 && rugChecksDone < 30 && (rugChecksDone === 0 || rugChecksDone % rugCheckInterval === 0)) {
+          try {
+            const rcResult = await evaluateRugCheck(position.tokenMint);
+            (position as any).rugChecksPerformed = rugChecksDone + 1;
+
+            if (rcResult.verdict === 'RUGGED') {
+              logger.warn(`[PriceMonitor] RUGCHECK LIVE: ${position.tokenSymbol} CONFIRMED RUGGED — emergency sell`);
+              await bondingCurveService.emergencySell(position.tokenMint, newMultiplier, 'RUGCHECK_RUGGED');
+              this.permanentBlacklist.add(position.tokenMint);
+              continue;
+            }
+
+            // Soft rug signal: significant score degradation
+            if (rcResult.scorePenalty > 0.6 && newMultiplier < 0.9) {
+              logger.warn(
+                `[PriceMonitor] RUGCHECK LIVE: ${position.tokenSymbol} high penalty (${rcResult.scorePenalty.toFixed(2)}) ` +
+                `at ${newMultiplier.toFixed(2)}x — emergency sell`
+              );
+              await bondingCurveService.emergencySell(position.tokenMint, newMultiplier, 'RUGCHECK_HIGH_RISK');
+              this.permanentBlacklist.add(position.tokenMint);
+              continue;
+            }
+          } catch (err) {
+            // Don't let RugCheck monitoring errors crash the loop
+            logger.debug(`[PriceMonitor] RugCheck monitor error for ${position.tokenSymbol}: ${err}`);
+          }
+        }
+
+        // ── DEXSCREENER LIVE MONITORING (sell pressure detection) ──
+        // Check at the same interval as RugCheck but offset by half
+        const dexCheckInterval = 24;
+        if (ageMinutes > 1 && rugChecksDone > 0 && rugChecksDone % dexCheckInterval === 12) {
+          try {
+            const dsResult = await evaluateDexScreener(position.tokenMint);
+            if (dsResult.dumpDetected && dsResult.metrics.priceChange1h < -30) {
+              logger.warn(
+                `[PriceMonitor] DEXSCREENER LIVE: ${position.tokenSymbol} dumping ${dsResult.metrics.priceChange1h.toFixed(1)}% ` +
+                `at ${newMultiplier.toFixed(2)}x — emergency sell`
+              );
+              await bondingCurveService.emergencySell(position.tokenMint, newMultiplier, 'DEXSCREENER_DUMP');
+              this.permanentBlacklist.add(position.tokenMint);
+              continue;
+            }
+            if (dsResult.sellPressureDetected && newMultiplier < 0.95) {
+              logger.warn(
+                `[PriceMonitor] DEXSCREENER LIVE: ${position.tokenSymbol} heavy sell pressure ` +
+                `(ratio: ${(dsResult.metrics.buySellRatio1h * 100).toFixed(0)}%) at ${newMultiplier.toFixed(2)}x`
+              );
+              // Don't auto-sell on sell pressure alone — log for awareness
+              // But if also declining, trigger emergency sell
+              if (newMultiplier < 0.8) {
+                await bondingCurveService.emergencySell(position.tokenMint, newMultiplier, 'DEXSCREENER_SELL_PRESSURE');
+                this.permanentBlacklist.add(position.tokenMint);
+                continue;
+              }
+            }
+          } catch (err) {
+            logger.debug(`[PriceMonitor] DexScreener monitor error for ${position.tokenSymbol}: ${err}`);
+          }
         }
 
         // Check TP levels

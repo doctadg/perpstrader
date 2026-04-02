@@ -335,6 +335,10 @@ class StoryClusterStoreEnhanced {
         if (!this.db) return;
 
         try {
+            // Guard against NULL heat_score (story_clusters.heat_score can be NULL)
+            const safeHeatScore = heatScore ?? 0;
+            const safeArticleCount = articleCount ?? 0;
+            const safeUniqueTitleCount = uniqueTitleCount ?? 0;
             const now = new Date().toISOString();
 
             // Calculate velocity (change from last point)
@@ -344,13 +348,13 @@ class StoryClusterStoreEnhanced {
                 ORDER BY timestamp DESC LIMIT 1
             `).get(clusterId) as { heat_score: number } | undefined;
 
-            const velocity = lastHistory ? heatScore - lastHistory.heat_score : 0;
+            const velocity = lastHistory ? safeHeatScore - lastHistory.heat_score : 0;
 
             this.db.prepare(`
                 INSERT INTO cluster_heat_history
                 (cluster_id, heat_score, article_count, unique_title_count, velocity, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?)
-            `).run(clusterId, heatScore, articleCount, uniqueTitleCount, velocity, now);
+            `).run(clusterId, safeHeatScore, safeArticleCount, safeUniqueTitleCount, velocity, now);
 
             // Update cluster with current velocity
             this.db.prepare(`

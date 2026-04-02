@@ -24,17 +24,22 @@ export async function qualityFilterNode(state: NewsAgentState): Promise<Partial<
   const startTime = Date.now();
   logger.info('[QualityFilterNode] Starting quality filter gate');
 
+  // Reset circuit breaker at start of each cycle
+  circuitBreakerOpen = false;
+  consecutiveRateLimits = 0;
+
   const filteredArticles: FilteredArticle[] = [];
   let filteredLanguage = 0;
   let filteredQuality = 0;
   let filteredCategory = 0;
   let filteredNonRelevant = 0;
 
+  // Phase 1: Fast pre-filtering (language, quality score, market relevance) — sequential, no API calls
+  const preFiltered: { article: RawArticle; qualityScore: number }[] = [];
   for (const article of state.rawArticles) {
     try {
       // Step 1: Language detection (fast fail)
       const language = article.language || detectLanguage(article.title + ' ' + article.content);
-
       if (language !== 'en') {
         filteredLanguage++;
         logger.debug(`[QualityFilterNode] Filtered non-English article: ${article.title} (lang: ${language})`);
@@ -43,7 +48,6 @@ export async function qualityFilterNode(state: NewsAgentState): Promise<Partial<
 
       // Step 2: Quality score check
       const qualityScore = calculateQualityScore(article.title, article.content);
-
       if (qualityScore < 0.3) {
         filteredQuality++;
         logger.debug(`[QualityFilterNode] Filtered low-quality article: ${article.title} (score: ${qualityScore.toFixed(2)})`);
@@ -51,7 +55,6 @@ export async function qualityFilterNode(state: NewsAgentState): Promise<Partial<
       }
 
       // Step 2b: Crypto/financial relevance pre-filter (fast, no API call)
-      // This catches obvious non-market content (sports, entertainment, etc.) even when the LLM gate is down
       const relevance = checkMarketRelevance(article.title, article.content || article.snippet || '');
       if (!relevance) {
         filteredNonRelevant++;
@@ -59,9 +62,31 @@ export async function qualityFilterNode(state: NewsAgentState): Promise<Partial<
         continue;
       }
 
-      // Step 3: LLM quality gate for market relevance
-      const gateResult = await applyQualityGate(article);
+      preFiltered.push({ article, qualityScore });
+    } catch (error) {
+      logger.debug(`[QualityFilterNode] Error pre-filtering article: ${error}`);
+      filteredArticles.push({
+        ...article,
+        qualityScore: 0.5,
+        isEnglish: true,
+        passedFirstFilter: true,
+      });
+    }
+  }
 
+  // Phase 2: LLM quality gate — batched with concurrency 3
+  if (preFiltered.length > 0) {
+    const QUALITY_GATE_CONCURRENCY = 3;
+    const gateResults = await asyncPool(
+      QUALITY_GATE_CONCURRENCY,
+      preFiltered,
+      async ({ article, qualityScore }) => {
+        const gateResult = await applyQualityGate(article);
+        return { article, qualityScore, gateResult };
+      }
+    );
+
+    for (const { article, qualityScore, gateResult } of gateResults) {
       if (!gateResult.passes) {
         if (gateResult.isSports && !EXCLUDED_CATEGORIES.some(c => state.categories.includes(c))) {
           filteredCategory++;
@@ -72,25 +97,12 @@ export async function qualityFilterNode(state: NewsAgentState): Promise<Partial<
         continue;
       }
 
-      // Article passed all filters
-      const filteredArticle: FilteredArticle = {
+      filteredArticles.push({
         ...article,
         qualityScore,
         isEnglish: true,
         passedFirstFilter: true,
         filterReasons: [],
-      };
-
-      filteredArticles.push(filteredArticle);
-
-    } catch (error) {
-      logger.debug(`[QualityFilterNode] Error processing article: ${error}`);
-      // On error, be conservative and include the article
-      filteredArticles.push({
-        ...article,
-        qualityScore: 0.5,
-        isEnglish: true,
-        passedFirstFilter: true,
       });
     }
   }
@@ -99,7 +111,8 @@ export async function qualityFilterNode(state: NewsAgentState): Promise<Partial<
   logger.info(
     `[QualityFilterNode] Completed in ${elapsed}ms. ` +
     `Passed: ${filteredArticles.length}/${state.rawArticles.length}, ` +
-    `Filtered: ${filteredLanguage} language, ${filteredQuality} quality, ${filteredCategory} category, ${filteredNonRelevant} non-relevant`
+    `Filtered: ${filteredLanguage} language, ${filteredQuality} quality, ${filteredCategory} category, ${filteredNonRelevant} non-relevant` +
+    (circuitBreakerOpen ? ' [CIRCUIT BREAKER ACTIVE]' : '')
   );
 
   return {
@@ -121,10 +134,23 @@ export async function qualityFilterNode(state: NewsAgentState): Promise<Partial<
 }
 
 /**
+ * Circuit breaker state for quality gate LLM calls.
+ * After RATE_LIMIT_THRESHOLD consecutive 429 errors, skip LLM gate and pass all articles.
+ */
+let consecutiveRateLimits = 0;
+const RATE_LIMIT_THRESHOLD = 3;
+let circuitBreakerOpen = false;
+
+/**
  * Apply LLM-based quality gate to an article
  * Evaluates market relevance and content appropriateness
  */
 async function applyQualityGate(article: RawArticle): Promise<QualityGateResult> {
+  // Circuit breaker: if rate limited, skip LLM gate entirely
+  if (circuitBreakerOpen) {
+    return { passes: true, reasons: ['circuit_breaker_skip'], marketRelevance: 'MEDIUM', isSports: false };
+  }
+
   try {
     // Build a concise prompt for quality evaluation
     const prompt = buildQualityGatePrompt(article);
@@ -157,9 +183,12 @@ async function applyQualityGate(article: RawArticle): Promise<QualityGateResult>
           'HTTP-Referer': 'https://perps-trader.ai',
           'X-Title': 'PerpsTrader News System',
         },
-        timeout: config.openrouter.timeout,
+        timeout: 15000, // 15s per call — fast fail instead of hanging
       }
     );
+
+    // Reset on success
+    consecutiveRateLimits = 0;
 
     // FIX: z-ai/glm models return content in 'reasoning' field
     const msg = response.data?.choices?.[0]?.message;
@@ -181,7 +210,15 @@ async function applyQualityGate(article: RawArticle): Promise<QualityGateResult>
 
     return parseQualityGateResponse(content, article);
 
-  } catch (error) {
+  } catch (error: any) {
+    // Detect 429 rate limit
+    if (error?.response?.status === 429) {
+      consecutiveRateLimits++;
+      if (consecutiveRateLimits >= RATE_LIMIT_THRESHOLD) {
+        circuitBreakerOpen = true;
+        logger.warn(`[QualityFilterNode] Circuit breaker OPEN after ${consecutiveRateLimits} consecutive 429s — skipping LLM gate for remaining articles`);
+      }
+    }
     logger.debug(`[QualityFilterNode] LLM gate failed for article "${article.title}": ${error}`);
     // On error, be conservative and pass with medium relevance
     return {
@@ -191,6 +228,33 @@ async function applyQualityGate(article: RawArticle): Promise<QualityGateResult>
       isSports: false,
     };
   }
+}
+
+/**
+ * Process items with bounded concurrency.
+ * Runs at most `concurrency` promises simultaneously.
+ */
+async function asyncPool<T, R>(
+  concurrency: number,
+  items: T[],
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  const executing: Promise<void>[] = [];
+  for (const item of items) {
+    const p = fn(item).then(result => { results.push(result); });
+    executing.push(p as any);
+    if (executing.length >= concurrency) {
+      await Promise.race(executing);
+      // Remove resolved promises
+      for (let i = executing.length - 1; i >= 0; i--) {
+        const settled = await Promise.race([executing[i].then(() => true, () => true), Promise.resolve(false)]);
+        if (settled) executing.splice(i, 1);
+      }
+    }
+  }
+  await Promise.all(executing);
+  return results;
 }
 
 /**

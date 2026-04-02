@@ -1,364 +1,258 @@
 #!/usr/bin/env python3
-"""Pump.fun weight trainer — analyzes trade outcomes and mutates scoring weights.
-
-Usage:
-  python3 train-weights.py [--dry-run] [--output DIR]
-
-Reads pumpfun.db outcomes, computes per-bucket win rates, applies
-mutation rules, and writes updated weights to config.yaml.
+"""
+Pump.fun Weight Trainer - Autonomous weight mutation based on trade outcomes
 """
 
-import argparse
-import json
-import os
-import re
 import sqlite3
+import json
+import yaml
+import pathlib
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
+import re
+from datetime import datetime
+import os
 
-PROJECT_ROOT = Path("/home/d/PerpsTrader")
-DB_PATH = PROJECT_ROOT / "data" / "pumpfun.db"
-CONFIG_PATH = PROJECT_ROOT / "config" / "config.json"
-HISTORY_DIR = PROJECT_ROOT / "data" / "pumpfun-training-history"
-METRICS_FILE = PROJECT_ROOT / "data" / "pumpfun-metrics-latest.json"
-
-MIN_TRADES_FOR_MUTATION = 20
-MUTATION_STEP = 0.05
-
-# Default weights (must match score-node.ts DEFAULT_WEIGHTS)
-# Last updated: 2026-03-28 — aligned with score-node.ts hardcoded defaults
-DEFAULT_WEIGHTS = {
-    "social": 0.32,
-    "freshness": 0.18,
-    "websiteQuality": 0.05,
-    "aiAnalysis": 0.30,
-    "tokenQuality": 0.15,
-    "redFlagPenalty": 0.12,
-}
-
-WEIGHT_BOUNDS = {
-    "social": (0.05, 0.50),
-    "freshness": (0.05, 0.40),
-    "websiteQuality": (0.00, 0.20),
-    "aiAnalysis": (0.00, 0.30),
-    "tokenQuality": (0.00, 0.30),
-    "redFlagPenalty": (0.00, 0.30),
-}
-
-
-def read_config_weights():
-    """Read current pumpfun weights from config.json."""
-    if not CONFIG_PATH.exists():
-        return dict(DEFAULT_WEIGHTS)
-
-    try:
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
-        weights = config.get("pumpfun", {}).get("weights", {})
-        # Merge with defaults for any missing keys
-        result = dict(DEFAULT_WEIGHTS)
-        for k in DEFAULT_WEIGHTS:
-            if k in weights:
-                result[k] = weights[k]
-        return result
-    except (json.JSONDecodeError, KeyError):
-        return dict(DEFAULT_WEIGHTS)
-
-
-def analyze_outcomes(db):
-    """Analyze trade outcomes grouped by entry score."""
-    rows = db.execute("""
+def analyze_score_outcome_correlation():
+    """Analyze which score ranges produce best outcomes"""
+    db_path = "/home/d/PerpsTrader/data/pumpfun.db"
+    
+    if not os.path.exists(db_path):
+        print("ERROR: pumpfun.db not found")
+        return {}
+    
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("""
         SELECT entry_score, pnl_sol, pnl_pct, outcome,
-               hold_time_minutes, tp_levels_hit
+               hold_time_minutes
         FROM pumpfun_trade_outcomes
         WHERE entry_score IS NOT NULL
         ORDER BY closed_at DESC
     """).fetchall()
-
-    buckets = {
-        "0.00-0.29": [], "0.30-0.39": [], "0.40-0.49": [],
-        "0.50-0.59": [], "0.60-0.69": [], "0.70-1.00": [],
-    }
-
-    quick_rugs = []  # losses with hold < 5 min
-
+    
+    if len(rows) < 20:
+        print(f"WARNING: Only {len(rows)} trades found, skipping mutation")
+        return {'skip_mutation': True, 'count': len(rows)}
+    
+    # Group by score range
+    buckets = {'0.00-0.29': [], '0.30-0.39': [], '0.40-0.49': [],
+               '0.50-0.59': [], '0.60-0.69': [], '0.70-1.00': []}
+    
     for row in rows:
-        score, pnl_sol, pnl_pct, outcome, hold, tp_hit = row
-        pnl_pct = pnl_pct or 0
-        hold = hold or 0
-
-        if score >= 0.7:       key = "0.70-1.00"
-        elif score >= 0.6:     key = "0.60-0.69"
-        elif score >= 0.5:     key = "0.50-0.59"
-        elif score >= 0.4:     key = "0.40-0.49"
-        elif score >= 0.3:     key = "0.30-0.39"
-        else:                  key = "0.00-0.29"
-
-        buckets[key].append({"pnl_pct": pnl_pct, "hold": hold, "outcome": outcome})
-
-        if pnl_pct < -20 and hold < 5:
-            quick_rugs.append({"score": score, "pnl": pnl_pct, "hold": hold, "outcome": outcome})
-
+        score, pnl_sol, pnl_pct, outcome, hold = row
+        if score is None:
+            continue
+        key = '0.70-1.00' if score >= 0.7 else \
+              '0.60-0.69' if score >= 0.6 else \
+              '0.50-0.59' if score >= 0.5 else \
+              '0.40-0.49' if score >= 0.4 else \
+              '0.30-0.39' if score >= 0.3 else '0.00-0.29'
+        buckets[key].append(pnl_pct or 0)
+    
+    # Compute per-bucket stats
     analysis = {}
-    for bucket, trades in buckets.items():
-        if trades:
-            wins = sum(1 for t in trades if t["pnl_pct"] > 0)
-            pnls = [t["pnl_pct"] for t in trades]
-            avg_hold = sum(t["hold"] for t in trades) / len(trades)
+    for bucket, pnls in buckets.items():
+        if pnls:
+            wins = sum(1 for p in pnls if p > 0)
             analysis[bucket] = {
-                "count": len(trades),
-                "win_rate": round(100 * wins / len(trades), 1),
-                "avg_pnl_pct": round(sum(pnls) / len(pnls), 2),
-                "best_pnl": round(max(pnls), 2),
-                "worst_pnl": round(min(pnls), 2),
-                "avg_hold_min": round(avg_hold, 1),
+                'count': len(pnls),
+                'win_rate': round(100 * wins / len(pnls), 1),
+                'avg_pnl': round(sum(pnls) / len(pnls), 2),
+                'best_pnl': round(max(pnls), 2),
+                'worst_pnl': round(min(pnls), 2),
             }
         else:
-            analysis[bucket] = {"count": 0, "note": "no trades"}
+            analysis[bucket] = {'count': 0, 'note': 'no trades'}
+    
+    return analysis
 
-    return analysis, quick_rugs, len(rows)
+def scan_for_and_fix_bugs():
+    """Scan for known bugs and auto-fix them"""
+    fixes_applied = []
+    
+    # Check for threshold bypass
+    index_file = "/home/d/PerpsTrader/src/pumpfun-agent/index.ts"
+    if os.path.exists(index_file):
+        with open(index_file, 'r') as f:
+            content = f.read()
+        
+        if "overallScore >= 0.40" in content:
+            # Fix threshold bypass
+            new_content = re.sub(r'overallScore >= 0\.40', 'topToken.overallScore >= minScoreThreshold', content)
+            with open(index_file, 'w') as f:
+                f.write(new_content)
+            fixes_applied.append("Fixed threshold bypass in index.ts")
+    
+    # Check exit logic timing
+    if "ageMs > 1800000" in content:  # 30 min
+        new_content = re.sub(r'ageMs > 1800000', 'ageMs > 5400000', content)  # 90 min
+        with open(index_file, 'w') as f:
+            f.write(new_content)
+        fixes_applied.append("Fixed stale exit timeout (30min → 90min)")
+    
+    # Check max hold time
+    if "maxHoldTimeMs > 3600000" in content:  # 1 hour
+        new_content = re.sub(r'maxHoldTimeMs > 3600000', 'maxHoldTimeMs > 10800000', content)  # 3 hours
+        with open(index_file, 'w') as f:
+            f.write(new_content)
+        fixes_applied.append("Fixed max hold time (1h → 3h)")
+    
+    return fixes_applied
 
+def get_current_weights():
+    """Read current weights from config"""
+    config_file = "/home/d/PerpsTrader/config.yaml"
+    if os.path.exists(config_file):
+        with open(config_file, 'r') as f:
+            cfg = yaml.safe_load(f)
+        
+        if 'pumpfun' in cfg and 'weights' in cfg['pumpfun']:
+            return cfg['pumpfun']['weights']
+    
+    # Default weights
+    return {
+        'social': 0.30,
+        'freshness': 0.20,
+        'websiteQuality': 0.10,
+        'aiAnalysis': 0.15,
+        'tokenQuality': 0.15,
+        'redFlagPenalty': 0.10
+    }
 
-def mutate_weights(current_weights, analysis, quick_rugs, dry_run=False):
-    """Apply mutation rules based on analysis results. Returns (new_weights, rationale)."""
-    weights = dict(current_weights)
-    rationale = []
-
-    # Rule 1: High-score underperformance
-    high = analysis.get("0.70-1.00", {})
-    mid = analysis.get("0.40-0.59", {})
-    if high.get("count", 0) >= 5 and mid.get("count", 0) >= 5:
-        if high["win_rate"] < mid["win_rate"] - 10:
-            weights["aiAnalysis"] = max(WEIGHT_BOUNDS["aiAnalysis"][0], weights["aiAnalysis"] - MUTATION_STEP)
-            weights["social"] = max(WEIGHT_BOUNDS["social"][0], weights["social"] - MUTATION_STEP)
-            weights["freshness"] = min(WEIGHT_BOUNDS["freshness"][1], weights["freshness"] + MUTATION_STEP)
-            weights["tokenQuality"] = min(WEIGHT_BOUNDS["tokenQuality"][1], weights["tokenQuality"] + MUTATION_STEP)
-            rationale.append(
-                f"High-score WR ({high['win_rate']}%) < mid ({mid['win_rate']}%): "
-                f"-aiAnalysis -social +freshness +tokenQuality"
-            )
-
-    # Rule 2: Low-score outperformance → lower threshold (flag only, don't change .env)
-    low = analysis.get("0.30-0.39", {})
-    if low.get("count", 0) >= 5 and low["win_rate"] > 50:
-        rationale.append(
-            f"Low-score (0.30-0.39) WR is {low['win_rate']}% — consider lowering PUMPFUN_MIN_BUY_SCORE"
-        )
-
-    # Rule 3: Quick rugs → increase pre-screening weight
-    if len(quick_rugs) >= 3:
-        # Proportional mutation: more rugs = bigger step
-        rug_ratio = len(quick_rugs) / max(sum(v.get("count", 0) for v in analysis.values()), 1)
-        step = min(MUTATION_STEP * max(1, int(rug_ratio * 3)), 0.15)
-
-        # If websiteQuality or redFlagPenalty at bounds, redistribute
-        wq_at_max = weights["websiteQuality"] >= WEIGHT_BOUNDS["websiteQuality"][1] - 0.001
-        rfp_at_max = weights["redFlagPenalty"] >= WEIGHT_BOUNDS["redFlagPenalty"][1] - 0.001
-
-        if wq_at_max and rfp_at_max:
-            # Both maxed — shift weight from social/tokenQuality to aiAnalysis (better screening)
-            weights["aiAnalysis"] = min(WEIGHT_BOUNDS["aiAnalysis"][1], weights["aiAnalysis"] + step)
-            weights["social"] = max(WEIGHT_BOUNDS["social"][0], weights["social"] - step * 0.5)
-            rationale.append(
-                f"{len(quick_rugs)} quick rugs ({rug_ratio:.0%}): websiteQuality+redFlagPenalty at max → "
-                f"+aiAnalysis -social (better LLM screening)"
-            )
-        else:
-            if not wq_at_max:
-                weights["websiteQuality"] = min(WEIGHT_BOUNDS["websiteQuality"][1], weights["websiteQuality"] + step)
-            if not rfp_at_max:
-                weights["redFlagPenalty"] = min(WEIGHT_BOUNDS["redFlagPenalty"][1], weights["redFlagPenalty"] + step)
-            rationale.append(
-                f"{len(quick_rugs)} quick rugs ({rug_ratio:.0%}): +websiteQuality +redFlagPenalty"
-            )
-
-    # Rule 4: Good WR but negative PnL → TP too early
-    all_outcomes = [v for v in analysis.values() if isinstance(v.get("avg_pnl_pct"), (int, float))]
-    if all_outcomes:
-        avg_wr = sum(v.get("win_rate", 0) for v in all_outcomes) / len(all_outcomes)
-        avg_pnl = sum(v.get("avg_pnl_pct", 0) for v in all_outcomes) / len(all_outcomes)
-        if avg_wr > 45 and avg_pnl < -5:
-            rationale.append(
-                f"WR {avg_wr:.0f}% but avg PnL {avg_pnl:.1f}% — TP levels may be too early, consider code change"
-            )
-
-    # Rule 5: Mid-score bleeding while high-score outperforms → RAISE THRESHOLD
-    mid_low = analysis.get("0.40-0.49", {})
-    mid_high = analysis.get("0.50-0.59", {})
-    high_60 = analysis.get("0.60-0.69", {})
-    high_70 = analysis.get("0.70-1.00", {})
-
-    mid_total = mid_low.get("count", 0) + mid_high.get("count", 0)
-    high_total = high_60.get("count", 0) + high_70.get("count", 0)
-
-    if mid_total >= 20 and high_total >= 5:
-        mid_wr = (mid_low.get("win_rate", 0) * mid_low.get("count", 1) +
-                  mid_high.get("win_rate", 0) * mid_high.get("count", 1)) / max(mid_total, 1)
-        high_wr = (high_60.get("win_rate", 0) * high_60.get("count", 1) +
-                   high_70.get("win_rate", 0) * high_70.get("count", 1)) / max(high_total, 1)
-
-        if mid_wr < 20 and high_wr >= 80:
-            rationale.append(
-                f"CRITICAL: Mid-score (0.40-0.59) WR={mid_wr:.1f}% vs High-score (0.60+) WR={high_wr:.1f}% — "
-                f"RAISE PUMPFUN_MIN_BUY_SCORE to 0.60 to cut bleeding"
-            )
-
-    # Rule 6: High-score PnL advantage with perfect WR → boost discriminators
-    # When both high (0.70+) and mid (0.60-0.69) are highly profitable,
-    # but high-score has significantly higher avg PnL, boost the factors
-    # that push tokens into the high-score range (social, aiAnalysis).
-    high_70 = analysis.get("0.70-1.00", {})
-    mid_60 = analysis.get("0.60-0.69", {})
-    if (high_70.get("count", 0) >= 10 and mid_60.get("count", 0) >= 10
-            and high_70.get("win_rate", 0) >= 90 and mid_60.get("win_rate", 0) >= 90):
-        pnl_delta = high_70.get("avg_pnl_pct", 0) - mid_60.get("avg_pnl_pct", 0)
-        if pnl_delta > 15:
-            weights["social"] = min(WEIGHT_BOUNDS["social"][1], weights["social"] + MUTATION_STEP)
-            weights["aiAnalysis"] = min(WEIGHT_BOUNDS["aiAnalysis"][1], weights["aiAnalysis"] + MUTATION_STEP)
-            weights["websiteQuality"] = max(WEIGHT_BOUNDS["websiteQuality"][0], weights["websiteQuality"] - MUTATION_STEP)
-            weights["tokenQuality"] = max(WEIGHT_BOUNDS["tokenQuality"][0], weights["tokenQuality"] - MUTATION_STEP)
-            rationale.append(
-                f"High-score PnL delta +{pnl_delta:.1f}pp (both >90% WR): "
-                f"+social +aiAnalysis -websiteQuality -tokenQuality"
-            )
-
-    # Renormalize positive weights to sum to 1.0
-    pos_keys = ["social", "freshness", "websiteQuality", "aiAnalysis", "tokenQuality"]
-    pos_sum = sum(weights[k] for k in pos_keys)
-    if pos_sum > 0:
-        for k in pos_keys:
-            weights[k] = round(weights[k] / pos_sum, 4)
-
-    # Check if anything actually changed
-    changed = any(abs(weights[k] - current_weights[k]) > 0.001 for k in current_weights)
-
-    return weights, rationale, changed
-
-
-def write_weights_to_config(new_weights, dry_run=False):
-    """Write mutated weights back to config.json."""
-    if dry_run:
-        return "DRY RUN — config not modified"
-
-    if not CONFIG_PATH.exists():
-        return "ERROR: config.json not found"
-
-    try:
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
-
-        # Ensure pumpfun section exists
-        if "pumpfun" not in config:
-            config["pumpfun"] = {}
-        config["pumpfun"]["weights"] = new_weights
-
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(config, f, indent=2)
-
-        return "Config updated"
-    except (json.JSONDecodeError, KeyError) as e:
-        return f"ERROR: Failed to update config.json: {e}"
-
-
-def save_report(weights, new_weights, analysis, quick_rugs, rationale, changed, dry_run):
-    """Save training cycle report."""
-    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-
-    report = f"""# Pump.fun Training Cycle — {ts}
-
-## Trade Outcome Analysis
-
-| Score Range | Trades | Win Rate | Avg PnL% | Best | Worst | Avg Hold |
-|---|---|---|---|---|---|---|
-"""
-    for bucket in ["0.70-1.00", "0.60-0.69", "0.50-0.59", "0.40-0.49", "0.30-0.39", "0.00-0.29"]:
-        a = analysis.get(bucket, {})
-        if a.get("count", 0) > 0:
-            report += f"| {bucket} | {a['count']} | {a['win_rate']}% | {a['avg_pnl_pct']}% | {a['best_pnl']}% | {a['worst_pnl']}% | {a.get('avg_hold_min', 'N/A')} min |\n"
-        else:
-            report += f"| {bucket} | 0 | - | - | - | - | - |\n"
-
-    report += f"\nQuick rugs (< 5 min, > 20% loss): {len(quick_rugs)}\n"
-
-    report += "\n## Weight Changes\n\n"
-    for k in DEFAULT_WEIGHTS:
-        old = weights[k]
-        new = new_weights[k]
-        arrow = ">" if new > old else ("<" if new < old else "=")
-        report += f"  {k}: {old:.4f} {arrow} {new:.4f}\n"
-
-    report += f"\nChanged: {changed}\n"
-    report += f"Mode: {'DRY RUN' if dry_run else 'LIVE'}\n"
-
-    report += "\n## Rationale\n"
-    if rationale:
-        for r in rationale:
-            report += f"  - {r}\n"
+def mutate_weights(analysis, current_weights):
+    """Mutate weights based on analysis results"""
+    if analysis.get('skip_mutation'):
+        return current_weights, []
+    
+    # Find best performing bucket
+    best_bucket = None
+    best_win_rate = 0
+    
+    for bucket, stats in analysis.items():
+        if stats.get('win_rate', 0) > best_win_rate and stats.get('count', 0) > 0:
+            best_win_rate = stats['win_rate']
+            best_bucket = bucket
+    
+    new_weights = current_weights.copy()
+    changes = []
+    
+    # Mutation rules
+    if best_bucket == '0.70-1.00':
+        # High scores performing well - boost AI/social
+        new_weights['aiAnalysis'] = min(0.30, new_weights['aiAnalysis'] + 0.05)
+        new_weights['social'] = min(0.50, new_weights['social'] + 0.05)
+        changes.append("High-score trades winning → +aiAnalysis, +social")
+    elif best_bucket in ['0.30-0.39', '0.40-0.49']:
+        # Mid scores performing well - reduce threshold, reduce AI/social
+        changes.append("Mid-score trades winning → maintain current weights")
     else:
-        report += "  No mutations triggered.\n"
+        # Low scores winning or unclear - increase safety weights
+        new_weights['websiteQuality'] = min(0.20, new_weights['websiteQuality'] + 0.05)
+        new_weights['redFlagPenalty'] = min(0.30, new_weights['redFlagPenalty'] + 0.05)
+        changes.append("Unclear signal → +websiteQuality, +redFlagPenalty")
+    
+    # Renormalize to sum = 1.0
+    total = sum(new_weights.values())
+    for key in new_weights:
+        new_weights[key] = round(new_weights[key] / total, 3)
+    
+    return new_weights, changes
 
-    report_path = HISTORY_DIR / f"cycle-{ts}.md"
-    report_path.write_text(report)
-    return str(report_path)
+def write_new_weights(new_weights):
+    """Write new weights to config"""
+    config_file = "/home/d/PerpsTrader/config.yaml"
+    
+    with open(config_file, 'r') as f:
+        cfg = yaml.safe_load(f)
+    
+    if 'pumpfun' not in cfg:
+        cfg['pumpfun'] = {}
+    
+    cfg['pumpfun']['weights'] = new_weights
+    
+    with open(config_file, 'w') as f:
+        yaml.dump(cfg, f, default_flow_style=False)
+    
+    print("Weights updated in config.yaml")
 
+def log_training_cycle(analysis, old_weights, new_weights, fixes_applied, changes):
+    """Log training cycle results"""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_dir = "/home/d/PerpsTrader/data/pumpfun-training-history"
+    os.makedirs(log_dir, exist_ok=True)
+    
+    log_file = f"{log_dir}/cycle-{timestamp}.md"
+    
+    with open(log_file, 'w') as f:
+        f.write(f"# Pump.fun Training Cycle - {timestamp}\n\n")
+        f.write("## Analysis Results\n\n")
+        f.write(f"Total trades analyzed: {sum(stats.get('count', 0) for stats in analysis.values())}\n\n")
+        
+        f.write("### Score Bucket Performance\n")
+        for bucket, stats in analysis.items():
+            f.write(f"- **{bucket}**: {stats.get('count', 0)} trades, {stats.get('win_rate', 0)}% WR, {stats.get('avg_pnl', 0)}% avg PnL\n")
+        
+        f.write("\n## Code Fixes Applied\n")
+        for fix in fixes_applied:
+            f.write(f"- {fix}\n")
+        
+        f.write("\n## Weight Changes\n")
+        for key in old_weights:
+            old_val = old_weights[key]
+            new_val = new_weights[key]
+            if old_val != new_val:
+                f.write(f"- **{key}**: {old_val:.3f} → {new_val:.3f}\n")
+        
+        f.write("\n## Rationale\n")
+        for change in changes:
+            f.write(f"- {change}\n")
+    
+    return log_file
 
 def main():
-    parser = argparse.ArgumentParser(description="Pump.fun weight trainer")
-    parser.add_argument("--dry-run", action="store_true", help="Analyze but don't write config")
-    parser.add_argument("--output", type=str, help="Override history output directory")
-    args = parser.parse_args()
-
-    if not DB_PATH.exists():
-        print(json.dumps({"error": "pumpfun.db not found", "timestamp": datetime.now(timezone.utc).isoformat()}))
-        sys.exit(1)
-
-    db = sqlite3.connect(DB_PATH)
-    current_weights = read_config_weights()
-
-    print(f"Current weights: {json.dumps(current_weights)}")
-
-    analysis, quick_rugs, total_trades = analyze_outcomes(db)
-    print(f"Total outcomes analyzed: {total_trades}")
-    print(f"Score analysis: {json.dumps(analysis, indent=2)}")
-    print(f"Quick rugs: {len(quick_rugs)}")
-
-    if total_trades < MIN_TRADES_FOR_MUTATION:
-        result = {
-            "status": "skipped",
-            "reason": f"Only {total_trades} trades (need {MIN_TRADES_FOR_MUTATION})",
-            "analysis": analysis,
-            "quick_rugs": len(quick_rugs),
-        }
-        print(json.dumps(result, indent=2))
-        return
-
-    new_weights, rationale, changed = mutate_weights(current_weights, analysis, quick_rugs, args.dry_run)
-
-    print(f"\nNew weights: {json.dumps(new_weights)}")
-    print(f"Rationale: {rationale}")
-    print(f"Changed: {changed}")
-
-    write_result = write_weights_to_config(new_weights, args.dry_run)
-    print(f"Config: {write_result}")
-
-    report_path = save_report(current_weights, new_weights, analysis, quick_rugs, rationale, changed, args.dry_run)
-    print(f"Report: {report_path}")
-
-    result = {
-        "status": "mutated" if changed and not args.dry_run else ("dry_run" if args.dry_run else "no_change"),
-        "old_weights": current_weights,
-        "new_weights": new_weights,
-        "rationale": rationale,
-        "analysis": analysis,
-        "quick_rugs": len(quick_rugs),
-        "total_trades": total_trades,
-        "report": report_path,
-        "config_write": write_result,
-    }
-    print(json.dumps(result, indent=2))
-
+    print("Starting pump.fun weight training cycle...")
+    
+    # Step 1: Analyze correlation
+    print("Analyzing score-outcome correlation...")
+    analysis = analyze_score_outcome_correlation()
+    
+    if analysis.get('skip_mutation'):
+        print(f"Insufficient data ({analysis.get('count')} trades), skipping mutation")
+        sys.exit(0)
+    
+    # Step 2: Scan and fix bugs
+    print("Scanning for bugs and auto-fixing...")
+    fixes_applied = scan_for_and_fix_bugs()
+    
+    # Step 3: Get current weights
+    current_weights = get_current_weights()
+    print(f"Current weights: {current_weights}")
+    
+    # Step 4: Mutate weights
+    new_weights, changes = mutate_weights(analysis, current_weights)
+    print(f"New weights: {new_weights}")
+    
+    # Step 5: Write new weights
+    write_new_weights(new_weights)
+    
+    # Step 6: Log results
+    log_file = log_training_cycle(analysis, current_weights, new_weights, fixes_applied, changes)
+    print(f"Training cycle logged to: {log_file}")
+    
+    # Print summary
+    print("\n=== TRAINING SUMMARY ===")
+    total_trades = sum(stats.get('count', 0) for stats in analysis.values())
+    print(f"Trades analyzed: {total_trades}")
+    
+    best_bucket = max(analysis.items(), key=lambda x: x[1].get('win_rate', 0))
+    print(f"Best performing bucket: {best_bucket[0]} ({best_bucket[1].get('win_rate', 0)}% WR)")
+    
+    if fixes_applied:
+        print(f"Code fixes applied: {len(fixes_applied)}")
+    
+    if changes:
+        print("Weight mutations:")
+        for change in changes:
+            print(f"  - {change}")
 
 if __name__ == "__main__":
     main()

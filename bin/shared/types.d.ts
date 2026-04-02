@@ -564,6 +564,116 @@ export interface ContractSecurity {
     metadataHash: string;
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
 }
+export interface RugCheckMarketData {
+    price: number;
+    vSol: number;
+    vUsd: number;
+    mc: number;
+    mcSol: number;
+    liquidity: number;
+    liquiditySol: number;
+    topHoldersPct: number;
+    priceHistory: Array<{
+        time: number;
+        price: number;
+    }>;
+}
+export interface RugCheckHolder {
+    owner: string;
+    pct: number;
+    isTopHolder: boolean;
+}
+export interface RugCheckMarkets {
+    id: string;
+    dexId: string;
+    url: string;
+    pair: {
+        base: string;
+        quote: string;
+    };
+    baseMint: string;
+    quoteMint: string;
+    liquidity: {
+        base: number;
+        quote: number;
+        usd: number;
+    };
+    volume24h: {
+        base: number;
+        quote: number;
+        usd: number;
+    };
+    priceUsd: number;
+    priceNative: number;
+    txns24h: {
+        buys: number;
+        sells: number;
+    };
+    apr24h: number;
+}
+export interface RugCheckReport {
+    markets: RugCheckMarkets[];
+    topHolders: RugCheckHolder[];
+    marketsHistory: any[];
+    newMarkets24h: number;
+    newMarkets7d: number;
+    prices: Array<{
+        time: number;
+        price: number;
+    }>;
+    metadata: any;
+}
+export interface RugCheckResult {
+    success: boolean;
+    score: number;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    rejectReasons: string[];
+    scorePenalty: number;
+    topHoldersPct: number;
+    markets: RugCheckMarkets[];
+    hasAdequateLiquidity: boolean;
+    isOnRaydium: boolean;
+    holderCount: number;
+}
+export interface DexScreenerTxns {
+    m5: {
+        buys: number;
+        sells: number;
+    };
+    h1: {
+        buys: number;
+        sells: number;
+    };
+    h6: {
+        buys: number;
+        sells: number;
+    };
+    h24: {
+        buys: number;
+        sells: number;
+    };
+}
+export interface DexScreenerMetrics {
+    buySellRatio1h: number;
+    priceChange1h: number;
+    volume1h: number;
+    liquidityUsd: number;
+    pairAgeMinutes: number;
+}
+export interface DexScreenerResult {
+    sellPressureDetected: boolean;
+    dumpDetected: boolean;
+    lowLiquidity: boolean;
+    socialLinks: {
+        twitter?: string;
+        telegram?: string;
+        discord?: string;
+        website?: string;
+    };
+    metrics: DexScreenerMetrics;
+    rejectReasons: string[];
+    scorePenalty: number;
+}
 export interface WebsiteAnalysis {
     url: string;
     exists: boolean;
@@ -609,9 +719,12 @@ export interface TokenAnalysis {
     security: ContractSecurity;
     website: WebsiteAnalysis;
     social: SocialAnalysis;
+    rugcheck?: RugCheckResult;
+    dexscreener?: DexScreenerResult;
     websiteScore: number;
     socialScore: number;
     securityScore: number;
+    rugcheckScore: number;
     overallScore: number;
     rationale: string;
     redFlags: string[];

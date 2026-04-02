@@ -10,13 +10,15 @@ exports.scoreNode = scoreNode;
 const config_1 = __importDefault(require("../../shared/config"));
 const logger_1 = __importDefault(require("../../shared/logger"));
 const state_1 = require("../state");
+const rugcheck_service_1 = require("../services/rugcheck-service");
 const DEFAULT_WEIGHTS = {
-    social: 0.32, // -0.03 — social still inflates dead-token scores (0.86 TIME_EXIT); push scores down to filter
-    freshness: 0.18, // -0.02 — slight trim; freshness alone doesn't predict pumps
-    websiteQuality: 0.05, // unchanged — weakest signal but nonzero for marginal filtering
-    aiAnalysis: 0.30, // +0.05 — strongest differentiator: 0.70-0.74 bucket has 100% WR vs 89% at 0.65-0.69
-    tokenQuality: 0.15, // unchanged — stable signal for false positive filtering
-    redFlagPenalty: 0.12, // +0.02 — TIME_EXIT trades (even at score 0.86) show red flags being missed
+    social: 0.20, // reduced — social easily faked, RugCheck handles the real detection
+    freshness: 0.10, // reduced — freshness alone doesn't predict rugs
+    websiteQuality: 0.05, // unchanged — weakest signal
+    aiAnalysis: 0.25, // reduced slightly — RugCheck provides ground truth
+    tokenQuality: 0.10, // reduced — naming quality is weak signal
+    rugSafety: 0.30, // NEW — RugCheck score, highest weight, actual on-chain safety data
+    redFlagPenalty: 0.15, // increased — RugCheck risks + LLM red flags
 };
 const DEFAULT_MIN_SCORE = 0.35;
 // ── Main Entry ─────────────────────────────────────────────────────────────
@@ -37,23 +39,38 @@ async function scoreNode(state) {
     const minScoreThreshold = config.pumpfun?.minScoreThreshold ?? DEFAULT_MIN_SCORE;
     const weights = resolveWeights(config.pumpfun?.weights);
     const now = Date.now();
-    const scoredTokens = state.analyzedTokens.map(token => {
-        const factors = computeFactors(token, now);
+    const scoredTokens = await Promise.all(state.analyzedTokens.map(async (token) => {
+        const factors = await computeFactors(token, now);
         // Weighted sum
         let score = factors.social * weights.social +
             factors.freshness * weights.freshness +
             factors.websiteQuality * weights.websiteQuality +
             factors.aiAnalysis * weights.aiAnalysis +
-            factors.tokenQuality * weights.tokenQuality;
+            factors.tokenQuality * weights.tokenQuality +
+            factors.rugSafety * weights.rugSafety;
         // Red flag penalty (deduction)
         score -= factors.redFlagPenalty * weights.redFlagPenalty;
         // Clamp to [0, 1]
         score = Math.min(1, Math.max(0, score));
+        // Populate rugcheckScore field on TokenAnalysis
+        const rugcheckScore = factors.rugSafety;
+        // Enrich token with RugCheck red flags for downstream AI analysis
+        let enrichedRedFlags = [...(token.redFlags || [])];
+        let enrichedGreenFlags = [...(token.greenFlags || [])];
+        if (rugcheckScore > 0.8) {
+            enrichedGreenFlags.push('RugCheck: strong safety profile');
+        }
+        else if (rugcheckScore < 0.4) {
+            enrichedRedFlags.push('RugCheck: weak safety score');
+        }
         return {
             ...token,
             overallScore: score,
+            rugcheckScore,
+            redFlags: enrichedRedFlags,
+            greenFlags: enrichedGreenFlags,
         };
-    });
+    }));
     // Sort descending by score
     scoredTokens.sort((a, b) => b.overallScore - a.overallScore);
     // Get high confidence tokens
@@ -61,12 +78,12 @@ async function scoreNode(state) {
     // Log top scores with factor breakdown for debugging
     const topN = scoredTokens.slice(0, 5);
     for (const t of topN) {
-        const factors = computeFactors(t, now);
+        const factors = await computeFactors(t, now);
         logger_1.default.info(`[ScoreNode] ${t.token.symbol}: ${t.overallScore.toFixed(3)} | ` +
             `soc=${factors.social.toFixed(2)} frsh=${factors.freshness.toFixed(2)} ` +
             `web=${factors.websiteQuality.toFixed(2)} ai=${factors.aiAnalysis.toFixed(2)} ` +
-            `tok=${factors.tokenQuality.toFixed(2)} red=${factors.redFlagPenalty} | ` +
-            `rec=${t.recommendation}`);
+            `tok=${factors.tokenQuality.toFixed(2)} rug=${factors.rugSafety.toFixed(2)} ` +
+            `red=${factors.redFlagPenalty} | rec=${t.recommendation}`);
     }
     logger_1.default.info(`[ScoreNode] Scored ${scoredTokens.length} tokens, ` +
         `${highConfidenceTokens.length} high confidence (>=${minScoreThreshold.toFixed(2)})`);
@@ -77,13 +94,15 @@ async function scoreNode(state) {
         highConfidenceTokens,
     };
 }
-function computeFactors(token, now) {
+async function computeFactors(token, now) {
+    const mint = token.token?.mintAddress || '';
     return {
         social: computeSocialScore(token),
         freshness: computeFreshnessScore(token, now),
         websiteQuality: computeWebsiteQualityScore(token),
         aiAnalysis: computeAIAnalysisScore(token),
         tokenQuality: computeTokenQualityScore(token),
+        rugSafety: await computeRugSafetyScore(mint, token),
         redFlagPenalty: computeRedFlagPenalty(token),
     };
 }
@@ -218,7 +237,53 @@ function computeTokenQualityScore(token) {
     return Math.min(1, Math.max(0, score));
 }
 /**
- * Factor 6: Red Flag Penalty (count of flags)
+ * Factor 6: RugCheck Safety Score (0-1)
+ * Fetches RugCheck report directly (uses in-memory cache in rugcheck-service).
+ * Tokens that passed the hard gate still have varying safety levels.
+ * Higher score = better holder distribution, no insider activity, LP locked.
+ */
+async function computeRugSafetyScore(mint, _token) {
+    try {
+        const report = await (0, rugcheck_service_1.getFullReport)(mint);
+        if (!report) {
+            // No RugCheck data (brand new, not indexed yet) — optimistic neutral
+            return 0.5;
+        }
+        // Base score from inverted normalized score (1=best → 1.0, 100=worst → 0.0)
+        let score = (0, rugcheck_service_1.rugCheckToScoreFactor)(report);
+        // Bonus: LP locked > 70%
+        if (report.lpLockedPct !== null && report.lpLockedPct !== undefined && report.lpLockedPct > 0.70) {
+            score = Math.min(1, score + 0.1);
+        }
+        // Penalty: insiders detected (soft — hard gate already caught >50)
+        if (report.graphInsidersDetected > 20) {
+            score *= 0.8;
+        }
+        else if (report.graphInsidersDetected > 10) {
+            score *= 0.9;
+        }
+        // Penalty: high top holder concentration (soft — hard gate caught >30%)
+        if (report.topHolders && report.topHolders[0]?.pct > 20) {
+            score *= 0.85;
+        }
+        // Penalty: creator still holds significant balance (potential dump)
+        if (report.creatorBalance > 0) {
+            score *= 0.95;
+        }
+        // Penalty: any danger-level risks
+        const dangerCount = (report.risks || []).filter(r => r.level === 'danger').length;
+        if (dangerCount === 1)
+            score *= 0.8;
+        if (dangerCount >= 2)
+            score *= 0.5;
+        return Math.min(1, Math.max(0, score));
+    }
+    catch {
+        return 0.5; // neutral on errors
+    }
+}
+/**
+ * Factor 7: Red Flag Penalty (count of flags)
  * Each red flag from AI analysis contributes -1 to the raw penalty.
  * Capped at 3 (was 5) to avoid extreme penalties from verbose LLM output.
  * Most tokens get 1-2 red flags from the fallback ("No website", "No whitepaper")
@@ -244,6 +309,7 @@ function resolveWeights(configured) {
         websiteQuality: Math.max(0, configured.websiteQuality ?? DEFAULT_WEIGHTS.websiteQuality),
         aiAnalysis: Math.max(0, configured.aiAnalysis ?? DEFAULT_WEIGHTS.aiAnalysis),
         tokenQuality: Math.max(0, configured.tokenQuality ?? DEFAULT_WEIGHTS.tokenQuality),
+        rugSafety: Math.max(0, configured.rugSafety ?? DEFAULT_WEIGHTS.rugSafety),
         redFlagPenalty: Math.max(0, configured.redFlagPenalty ?? DEFAULT_WEIGHTS.redFlagPenalty),
     };
 }

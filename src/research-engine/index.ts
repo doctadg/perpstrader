@@ -382,7 +382,6 @@ export class ResearchEngine {
                   : 0,
                 profitFactor: perf.profitFactor,
               }),
-              paramsHash,
               new Date().toISOString(),
               existing.id
             );

@@ -978,12 +978,8 @@ async function mergeSimilarClustersEnhanced(useVectorMode: boolean): Promise<{ m
                         mergedCount++;
                         targetCount++;
 
-                        // Create hierarchy record
-                        await storyClusterStoreEnhanced.createHierarchy(
-                            target.id,
-                            source.id,
-                            'MERGED_INTO'
-                        );
+                        // Hierarchy record already created inside mergeClusters() — no need to call again
+                        // (calling after mergeClusters would fail with FK constraint since source is deleted)
                     }
                 }
             }
@@ -1267,7 +1263,7 @@ async function mergeSingletonClusters(): Promise<{ mergedCount: number }> {
                         if (result.moved > 0) {
                             s2sMerged++;
                             mergedAway.add(source.id);
-                            await storyClusterStoreEnhanced.createHierarchy(target.id, source.id, 'MERGED_INTO');
+                            // Hierarchy record already created inside mergeClusters() — no need to call again
                         }
                     } catch (e) {
                         logger.warn(`[EnhancedClusterNode] S2S merge failed: ${source.id.slice(0, 8)} -> ${target.id.slice(0, 8)}`, e);
