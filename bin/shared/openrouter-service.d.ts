@@ -93,6 +93,12 @@ declare class OpenRouterService {
         snippet?: string;
         source?: string;
     }>): Promise<Map<string, CategorizationResult>>;
+    /**
+     * Extract the first balanced JSON object from LLM response text.
+     * Handles markdown code fences, trailing text, and nested structures.
+     * Falls back to simple brace-counting repair if balanced extraction fails.
+     */
+    private extractBalancedJson;
     private validateSubEventType;
     private validateUrgency;
 }

@@ -341,28 +341,11 @@ Return JSON in this format:
                     .map((d) => d.text)
                     .join('\n');
             }
-            let jsonMatch = content.match(/\{[\s\S]*"articles"[\s\S]*\}/);
-            if (!jsonMatch) {
-                jsonMatch = content.match(/\{[\s\S]*\}/);
-            }
-            if (jsonMatch) {
+            // Extract the first balanced JSON object from the response.
+            // Handles markdown code fences and models that append text after JSON.
+            let jsonString = this.extractBalancedJson(content);
+            if (jsonString) {
                 try {
-                    let jsonString = jsonMatch[0];
-                    // Apply same JSON repair logic as event labels
-                    const openBraces = (jsonString.match(/\{/g) || []).length;
-                    const closeBraces = (jsonString.match(/\}/g) || []).length;
-                    const openBrackets = (jsonString.match(/\[/g) || []).length;
-                    const closeBrackets = (jsonString.match(/\]/g) || []).length;
-                    for (let i = 0; i < openBraces - closeBraces; i++) {
-                        jsonString += '}';
-                    }
-                    for (let i = 0; i < openBrackets - closeBrackets; i++) {
-                        jsonString += ']';
-                    }
-                    jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
-                    if (jsonString.match(/"[^"]*$/)) {
-                        jsonString += '"';
-                    }
                     const parsed = JSON.parse(jsonString);
                     for (const article of parsed.articles || []) {
                         const result = {
@@ -428,6 +411,75 @@ Return JSON in this format:
         }
         logger_1.default.info(`[OpenRouter] Total categorized: ${allResults.size} articles`);
         return allResults;
+    }
+    /**
+     * Extract the first balanced JSON object from LLM response text.
+     * Handles markdown code fences, trailing text, and nested structures.
+     * Falls back to simple brace-counting repair if balanced extraction fails.
+     */
+    extractBalancedJson(content) {
+        if (!content)
+            return null;
+        // Strip markdown code fences
+        let clean = content
+            .replace(/^```(?:json)?\s*\n?/gi, '')
+            .replace(/\n?```\s*$/g, '')
+            .trim();
+        const startIdx = clean.indexOf('{');
+        if (startIdx === -1)
+            return null;
+        // Find the end of the balanced JSON object using proper bracket counting
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+        let endIdx = -1;
+        for (let i = startIdx; i < clean.length; i++) {
+            const ch = clean[i];
+            if (escape) {
+                escape = false;
+                continue;
+            }
+            if (ch === '\\' && inString) {
+                escape = true;
+                continue;
+            }
+            if (ch === '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString)
+                continue;
+            if (ch === '{' || ch === '[')
+                depth++;
+            else if (ch === '}' || ch === ']') {
+                depth--;
+                if (depth === 0) {
+                    endIdx = i;
+                    break;
+                }
+            }
+        }
+        if (endIdx !== -1) {
+            let candidate = clean.substring(startIdx, endIdx + 1);
+            // Quick repair: remove trailing commas before } or ]
+            candidate = candidate.replace(/,\s*([}\]])/g, '$1');
+            return candidate;
+        }
+        // Fallback: if no balanced object found (truncated response),
+        // use the original approach of counting and appending
+        let candidate = clean.substring(startIdx);
+        const openBraces = (candidate.match(/\{/g) || []).length;
+        const closeBraces = (candidate.match(/\}/g) || []).length;
+        const openBrackets = (candidate.match(/\[/g) || []).length;
+        const closeBrackets = (candidate.match(/\]/g) || []).length;
+        for (let i = 0; i < openBraces - closeBraces; i++)
+            candidate += '}';
+        for (let i = 0; i < openBrackets - closeBrackets; i++)
+            candidate += ']';
+        candidate = candidate.replace(/,\s*([}\]])/g, '$1');
+        if (candidate.match(/"[^"]*$/))
+            candidate += '"';
+        return candidate;
     }
     validateSubEventType(value) {
         const validTypes = [
