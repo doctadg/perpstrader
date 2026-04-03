@@ -37,7 +37,7 @@ def q1(sql, params=None):
 
 def update_strategy_performance():
     """Update strategies.performance from live trades - CRITICAL for Hermes training"""
-    import datetime
+    import datetime, math
     try:
         c = sqlite3.connect(DB)
         c.row_factory = sqlite3.Row
@@ -62,7 +62,22 @@ def update_strategy_performance():
             losses = r['losses']
             win_rate = (wins / exits * 100) if exits > 0 else 0
             profit_factor = r['win_pnl'] / r['loss_pnl'] if r['loss_pnl'] > 0 else 999.0
-            sharpe = (profit_factor * win_rate / 100) * 0.5 if profit_factor < 999 else 10
+            # Proper Sharpe ratio from per-trade returns (not the fake PF*WR formula)
+            trade_pnls = [row[0] for row in c.execute(
+                "SELECT pnl FROM trades WHERE strategyId=? AND entryExit='EXIT' AND status='FILLED' AND pnl != 0 ORDER BY timestamp",
+                (sid,)
+            ).fetchall()]
+            if len(trade_pnls) >= 2:
+                avg_r = sum(trade_pnls) / len(trade_pnls)
+                std_r = math.sqrt(sum((x - avg_r)**2 for x in trade_pnls) / (len(trade_pnls) - 1))
+                # Annualize assuming ~30 trades/day average for active strategies
+                # Use sqrt(N) scaling capped at sqrt(252) to avoid inflation on short histories
+                annual_factor = min(math.sqrt(len(trade_pnls)), math.sqrt(252))
+                sharpe = (avg_r / std_r * annual_factor) if std_r > 0 else 0
+            elif len(trade_pnls) == 1:
+                sharpe = 0  # Cannot compute Sharpe from 1 trade
+            else:
+                sharpe = 0
             
             perf = json.dumps({
                 "totalTrades": r['total_trades'],

@@ -81,13 +81,18 @@ const VALID_ACTIONS = new Set([
 // Simple in-memory cache to skip topic generation if run recently
 let lastTopicGenerationTime = 0;
 const TOPIC_GENERATION_CACHE_MS = 5 * 60 * 1000; // 5 minutes
+const TOPIC_GENERATION_GLOBAL_TIMEOUT_MS = 60 * 1000; // 60 seconds max for entire node
+const TOPIC_GENERATION_PER_ARTICLE_TIMEOUT_MS = 8000; // 8 seconds per article (not 60s)
+const TOPIC_GENERATION_MAX_CONSECUTIVE_FAILURES = 3; // Bail to fallback after 3 consecutive fails
 
 /**
  * Topic Generation Node
  * Generates topics with strict validation for categorized articles
+ * Uses circuit-breaker pattern: if 3 consecutive LLM calls fail, use fallback for all remaining
  */
 export async function topicGenerationNode(state: NewsAgentState): Promise<Partial<NewsAgentState>> {
   const startTime = Date.now();
+  const deadline = startTime + TOPIC_GENERATION_GLOBAL_TIMEOUT_MS;
 
   // Cache check: skip if topics were generated recently
   if (Date.now() - lastTopicGenerationTime < TOPIC_GENERATION_CACHE_MS) {
@@ -105,8 +110,24 @@ export async function topicGenerationNode(state: NewsAgentState): Promise<Partia
   const labeledArticles: LabeledArticle[] = [];
   let generated = 0;
   let skipped = 0;
+  let consecutiveFailures = 0;
+  let useFallbackOnly = false;
 
   for (const article of state.labeledArticles) {
+    // Global timeout check
+    if (Date.now() > deadline) {
+      logger.warn(`[TopicGenerationNode] Global timeout reached (${TOPIC_GENERATION_GLOBAL_TIMEOUT_MS}ms). Using fallback for remaining ${state.labeledArticles.length - labeledArticles.length} articles.`);
+      // Fast-path: push remaining articles with fallback topics
+      for (const remaining of state.labeledArticles.slice(labeledArticles.length)) {
+        labeledArticles.push({
+          ...remaining,
+          topic: generateFallbackTopic(remaining),
+        });
+        skipped++;
+      }
+      break;
+    }
+
     try {
       // Check if article already has a valid topic from categorization
       if (article.topic && article.topic.length > 5) {
@@ -117,15 +138,28 @@ export async function topicGenerationNode(state: NewsAgentState): Promise<Partia
           // Existing topic is good, use it
           labeledArticles.push(article);
           generated++;
+          consecutiveFailures = 0;
           continue;
         }
       }
 
+      // Circuit breaker: if too many consecutive failures, skip LLM calls
+      if (useFallbackOnly) {
+        labeledArticles.push({
+          ...article,
+          topic: generateFallbackTopic(article),
+        });
+        skipped++;
+        continue;
+      }
+
       // Generate new topic (article might be a FilteredArticle without topic yet)
       const filterArticle = article as FilteredArticle;
-      const topicResult = await generateTopic(filterArticle);
+      const topicResult = await generateTopic(filterArticle, TOPIC_GENERATION_PER_ARTICLE_TIMEOUT_MS);
 
       if (topicResult && topicResult.topic) {
+        consecutiveFailures = 0;
+
         // Validate the generated topic
         const validation = validateTopic(topicResult.topic, article.title);
 
@@ -151,7 +185,13 @@ export async function topicGenerationNode(state: NewsAgentState): Promise<Partia
           });
         }
       } else {
+        consecutiveFailures++;
         skipped++;
+
+        if (consecutiveFailures >= TOPIC_GENERATION_MAX_CONSECUTIVE_FAILURES) {
+          logger.warn(`[TopicGenerationNode] ${consecutiveFailures} consecutive LLM failures. Switching to fallback-only for remaining articles.`);
+          useFallbackOnly = true;
+        }
 
         // Include with fallback topic
         labeledArticles.push({
@@ -161,8 +201,13 @@ export async function topicGenerationNode(state: NewsAgentState): Promise<Partia
       }
 
     } catch (error) {
-      logger.debug(`[TopicGenerationNode] Error generating topic for article "${article.title}": ${error}`);
+      consecutiveFailures++;
       skipped++;
+
+      if (consecutiveFailures >= TOPIC_GENERATION_MAX_CONSECUTIVE_FAILURES) {
+        logger.warn(`[TopicGenerationNode] ${consecutiveFailures} consecutive errors. Switching to fallback-only for remaining articles.`);
+        useFallbackOnly = true;
+      }
 
       // Include with fallback topic on error
       labeledArticles.push({
@@ -196,7 +241,7 @@ export async function topicGenerationNode(state: NewsAgentState): Promise<Partia
 /**
  * Generate a topic for an article using LLM
  */
-async function generateTopic(article: FilteredArticle): Promise<{
+async function generateTopic(article: FilteredArticle, timeoutMs: number = 8000): Promise<{
   topic: string;
   subEventType: string;
   trendDirection: 'UP' | 'DOWN' | 'NEUTRAL';
@@ -234,7 +279,7 @@ async function generateTopic(article: FilteredArticle): Promise<{
           'HTTP-Referer': 'https://perps-trader.ai',
           'X-Title': 'PerpsTrader News System',
         },
-        timeout: config.openrouter.timeout,
+        timeout: timeoutMs,
       }
     );
 

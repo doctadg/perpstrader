@@ -161,18 +161,18 @@ async function main() {
                     const state = await bonding_curve_1.default.readBondingCurveState(pos.tokenMint);
                     if (state?.complete) {
                         // Bonding curve graduated - force exit at current multiplier
-                        await bonding_curve_1.default.emergencySell(pos.tokenMint, Math.max(mult, 1.0));
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, Math.max(mult, 1.0), 'GRADUATED');
                         logger_1.default.info(`[GRADUATED] ${pos.tokenSymbol}: bonding curve complete, exiting at ${mult.toFixed(2)}x`);
                         continue;
                     }
                     if (ageMs > 60 * 60 * 1000) {
                         // Force exit anything over 1 hour
-                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult, 'TIME_EXIT');
                         logger_1.default.info(`[STOP-LOSS] ${pos.tokenSymbol}: forced exit (age ${(ageMs / 60000).toFixed(0)}min)`);
                     }
-                    else if (ageMs > 30 * 60 * 1000 && mult < 1.5) {
-                        // Exit underperformers after 30 min
-                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult);
+                    else if (ageMs > 90 * 60 * 1000 && mult < 1.5) {
+                        // Exit underperformers after 90 min (increased from 30)
+                        await bonding_curve_1.default.emergencySell(pos.tokenMint, mult, 'STALE_EXIT');
                         logger_1.default.info(`[STOP-LOSS] ${pos.tokenSymbol}: stale exit (age ${(ageMs / 60000).toFixed(0)}min, ${mult.toFixed(2)}x)`);
                     }
                 }
@@ -199,9 +199,10 @@ async function main() {
                         // Fallback: direct buy through bonding curve for top-scoring tokens
                     }
                 }
-                // For now, directly buy the top token if it scores above snipe threshold
+// For now, directly buy the top token if it scores above snipe threshold
                 const topToken = result.highConfidenceTokens[0];
-                if (topToken && topToken.overallScore >= 0.40 && snipeStatus.openPositions < 3) {
+                const minScoreThreshold = parseFloat(process.env.PUMPFUN_MIN_BUY_SCORE || '0.35');
+                if (topToken && topToken.overallScore >= minScoreThreshold && snipeStatus.openPositions < 3) {
                     const solAmount = parseFloat(process.env.PUMPFUN_SNIPER_SOL_AMOUNT || '0.3');
                     const buyResult = await bonding_curve_1.default.buy(topToken.token.mintAddress, topToken.token.symbol, solAmount, bonding_curve_1.DEFAULT_TP_LEVELS, topToken.overallScore);
                     if (buyResult.success) {

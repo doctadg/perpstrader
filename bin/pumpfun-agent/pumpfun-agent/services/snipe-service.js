@@ -453,7 +453,7 @@ class SnipeService {
                 // Check stop loss at 0.4x (60% down)
                 if (newMultiplier <= 0.4) {
                     logger_1.default.warn(`[PriceSimulation] STOP LOSS: ${position.tokenSymbol} at ${newMultiplier.toFixed(2)}x`);
-                    await bonding_curve_1.default.emergencySell(position.tokenMint, newMultiplier);
+                    await bonding_curve_1.default.emergencySell(position.tokenMint, newMultiplier, 'STOP_LOSS');
                     this.tokenPrices.delete(position.tokenMint);
                     continue;
                 }

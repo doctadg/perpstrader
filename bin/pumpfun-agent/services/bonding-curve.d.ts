@@ -131,6 +131,7 @@ declare class BondingCurveService {
      * Force sell entire position (emergency exit / stop loss / time-based exit)
      * @param reason - 'STOP_LOSS' | 'TIME_EXIT' | 'STALE_EXIT' | 'TAKE_PROFIT'
      */
+    const outcomeMap: Record<string, string>;
     emergencySell(tokenMint: string, currentPriceMultiplier: number, reason?: string): Promise<SellResult | null>;
     /**
      * Get all open positions

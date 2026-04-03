@@ -381,7 +381,7 @@ class BondingCurveService {
     /**
      * Force sell entire position (emergency exit / stop loss)
      */
-    async emergencySell(tokenMint, currentPriceMultiplier) {
+    async emergencySell(tokenMint, currentPriceMultiplier, reason = 'STOP_LOSS') {
         const position = this.paperPositions.get(tokenMint);
         if (!position || position.tokensOwned < 1)
             return null;
@@ -401,7 +401,17 @@ class BondingCurveService {
         const tpLevelsHit = position.partialSells.map(p => p.tpLevel);
         this.persistSellToDb(tokenMint, position.tokenSymbol, position.tokensOwned, solToReceive, 'STOP_LOSS', totalPnl, entryScore, currentPriceMultiplier).catch(() => { });
         this.persistPositionUpdate(tokenMint, position, 'CLOSED', positionMaxMultiplier, currentPriceMultiplier, entryScore).catch(() => { });
-        this.persistOutcomeToDb(tokenMint, position.tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, 'LOSS_STOP', holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => { });
+                // Map reason to outcome label
+        const outcomeMap = {
+            'STOP_LOSS': 'LOSS_STOP',
+            'STALE_EXIT': 'STALE_EXIT',
+            'TIME_EXIT': 'TIME_EXIT',
+            'TAKE_PROFIT': 'TAKE_PROFIT',
+            'GRADUATED': 'GRADUATED'
+        };
+        const outcome = outcomeMap[reason] || 'LOSS_STOP';
+        
+        this.persistOutcomeToDb(tokenMint, position.tokenSymbol, entryScore, position.solSpent, exitSol, totalPnl, pnlPct, positionMaxMultiplier, outcome, holdTimeMinutes, position.partialSells.length, tpLevelsHit).catch(() => { });
         // Clean up tracking maps
         this.entryScores.delete(tokenMint);
         this.maxMultipliers.delete(tokenMint);

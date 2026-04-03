@@ -8,6 +8,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.enhancedStoryClusterNode = enhancedStoryClusterNode;
 const logger_1 = __importDefault(require("../shared/logger"));
+// FIX: Noise keywords that have zero discriminative power for clustering.
+// These appear in thousands of articles across unrelated topics and cause
+// false merges when used as similarity signals.
+const NOISE_KEYWORDS = new Set([
+    'stock', 'stocks', 'market', 'markets', 'crypto', 'price', 'prices',
+    'trading', 'trade', 'earnings', 'today', 'week', 'here', '2025', '2026',
+    'investors', 'investing', 'investment', 'buy', 'sell', 'news', 'analysis',
+    'bitcoin', 'ethereum', 'btc', 'eth', 'solana', 'sol',
+    'update', 'latest', 'report', 'data', 'forecast', 'prediction',
+    'growth', 'rise', 'fall', 'gain', 'loss', 'profit', 'revenue',
+    'percent', 'billion', 'million', 'share', 'shares', 'etf', 'etfs',
+    'us', 'usd', 'dollar', 'fed', 'rate', 'rates', 'inflation',
+    'could', 'should', 'will', 'may', 'might', 'need', 'new',
+]);
 const news_vector_store_1 = __importDefault(require("../data/news-vector-store"));
 const story_cluster_store_enhanced_1 = __importDefault(require("../data/story-cluster-store-enhanced"));
 const story_cluster_store_1 = __importDefault(require("../data/story-cluster-store"));
@@ -31,11 +45,11 @@ const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM === 'true';
 const USE_ENHANCED_CLUSTERING = process.env.USE_ENHANCED_SEMANTIC_CLUSTERING !== 'false'; // Default true
 const CLUSTER_MERGE_HOURS_THRESHOLD = 48;
 const CLUSTER_BATCH_SIZE = Number.parseInt(process.env.CLUSTER_BATCH_SIZE || '50', 10); // Increased from 20 to process more articles per cycle
-const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.40; // Lowered from 0.55 — entity overlap now drives most merges, threshold is secondary
-const ANTI_SPAM_HOURS = 48; // Extended from 2 hours to match merge window for better cross-run dedup
+const CLUSTER_MERGE_SIMILARITY_THRESHOLD = 0.45; // Raised from 0.40 — prevent false merges between loosely related topics
+const ANTI_SPAM_HOURS = 6; // Reduced from 48 — 48h caused catch-all clusters for common entities (Trump, Iran, Bitcoin)
 const MAX_ENTITY_CLUSTER_LINKS = 200; // Cap entity links per cluster to prevent gravity wells
 const ENTITY_RELEVANCE_MIN_MATCH = 3; // Min chars of entity name that must appear in topic/keywords to be linked
-const MAX_CLUSTER_ARTICLES = 500; // Cap articles per cluster to prevent gravity wells (22k+ is too big)
+const MAX_CLUSTER_ARTICLES = 75; // Reduced from 500 — clusters >75 articles lose topical coherence (catch-all gravity wells)
 /**
  * Enhanced story clustering with improved title clustering
  */
@@ -393,22 +407,19 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                 }
             }
             // Size-aware entity overlap threshold:
-            // - Small clusters (<50 articles): 0.20 — absorb freely
-            // - Medium clusters (50-200): 0.30 — require stronger entity signal
-            // - Large clusters (200-500): 0.40 — must share significant entities
-            // - Mega clusters (>500): 0.50 — only highly-specific entity matches
-            // This prevents catch-all clusters from absorbing every article in their category.
-            let entityOverlapThreshold = 0.20;
+            // - Small clusters (<20 articles): 0.30 — require meaningful entity overlap
+            // - Medium clusters (20-50): 0.40 — require stronger entity signal
+            // - Large clusters (50-75): 0.50 — must share significant entities
+            // Tightened from (0.20/0.30/0.40) to prevent catch-all absorption
+            let entityOverlapThreshold = 0.30;
             if (knownClusterIds.has(bestEntityCluster)) {
                 const sizeCheck = await story_cluster_store_enhanced_1.default.getClusterById(bestEntityCluster);
                 if (sizeCheck) {
                     const size = sizeCheck.article_count || 0;
-                    if (size >= 500)
+                    if (size >= 50)
                         entityOverlapThreshold = 0.50;
-                    else if (size >= 200)
+                    else if (size >= 20)
                         entityOverlapThreshold = 0.40;
-                    else if (size >= 50)
-                        entityOverlapThreshold = 0.30;
                 }
             }
             if (bestEntityCluster && bestEntityOverlap >= entityOverlapThreshold) {
@@ -604,6 +615,8 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
     }
     else {
         // FIX 6: Anti-spam dedup - check for recent cluster with same primary entity
+        // TIGHTENED: Now requires entity overlap + topic keyword overlap to merge,
+        // not just primary entity match. Prevents catch-all clusters for common entities.
         if (entities.length > 0) {
             // Find the primary entity (highest confidence TOKEN or ORGANIZATION)
             const primaryEntities = entities
@@ -611,23 +624,45 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                 .sort((a, b) => b.confidence - a.confidence);
             if (primaryEntities.length > 0) {
                 const primaryEntity = primaryEntities[0];
-                const recentClusters = await story_cluster_store_enhanced_1.default.findRecentClustersByPrimaryEntity(primaryEntity.normalized || primaryEntity.name, ANTI_SPAM_HOURS, // Extended from 2 hours to 48 for better cross-run dedup
-                article.categories[0]);
+                const recentClusters = await story_cluster_store_enhanced_1.default.findRecentClustersByPrimaryEntity(primaryEntity.normalized || primaryEntity.name, ANTI_SPAM_HOURS, article.categories[0]);
                 if (recentClusters.length > 0) {
-                    // Merge into the most recent/highest-heat cluster instead of creating new
-                    const target = recentClusters[0];
-                    // SIZE CAP: Check target cluster isn't at max capacity
-                    if (target.article_count >= MAX_CLUSTER_ARTICLES) {
-                        logger_1.default.info(`[EnhancedClusterNode] Anti-spam target cluster ${target.id.slice(0, 8)} at capacity (${target.article_count}/${MAX_CLUSTER_ARTICLES}), creating new cluster instead`);
-                        // Fall through to create new cluster below
+                    // Score candidates by entity overlap AND topic keyword overlap
+                    const articleKwSet = new Set(keywords.map((k) => k.toLowerCase()));
+                    const articleEntitySet = new Set(entities.map(e => e.normalized || e.name.toLowerCase()));
+                    let bestTarget = null;
+                    let bestTargetScore = 0;
+                    for (const candidate of recentClusters) {
+                        // Skip over-capacity clusters
+                        if (candidate.article_count >= MAX_CLUSTER_ARTICLES)
+                            continue;
+                        // Calculate topic keyword overlap
+                        const candidateKwSet = new Set((candidate.keywords || []).map((k) => k.toLowerCase()));
+                        const kwOverlap = [...articleKwSet].filter(k => candidateKwSet.has(k)).length;
+                        const kwUnion = new Set([...articleKwSet, ...candidateKwSet]).size;
+                        const kwJaccard = kwUnion > 0 ? kwOverlap / kwUnion : 0;
+                        // Calculate topic word overlap
+                        const articleTopicWords = new Set(topic.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+                        const candidateTopicWords = new Set((candidate.topic || '').toLowerCase().split(/\s+/).filter(w => w.length > 3));
+                        const topicOverlap = [...articleTopicWords].filter(w => candidateTopicWords.has(w)).length;
+                        const topicUnion = new Set([...articleTopicWords, ...candidateTopicWords]).size;
+                        const topicJaccard = topicUnion > 0 ? topicOverlap / topicUnion : 0;
+                        // Combined score: require BOTH entity match AND some topic similarity
+                        // Primary entity match alone is NOT sufficient (was causing catch-all clusters)
+                        const combinedScore = (kwJaccard * 0.4) + (topicJaccard * 0.6);
+                        if (combinedScore > bestTargetScore) {
+                            bestTargetScore = combinedScore;
+                            bestTarget = candidate;
+                        }
                     }
-                    else {
-                        logger_1.default.info(`[EnhancedClusterNode] Anti-spam: merging into existing cluster "${target.topic.slice(0, 40)}..." (primary entity: ${primaryEntity.name})`);
+                    // Require minimum topic similarity to merge (0.15 = at least some keyword/topic overlap)
+                    const ANTI_SPAM_TOPIC_THRESHOLD = 0.15;
+                    if (bestTarget && bestTargetScore >= ANTI_SPAM_TOPIC_THRESHOLD) {
+                        logger_1.default.info(`[EnhancedClusterNode] Anti-spam: merging into "${bestTarget.topic.slice(0, 40)}..." (entity: ${primaryEntity.name}, topic score: ${bestTargetScore.toFixed(2)})`);
                         const heatDelta = await story_cluster_store_enhanced_1.default.calculateEnhancedHeat(article, new Date(), 10);
                         const titleFingerprint = (0, title_cleaner_1.getTitleFingerprint)(article.title);
-                        await story_cluster_store_enhanced_1.default.addArticleToCluster(target.id, article.id, titleFingerprint, heatDelta, aiLabel.trendDirection);
+                        await story_cluster_store_enhanced_1.default.addArticleToCluster(bestTarget.id, article.id, titleFingerprint, heatDelta, aiLabel.trendDirection);
                         if (useVectorMode) {
-                            await news_vector_store_1.default.storeArticle(article, target.id);
+                            await news_vector_store_1.default.storeArticle(article, bestTarget.id);
                         }
                         // Link entities (FIX 8: filtered by relevance)
                         for (const entity of entities) {
@@ -636,15 +671,15 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
                                 if (!entityId)
                                     continue;
                                 await story_cluster_store_enhanced_1.default.linkEntityToArticle(entityId, article.id, entity.confidence);
-                                if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), target.topic, target.keywords || [])) {
-                                    await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, target.id, heatDelta * 0.1);
+                                if (isEntityRelevantToCluster(entity.name, entity.normalized || entity.name.toLowerCase(), bestTarget.topic, bestTarget.keywords || [])) {
+                                    await story_cluster_store_enhanced_1.default.updateEntityClusterHeat(entityId, bestTarget.id, heatDelta * 0.1);
                                 }
                             }
                             catch (e) {
-                                logger_1.default.warn(`[EnhancedClusterNode] Anti-spam entity linking failed: ${entity.name} -> ${target.id.slice(0, 8)}`, e);
+                                logger_1.default.warn(`[EnhancedClusterNode] Anti-spam entity linking failed: ${entity.name} -> ${bestTarget.id.slice(0, 8)}`, e);
                             }
                         }
-                        return { clusterId: target.id, created: false, assigned: true, semanticMatch: false };
+                        return { clusterId: bestTarget.id, created: false, assigned: true, semanticMatch: false };
                     }
                 }
             }
@@ -784,8 +819,10 @@ async function mergeSimilarClustersEnhanced(useVectorMode) {
  * Processes ALL singletons within the merge window, not just top-200 by heat.
  */
 async function mergeSingletonClusters() {
-    // Fetch ALL recent singletons — not heat-ranked, just all of them
-    const singletons = await story_cluster_store_enhanced_1.default.getRecentSingletons(CLUSTER_MERGE_HOURS_THRESHOLD, 1000);
+    // Fetch ALL recent singletons — use a wider window than merge threshold
+    // but NOT 30 days (was causing unrelated ancient singletons to merge into current clusters)
+    const SINGLETON_BACKFILL_HOURS = 168; // 7 days
+    const singletons = await story_cluster_store_enhanced_1.default.getRecentSingletons(SINGLETON_BACKFILL_HOURS, 2000);
     if (singletons.length === 0) {
         return { mergedCount: 0 };
     }
@@ -824,8 +861,8 @@ async function mergeSingletonClusters() {
     const targetData = mergeTargets.map((t, idx) => {
         const entities = extractEntitiesFromTopicAndKeywords(t.topic || '', t.keywords || []);
         const entitySet = new Set(entities.map(resolveToken));
-        const kws = (t.keywords || []).map((k) => k.toLowerCase().replace(/[^a-z0-9]/g, ''));
-        const kwSet = new Set(kws.filter((k) => k.length >= 3));
+        const kws = (t.keywords || []).map((k) => k.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((k) => k.length >= 3 && !NOISE_KEYWORDS.has(k));
+        const kwSet = new Set(kws);
         const cat = t.category || 'UNKNOWN';
         const words = (t.topic || '').toLowerCase().split(/\s+/).filter((w) => w.length > 3);
         for (const kw of kwSet) {
@@ -857,7 +894,7 @@ async function mergeSingletonClusters() {
         // Extract singleton entities and keywords
         const sEntities = extractEntitiesFromTopicAndKeywords(singleton.topic || '', singleton.keywords || []);
         const sEntitySet = new Set(sEntities.map(resolveToken));
-        const sKws = new Set((singleton.keywords || []).map((k) => k.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((k) => k.length >= 3));
+        const sKws = new Set((singleton.keywords || []).map((k) => k.toLowerCase().replace(/[^a-z0-9]/g, '')).filter((k) => k.length >= 3 && !NOISE_KEYWORDS.has(k)));
         const sCat = singleton.category || 'UNKNOWN';
         const sWords = new Set((singleton.topic || '').toLowerCase().split(/\s+/).filter((w) => w.length > 3));
         // === Inverted index lookup: find candidate targets efficiently ===
@@ -936,10 +973,10 @@ async function mergeSingletonClusters() {
                 bestTarget = td.cluster;
             }
         }
-        // Threshold: 0.18 for entity matches, 0.22 for keyword-only (stricter to avoid false merges)
-        const entityThreshold = 0.18;
-        const kwThreshold = 0.22;
-        const threshold = bestScore >= 0.30 ? entityThreshold : kwThreshold;
+        // Threshold: 0.22 for entity matches, 0.30 for keyword-only (tightened to reduce false merges)
+        const entityThreshold = 0.22;
+        const kwThreshold = 0.30;
+        const threshold = bestScore >= 0.35 ? entityThreshold : kwThreshold;
         // Skip mega-clusters — don't feed them more articles
         if (bestTarget && bestTarget.article_count >= MAX_CLUSTER_ARTICLES) {
             continue;
@@ -1217,9 +1254,9 @@ async function calculateEnhancedSimilarityAsync(c1, c2) {
     const topicIntersect = [...t1Words].filter(w => t2Words.has(w));
     const topicUnion = new Set([...t1Words, ...t2Words]);
     const topicSim = topicUnion.size > 0 ? topicIntersect.length / topicUnion.size : 0;
-    // Keyword overlap (Jaccard)
-    const k1Words = new Set((c1.keywords || []).map((k) => k.toLowerCase()));
-    const k2Words = new Set((c2.keywords || []).map((k) => k.toLowerCase()));
+    // Keyword overlap (Jaccard) — exclude noise keywords
+    const k1Words = new Set((c1.keywords || []).map((k) => k.toLowerCase()).filter((k) => k.length >= 3 && !NOISE_KEYWORDS.has(k)));
+    const k2Words = new Set((c2.keywords || []).map((k) => k.toLowerCase()).filter((k) => k.length >= 3 && !NOISE_KEYWORDS.has(k)));
     const kIntersect = [...k1Words].filter(k => k2Words.has(k));
     const kUnion = new Set([...k1Words, ...k2Words]);
     const keywordSim = kUnion.size > 0 ? kIntersect.length / kUnion.size : 0;

@@ -1189,7 +1189,7 @@ class StoryClusterStoreEnhanced {
             // Primary: exact match — FIX 15: exclude monster clusters
             const row = this.db.prepare(`
                 SELECT id FROM story_clusters
-                WHERE topic_key = ? AND article_count < 500
+                WHERE topic_key = ? AND article_count < 75
                 ORDER BY updated_at DESC
                 LIMIT 1
             `).get(topicKey) as { id: string } | undefined;
@@ -1205,7 +1205,7 @@ class StoryClusterStoreEnhanced {
             if (prefix.length >= 20) {
                 const fallbackRow = this.db.prepare(`
                     SELECT id FROM story_clusters
-                    WHERE topic_key LIKE ? || '%' AND article_count < 500
+                    WHERE topic_key LIKE ? || '%' AND article_count < 75
                     ORDER BY updated_at DESC
                     LIMIT 1
                 `).get(prefix) as { id: string } | undefined;
@@ -1362,15 +1362,16 @@ class StoryClusterStoreEnhanced {
                 VALUES (?, ?, ?, ?)
             `).run(clusterId, articleId, titleFingerprint, now);
 
-            // Update cluster stats
+            // Update cluster stats (including unique_title_count)
             this.db.prepare(`
                 UPDATE story_clusters
                 SET article_count = article_count + 1,
+                    unique_title_count = (SELECT COUNT(DISTINCT title_fingerprint) FROM cluster_articles WHERE cluster_id = ?),
                     heat_score = heat_score + ?,
                     trend_direction = COALESCE(?, trend_direction),
                     updated_at = ?
                 WHERE id = ?
-            `).run(heatDelta, trendDirection || null, now, clusterId);
+            `).run(clusterId, heatDelta, trendDirection || null, now, clusterId);
 
             return { added: true };
         } catch (error) {
@@ -1407,14 +1408,16 @@ class StoryClusterStoreEnhanced {
 
             const moved = result.changes;
 
-            // Transfer heat and counts
+            // Transfer heat and counts (including unique_title_count)
+            const updatedNow = new Date().toISOString();
             this.db.prepare(`
                 UPDATE story_clusters
                 SET article_count = article_count + ?,
+                    unique_title_count = (SELECT COUNT(DISTINCT title_fingerprint) FROM cluster_articles WHERE cluster_id = ?),
                     heat_score = heat_score + (SELECT heat_score FROM story_clusters WHERE id = ?),
                     updated_at = ?
                 WHERE id = ?
-            `).run(moved, sourceId, new Date().toISOString(), targetId);
+            `).run(moved, targetId, sourceId, updatedNow, targetId);
 
             // Create hierarchy record BEFORE deleting (FK constraint requires both clusters exist)
             const now = new Date().toISOString();
@@ -1447,7 +1450,7 @@ class StoryClusterStoreEnhanced {
             let query = `
                 SELECT * FROM story_clusters 
                 WHERE updated_at > ?
-                AND article_count < 500
+                AND article_count < 75
             `;
             const params: any[] = [cutoff];
 
@@ -1525,7 +1528,7 @@ class StoryClusterStoreEnhanced {
                 JOIN named_entities ne ON ecl.entity_id = ne.id
                 JOIN story_clusters sc ON ecl.cluster_id = sc.id
                 WHERE ne.normalized_name IN (${placeholders})
-                AND sc.article_count < 500
+                AND sc.article_count < 75
             `).all(...normalized) as Array<{ cluster_id: string; normalized_name: string }>;
 
             const result = new Map<string, Set<string>>();
@@ -1566,7 +1569,7 @@ class StoryClusterStoreEnhanced {
                 JOIN named_entities ne ON ecl.entity_id = ne.id
                 WHERE ne.normalized_name = ?
                 AND sc.updated_at > ?
-                AND sc.article_count < 500
+                AND sc.article_count < 75
             `;
             const params: any[] = [normalizedName, cutoff];
 
@@ -1603,10 +1606,11 @@ class StoryClusterStoreEnhanced {
     }
 
     /**
-     * Get recent singleton clusters — no heat_score ordering, fetches ALL within window.
-     * Used for bulk singleton re-clustering where we need complete coverage.
+     * Get singleton clusters for re-clustering — uses created_at (not updated_at)
+     * because singletons that were never merged still have old updated_at timestamps.
+     * Default 30-day window to cover the full singleton backlog.
      */
-    async getRecentSingletons(sinceHours: number = 48, limit: number = 1000): Promise<any[]> {
+    async getRecentSingletons(sinceHours: number = 720, limit: number = 2000): Promise<any[]> {
         await this.initialize();
         if (!this.db) return [];
 
@@ -1615,8 +1619,8 @@ class StoryClusterStoreEnhanced {
 
             const rows = this.db.prepare(`
                 SELECT * FROM story_clusters 
-                WHERE updated_at > ? AND article_count <= 1
-                ORDER BY updated_at DESC
+                WHERE created_at > ? AND article_count <= 1
+                ORDER BY created_at DESC
                 LIMIT ?
             `).all(cutoff, limit) as any[];
 

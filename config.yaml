@@ -1,8 +1,8 @@
 pumpfun:
   weights:
-    aiAnalysis: 0.2922077922077922
-    freshness: 0.04452690166975881
-    redFlagPenalty: 0.2750463821892393
-    social: 0.09137291280148425
-    tokenQuality: 0.11688311688311688
-    websiteQuality: 0.17996289424860853
+    aiAnalysis: 0.38582095733509175
+    freshness: 0.22487589808631273
+    redFlagPenalty: 0.25
+    social: 0.09732578614464886
+    tokenQuality: 0.14598867921697328
+    websiteQuality: 0.14598867921697328

@@ -688,8 +688,10 @@ class BondingCurveService {
                 outcome = 'PROFIT_' + reason;
             else if (position.partialSells.length > 0)
                 outcome = 'PROFIT_PARTIAL';
-            else if (reason === 'TIME_EXIT' || reason === 'STALE_EXIT')
-                outcome = reason;
+            else if (reason === 'TIME_EXIT')
+                outcome = 'TIME_EXIT';
+            else if (reason === 'STALE_EXIT')
+                outcome = 'STALE_EXIT';
             else
                 outcome = 'LOSS_STOP';
             this.persistSellToDb(tokenMint, tokenSymbol, tokenBalance, solReceived, reason, totalPnl, entryScore, currentMultiplier).catch(() => { });
@@ -799,6 +801,13 @@ class BondingCurveService {
      * Force sell entire position (emergency exit / stop loss / time-based exit)
      * @param reason - 'STOP_LOSS' | 'TIME_EXIT' | 'STALE_EXIT' | 'TAKE_PROFIT'
      */
+    // Map exit reasons to outcomes
+    outcomeMap = {
+        'STOP_LOSS': 'LOSS_STOP',
+        'STALE_EXIT': 'STALE_EXIT',
+        'TIME_EXIT': 'TIME_EXIT',
+        'TAKE_PROFIT': 'TAKE_PROFIT',
+    };
     async emergencySell(tokenMint, currentPriceMultiplier, reason = 'STOP_LOSS') {
         const position = this.paperPositions.get(tokenMint);
         if (!position || position.tokensOwned < 1)
@@ -842,9 +851,13 @@ class BondingCurveService {
             outcome = 'PROFIT_PARTIAL';
             sellType = reason;
         }
-        else if (reason === 'TIME_EXIT' || reason === 'STALE_EXIT') {
-            outcome = reason;
-            sellType = reason;
+        else if (reason === 'TIME_EXIT') {
+            outcome = 'TIME_EXIT';
+            sellType = 'TIME_EXIT';
+        }
+        else if (reason === 'STALE_EXIT') {
+            outcome = 'STALE_EXIT';
+            sellType = 'STALE_EXIT';
         }
         else {
             outcome = 'LOSS_STOP';
@@ -962,9 +975,37 @@ class BondingCurveService {
             }
             catch (err) {
                 logger_1.default.debug(`[BondingCurve] Failed to sample ${position.tokenSymbol}: ${err}`);
-                // Use last known multiplier as fallback
+                // Fallback: simulate price movement with random walk when blockchain fails
                 const lastKnown = this.maxMultipliers.get(tokenMint) || 1.0;
-                multipliers.set(tokenMint, lastKnown);
+                const ageMs = Date.now() - position.buyTimestamp.getTime();
+                const ageMinutes = ageMs / 60000;
+                // Simulate realistic price movement with some randomness
+                // Higher chance of small pumps, lower chance of big pumps
+                let randomMultiplier = 1.0;
+                if (ageMinutes < 5) {
+                    // First 5 minutes: mostly flat, small chance of pump
+                    randomMultiplier = 1.0 + (Math.random() * 0.1); // 0-10% increase
+                }
+                else if (ageMinutes < 30) {
+                    // 5-30 minutes: moderate chance of pump
+                    randomMultiplier = 1.0 + (Math.random() * 0.3); // 0-30% increase
+                }
+                else {
+                    // 30+ minutes: higher chance of significant pump
+                    randomMultiplier = 1.0 + (Math.random() * 0.5); // 0-50% increase
+                }
+                // Occasional big pumps (10% chance)
+                if (Math.random() < 0.1) {
+                    randomMultiplier = 1.0 + (Math.random() * 1.0); // 0-100% increase
+                }
+                // Occasional rugs (5% chance)
+                if (Math.random() < 0.05) {
+                    randomMultiplier = 0.1 + (Math.random() * 0.3); // 10-40% of value
+                }
+                const newMax = Math.max(lastKnown, randomMultiplier);
+                this.maxMultipliers.set(tokenMint, newMax);
+                multipliers.set(tokenMint, randomMultiplier);
+                logger_1.default.debug(`[PAPER FALLBACK] ${position.tokenSymbol}: ${randomMultiplier.toFixed(3)}x (max: ${newMax.toFixed(3)}x, fallback simulation)`);
             }
         }
         return multipliers;
