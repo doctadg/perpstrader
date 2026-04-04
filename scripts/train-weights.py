@@ -75,10 +75,10 @@ def analyze_trade_data(db_path):
     
     # Get trade data
     cursor.execute("""
-        SELECT entry_score, pnl_pct, outcome, hold_time_minutes, trade_reason
+        SELECT entry_score, pnl_pct, outcome, hold_time_minutes
         FROM pumpfun_trade_outcomes
         WHERE entry_score IS NOT NULL
-        ORDER BY created_at DESC
+        ORDER BY closed_at DESC
     """)
     
     rows = cursor.fetchall()
@@ -96,7 +96,7 @@ def analyze_trade_data(db_path):
     quick_rugs = []
     
     for row in rows:
-        score, pnl_pct, outcome, hold_time, reason = row
+        score, pnl_pct, outcome, hold_time = row
         pnl_pct = pnl_pct or 0
         
         # Determine bucket
@@ -223,7 +223,7 @@ def save_weights_and_thresholds(weights, threshold):
     with open('../config.yaml', 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
     
-    # Update .env
+# Update .env
     if threshold is not None:
         with open('../.env', 'r') as f:
             lines = f.readlines()
@@ -231,13 +231,12 @@ def save_weights_and_thresholds(weights, threshold):
         with open('../.env', 'w') as f:
             for line in lines:
                 if line.startswith('PUMPFUN_MIN_BUY_SCORE='):
-                    f.write(f'PUMPFUN_MIN_BUY_SCORE={threshold}
-')
+                    f.write(f'PUMPFUN_MIN_BUY_SCORE={threshold}\n')
                 else:
                     f.write(line)
 
 def main():
-    db_path = '../data/pumpfun.db'
+    db_path = './data/pumpfun.db'
     
     # Load current configuration
     current_weights = load_current_weights()
