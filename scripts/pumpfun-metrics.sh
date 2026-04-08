@@ -1,70 +1,39 @@
 #!/bin/bash
-
 # Pump.fun Metrics Export Script
-# Exports trade data from SQLite to JSON for analysis
-
 set -e
 
-# Database path
-DB_PATH="./data/pumpfun.db"
+PROJECT_ROOT="/home/d/PerpsTrader"
+METRICS_DIR="$PROJECT_ROOT/data/pumpfun-metrics-history"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
-# Ensure data directory exists
-mkdir -p ../data
+mkdir -p "$METRICS_DIR"
 
-# Export metrics to JSON
-sqlite3 "$DB_PATH" << 'EOF'
--- Get total trades and quick rugs
-SELECT json_object(
-  'timestamp', datetime('now'),
-  'total_trades_analyzed', COUNT(DISTINCT id),
-  'quick_rugs_count', SUM(CASE WHEN hold_time_minutes < 5 THEN 1 ELSE 0 END),
-  'quick_rugs_rate', ROUND(100.0 * SUM(CASE WHEN hold_time_minutes < 5 THEN 1 ELSE 0 END) / COUNT(DISTINCT id), 1),
-  'score_buckets', (
-    SELECT json_object(
-      '0.00-0.29', json_object('count', COUNT(CASE WHEN entry_score < 0.3 THEN 1 END), 'note', CASE WHEN COUNT(CASE WHEN entry_score < 0.3 THEN 1 END) = 0 THEN 'no trades' ELSE NULL END),
-      '0.30-0.39', json_object('count', COUNT(CASE WHEN entry_score >= 0.3 AND entry_score < 0.4 THEN 1 END), 'note', CASE WHEN COUNT(CASE WHEN entry_score >= 0.3 AND entry_score < 0.4 THEN 1 END) = 0 THEN 'no trades' ELSE NULL END),
-      '0.40-0.49', json_object('count', COUNT(CASE WHEN entry_score >= 0.4 AND entry_score < 0.5 THEN 1 END), 'note', CASE WHEN COUNT(CASE WHEN entry_score >= 0.4 AND entry_score < 0.5 THEN 1 END) = 0 THEN 'no trades' ELSE NULL END),
-      '0.50-0.59', json_object('count', COUNT(CASE WHEN entry_score >= 0.5 AND entry_score < 0.6 THEN 1 END), 'note', CASE WHEN COUNT(CASE WHEN entry_score >= 0.5 AND entry_score < 0.6 THEN 1 END) = 0 THEN 'no trades' ELSE NULL END),
-      '0.60-0.69', json_object('count', COUNT(CASE WHEN entry_score >= 0.6 AND entry_score < 0.7 THEN 1 END), 'note', CASE WHEN COUNT(CASE WHEN entry_score >= 0.6 AND entry_score < 0.7 THEN 1 END) = 0 THEN 'no trades' ELSE NULL END),
-      '0.70-1.00', json_object(
-        'count', COUNT(CASE WHEN entry_score >= 0.7 THEN 1 END),
-        'win_rate', ROUND(100.0 * SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) / COUNT(CASE WHEN entry_score >= 0.7 THEN 1 END), 1),
-        'avg_pnl', ROUND(AVG(COALESCE(pnl_pct, 0)), 2),
-        'best_pnl', ROUND(MAX(COALESCE(pnl_pct, 0)), 2),
-        'worst_pnl', ROUND(MIN(COALESCE(pnl_pct, 0)), 2),
-        'avg_hold_time', ROUND(AVG(hold_time_minutes), 1)
-      )
-    )
-  ),
-  'quick_rugs_examples', (
-    SELECT json_group_array(json_object(
-      'score', entry_score,
-      'pnl_pct', ROUND(pnl_pct, 4),
-      'hold_time', ROUND(hold_time_minutes, 4),
-      'token_symbol', token_symbol
-    ))
-    FROM pumpfun_trade_outcomes
-    WHERE hold_time_minutes < 5
-    ORDER BY created_at DESC
-    LIMIT 5
-  ),
-  'config_weights', (
-    SELECT json_object(
-      'social', COALESCE((SELECT value FROM config WHERE key = 'pumpfun.social_weight'), 0.3),
-      'freshness', COALESCE((SELECT value FROM config WHERE key = 'pumpfun.freshness_weight'), 0.2),
-      'websiteQuality', COALESCE((SELECT value FROM config WHERE key = 'pumpfun.website_quality_weight'), 0.1),
-      'aiAnalysis', COALESCE((SELECT value FROM config WHERE key = 'pumpfun.ai_analysis_weight'), 0.15),
-      'tokenQuality', COALESCE((SELECT value FROM config WHERE key = 'pumpfun.token_quality_weight'), 0.15),
-      'redFlagPenalty', COALESCE((SELECT value FROM config WHERE key = 'pumpfun.red_flag_penalty_weight'), 0.1)
-    )
-    FROM config
-    LIMIT 1
-  )
-)
-FROM pumpfun_trade_outcomes;
-EOF
+# Create comprehensive metrics report
+cat > "/tmp/pumpfun-stats-$TIMESTAMP.json" << JSON_EOF
+{
+  "export_timestamp": "$(date -Iseconds)",
+  "total_trades": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes;"),
+  "winning_trades": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE pnl_pct > 0;"),
+  "losing_trades": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE pnl_pct <= 0;"),
+  "total_sol_pnl": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT SUM(pnl_sol) FROM pumpfun_trade_outcomes;"),
+  "avg_pnl_pct": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT AVG(pnl_pct) FROM pumpfun_trade_outcomes;"),
+  "quick_rugs": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE hold_time_minutes < 5;"),
+  "avg_hold_time": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT AVG(hold_time_minutes) FROM pumpfun_trade_outcomes;"),
+  "score_distribution": {
+    "0.00-0.29": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score < 0.3;"),
+    "0.30-0.39": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.3 AND entry_score < 0.4;"),
+    "0.40-0.49": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.4 AND entry_score < 0.5;"),
+    "0.50-0.59": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.5 AND entry_score < 0.6;"),
+    "0.60-0.69": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.6 AND entry_score < 0.7;"),
+    "0.70+": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.7;")
+  }
+}
+JSON_EOF
 
-# Copy to latest metrics file
-cp ../data/pumpfun-metrics-latest.json ../data/pumpfun-metrics-$(date +%Y%m%d_%H%M%S).json
+cp "/tmp/pumpfun-stats-$TIMESTAMP.json" "$METRICS_DIR/"
+ln -sf "$METRICS_DIR/pumpfun-stats-$TIMESTAMP.json" "$PROJECT_ROOT/data/pumpfun-metrics-latest.json"
+rm "/tmp/pumpfun-stats-$TIMESTAMP.json"
 
-echo "Metrics exported successfully to ../data/pumpfun-metrics-latest.json"
+echo "✅ Metrics exported to: $METRICS_DIR/"
+echo "📈 Summary:"
+sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT 'Total Trades: ' || COUNT(*) as total, 'Win Rate: ' || ROUND(CAST(COUNT(CASE WHEN pnl_pct > 0 THEN 1 END) AS REAL) / COUNT(*) * 100, 1) || '%' as win_rate, 'Avg PnL%: ' || ROUND(AVG(pnl_pct), 2) as avg_pnl FROM pumpfun_trade_outcomes;"

@@ -23,13 +23,13 @@ interface ScoringWeights {
 }
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
-  social: 0.20,          // reduced — social easily faked, RugCheck handles the real detection
-  freshness: 0.10,       // reduced — freshness alone doesn't predict rugs
-  websiteQuality: 0.05,  // unchanged — weakest signal
-  aiAnalysis: 0.25,      // reduced slightly — RugCheck provides ground truth
-  tokenQuality: 0.10,    // reduced — naming quality is weak signal
-  rugSafety: 0.30,       // NEW — RugCheck score, highest weight, actual on-chain safety data
-  redFlagPenalty: 0.15,  // increased — RugCheck risks + LLM red flags
+  social: 0.19230769230769232,
+  freshness: 0.09615384615384616,
+  websiteQuality: 0.04807692307692308,
+  aiAnalysis: 0.25961538461538464,
+  tokenQuality: 0.09615384615384616,
+  rugSafety: 0.3076923076923077,
+  redFlagPenalty: 0.15,
 };
 
 const DEFAULT_MIN_SCORE = 0.35;
