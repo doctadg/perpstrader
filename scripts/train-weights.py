@@ -27,7 +27,11 @@ def analyze_score_outcome_correlation():
     for row in rows:
         score, pnl_sol, pnl_pct, outcome, hold, reason = row
         pnl_pct = pnl_pct or 0
-        key = '0.70-1.00' if score >= 0.7 else               '0.60-0.69' if score >= 0.6 else               '0.50-0.59' if score >= 0.5 else               '0.40-0.49' if score >= 0.4 else               '0.30-0.39' if score >= 0.3 else '0.00-0.29'
+        key = '0.70-1.00' if score >= 0.7 else \
+              '0.60-0.69' if score >= 0.6 else \
+              '0.50-0.59' if score >= 0.5 else \
+              '0.40-0.49' if score >= 0.4 else \
+              '0.30-0.39' if score >= 0.3 else '0.00-0.29'
         buckets[key].append(pnl_pct)
     
     analysis = {}
@@ -60,6 +64,7 @@ def get_current_weights():
         # Enhanced parsing to handle TypeScript comments
         for line in content.split('\n'):
             if 'social:' in line and not line.strip().startswith('//'):
+                # Extract number value, ignoring comments
                 match = re.search(r'social:\s*([0-9.]+)', line)
                 if match:
                     weights['social'] = float(match.group(1))
@@ -86,12 +91,12 @@ def get_current_weights():
         
         # Ensure redFlagPenalty exists
         if 'redFlagPenalty' not in weights:
-            weights['redFlagPenalty'] = 0.10
+            weights['redFlagPenalty'] = 0.15
             
         return weights
     except Exception as e:
         print(f"⚠️ Error reading weights: {e}")
-        return {'social': 0.30, 'freshness': 0.20, 'websiteQuality': 0.10, 'aiAnalysis': 0.15, 'tokenQuality': 0.15, 'redFlagPenalty': 0.10}
+        return {'social': 0.30, 'freshness': 0.20, 'websiteQuality': 0.10, 'aiAnalysis': 0.15, 'tokenQuality': 0.15, 'redFlagPenalty': 0.15}
 
 def mutate_weights(weights, analysis):
     current_weights = weights.copy()
@@ -101,12 +106,12 @@ def mutate_weights(weights, analysis):
     if quick_rug_rate > 90:
         current_weights['social'] = max(0.05, current_weights.get('social', 0.30) - 0.20)
         current_weights['aiAnalysis'] = min(0.50, current_weights.get('aiAnalysis', 0.15) + 0.20)
-        current_weights['redFlagPenalty'] = min(0.40, current_weights.get('redFlagPenalty', 0.10) + 0.15)
+        current_weights['redFlagPenalty'] = min(0.40, current_weights.get('redFlagPenalty', 0.15) + 0.15)
     
     # HIGH QUICK RUG RATE (>70%) - Aggressive red flag detection
     elif quick_rug_rate > 70:
         current_weights['aiAnalysis'] = min(0.40, current_weights.get('aiAnalysis', 0.15) + 0.05)
-        current_weights['redFlagPenalty'] = min(0.35, current_weights.get('redFlagPenalty', 0.10) + 0.05)
+        current_weights['redFlagPenalty'] = min(0.35, current_weights.get('redFlagPenalty', 0.15) + 0.05)
         current_weights['social'] = max(0.05, current_weights.get('social', 0.30) - 0.05)
     
     # NORMAL MUTATION BASED ON SCORE-OUTCOME CORRELATION
@@ -128,7 +133,7 @@ def mutate_weights(weights, analysis):
     # ZERO WIN RATE EMERGENCY FIX
     if analysis.get('overall_win_rate', 0) == 0 and analysis.get('total_trades', 0) > 0:
         current_weights['aiAnalysis'] = min(0.45, current_weights.get('aiAnalysis', 0.15) + 0.10)
-        current_weights['redFlagPenalty'] = min(0.40, current_weights.get('redFlagPenalty', 0.10) + 0.10)
+        current_weights['redFlagPenalty'] = min(0.40, current_weights.get('redFlagPenalty', 0.15) + 0.10)
     
     # Normalize weights to sum to 1.0 (except redFlagPenalty which is a deduction)
     positive_weights = {k: v for k, v in current_weights.items() if k != 'redFlagPenalty'}
