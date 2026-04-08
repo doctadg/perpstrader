@@ -33,6 +33,7 @@ export declare class ExecutionEngine {
     private exitPlanMonitor;
     private lastPaperExitLogTime;
     private isTestnet;
+    private isEnforcing;
     private static priceSubscriptionInitialized;
     private marketDataHandler;
     private orderBookHandler;

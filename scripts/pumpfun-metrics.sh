@@ -6,7 +6,7 @@
 set -e
 
 # Database path
-DB_PATH="../data/pumpfun.db"
+DB_PATH="./data/pumpfun.db"
 
 # Ensure data directory exists
 mkdir -p ../data

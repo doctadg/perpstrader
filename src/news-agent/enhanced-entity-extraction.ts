@@ -51,7 +51,7 @@ class EnhancedEntityExtractor {
     // DeFi protocols and platforms
     PROTOCOL: [
       /\b(Uniswap|Aave|Compound|Curve|MakerDAO|Synthetix|Yearn|YFI|SushiSwap|PancakeSwap|Balancer|1inch|GMX|dYdX|Perpetual Protocol|Opyn|Hegic|KeeperDAO|Lido|Rocket Pool|Anchor|Terra|Luna|Osmosis|Jupiter|Orca|Raydium|Serum|Meteora)\b/gi,
-      /\b(DeFi|DEX|CEX|NFT|DAO|Web3|Layer 2|L2|Rollup|Bridge|Oracle|AMM|Yield Farming|Liquidity Mining)\b/gi,
+      /\\b(DeFi|DEX|CEX|NFT|DAO|Web3|Layer 2|L2|Rollup|Oracle|AMM|Yield Farming|Liquidity Mining)\\b/gi,
     ],
 
     // Technology companies
@@ -63,7 +63,7 @@ class EnhancedEntityExtractor {
       // Financial institutions
       /\b(BlackRock|Fidelity|Invesco|Ark Invest|Grayscale|VanEck|WisdomTree|Vanguard|Charles Schwab|Morgan Stanley|Goldman Sachs|JPMorgan Chase|Bank of America|Citi|Citigroup|Wells Fargo|HSBC|Deutsche Bank|UBS|Credit Suisse)\b/gi,
       // Crypto companies
-      /\b(MicroStrategy|Strategy|Tesla|Block|Square|PayPal|Visa|Mastercard|Stripe|Plaid|Robinhood|eToro|SoFi)\b/gi,
+      /\\b(MicroStrategy|Tesla|Block|Square|PayPal|Visa|Mastercard|Stripe|Plaid|Robinhood|eToro|SoFi)\\b/gi,
     ],
 
     // Government and regulatory bodies
@@ -224,6 +224,10 @@ class EnhancedEntityExtractor {
     // === MISC GARBAGE ===
     'yes', 'ok', 'no', 'na', 'n/a', 'tba', 'fyi', 'lol', 'omg',
     'ama', 'dmca', 'ped', 'kl', 'sd', 'sm', 'dm', 'sfw', 'nsfw',
+    // === REGEX ALTERNATION FALSE POSITIVES ===
+    // Generic words matched by token/protocol/org alternations:
+    'strategy', 'spot', 'base', 'virtual', 'bridge', 'dot',
+    'square', 'ledger', 'block', 'chinese',
   ]);
 
   // Patterns for garbage entities (dollar amounts, timestamps, etc.)

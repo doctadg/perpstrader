@@ -166,6 +166,8 @@ class ExecutionEngine {
     exitPlanMonitor = null;
     lastPaperExitLogTime = 0;
     isTestnet;
+    // CONCURRENCY GUARD: prevent overlapping enforceManagedExitPlans() calls
+    isEnforcing = false;
     // Message bus price subscription state (singleton guard)
     static priceSubscriptionInitialized = false;
     marketDataHandler = null;
@@ -519,12 +521,18 @@ class ExecutionEngine {
         }, this.EXIT_PLAN_CHECK_INTERVAL_MS);
     }
     async enforceManagedExitPlans() {
+        // CONCURRENCY GUARD: prevent overlapping invocations (fire-and-forget setInterval)
+        if (this.isEnforcing)
+            return;
+        this.isEnforcing = true;
         // Paper trading branch: check paper portfolio positions against exit plans
         // BUG FIX: Was `!hyperliquidClient.isConfigured() && PAPER_TRADING` which skipped
         // this branch when HL wallet was configured. Changed to check PAPER_TRADING only.
         if (process.env.PAPER_TRADING === 'true') {
-            if (this.positionExitPlans.size === 0 && paperPortfolio.getPositions().length === 0)
+            if (this.positionExitPlans.size === 0 && paperPortfolio.getPositions().length === 0) {
+                this.isEnforcing = false;
                 return;
+            }
             try {
                 const paperPositions = paperPortfolio.getPositions();
                 const activeSymbols = new Set();
@@ -658,10 +666,12 @@ class ExecutionEngine {
             catch (error) {
                 logger_1.default.error('[PaperExit] Monitor failed:', error);
             }
+            this.isEnforcing = false;
             return;
         }
         if (!hyperliquid_client_1.default.isConfigured()
             || (this.positionExitPlans.size === 0 && this.nativeStopOrders.size === 0)) {
+            this.isEnforcing = false;
             return;
         }
         try {
@@ -767,6 +777,7 @@ class ExecutionEngine {
         catch (error) {
             logger_1.default.error('[ExecutionEngine] Managed exit monitor failed:', error);
         }
+        this.isEnforcing = false;
     }
     async executeSignal(signal, riskAssessment) {
         const symbolKey = signal.symbol.toUpperCase();
@@ -831,6 +842,18 @@ class ExecutionEngine {
             }
             catch (dbErr) {
                 logger_1.default.warn('[PaperPortfolio] Failed to persist trade:', dbErr);
+            }
+            // CRITICAL FIX: Clear exit plan after paper exit (matches live path L1351)
+            // Without this, the stale exit plan persists and causes duplicate exits
+            // when positions are re-opened for the same symbol.
+            if (isPaperExit || isRecoveryExit) {
+                this.clearManagedExitPlan(signal.symbol);
+                try {
+                    const rm = require('../risk-manager/risk-manager').default;
+                    const exitSide = signal.action === 'SELL' ? 'LONG' : 'SHORT';
+                    rm.clearPositionTracking(signal.symbol, exitSide);
+                }
+                catch (_) { /* non-critical */ }
             }
             // Feed trade result to safety monitor for breaker evaluation
             try {

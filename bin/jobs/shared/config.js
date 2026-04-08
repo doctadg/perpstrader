@@ -32,7 +32,7 @@ class ConfigManager {
             glm: {
                 apiKey: process.env.OPENROUTER_API_KEY || process.env.ZAI_API_KEY || '',
                 baseUrl: process.env.OPENROUTER_BASE_URL || process.env.ZAI_API_URL || 'https://openrouter.ai/api/v1',
-                model: process.env.ZAI_MODEL || 'z-ai/glm-5-turbo',
+                model: process.env.ZAI_MODEL || 'z-ai/glm-4.7-flash',
                 timeout: parseInt(process.env.ZAI_API_TIMEOUT || '30000')
             },
             openrouter: {

@@ -76,7 +76,7 @@ async function performAIAnalysis(state: SafekeepingFundState): Promise<AIAnalysi
     const response = await axios.post(
       `${config.openrouter?.baseUrl || 'https://openrouter.ai/api/v1'}/chat/completions`,
       {
-        model: config.openrouter?.labelingModel || 'z-ai/glm-5-turbo',
+        model: config.openrouter?.labelingModel || 'z-ai/glm-4.7-flash',
         messages: [
           {
             role: 'system',

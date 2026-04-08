@@ -12,7 +12,7 @@ class EntityExtractor {
     ];
     static PROTOCOL_PATTERNS = [
         /\b(Uniswap|Aave|Compound|Curve|Maker|Synthetix|Yearn|Sushi|Pancake|Balancer|1inch|GMX|dYdX|Perpetual|Opyn|Hegic|Keeper|Lido|Rocket|Anchor|Terra|Luna|Osmosis|Jupiter|Orca|Raydium)\b/gi,
-        /\b(DeFi|DEX|CEX|NFT|DAO|Web3|Layer 2|L2|Rollup|Bridge|Oracle|AMM)\b/gi,
+        /\\b(DeFi|DEX|CEX|NFT|DAO|Web3|Layer 2|L2|Rollup|Oracle|AMM)\\b/gi,
     ];
     // Organizations
     static ORG_PATTERNS = [
@@ -220,6 +220,8 @@ class EntityExtractor {
         'inflation', 'earnings', 'recession', 'summit', 'conference',
         // Word fragments
         'ing', 'ion', 'ter', 'tic', 'bitc', 'tco', 'itc', 'est', 'ati', 'lat', 'ear', 'mar', 'sto', 'ent', 'lin', 'nal', 'ment',
+        // Regex alternation false positives (generic words matched by org/token/protocol patterns)
+        'strategy', 'spot', 'base', 'virtual', 'bridge', 'dot', 'square', 'ledger', 'block', 'chinese',
     ]);
     // Patterns for garbage entities (dollar amounts, timestamps, etc.)
     static GARBAGE_PATTERNS = [

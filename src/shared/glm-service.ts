@@ -28,8 +28,8 @@ export class GLMAIService {
         this.baseUrl = config.glm.baseUrl;
         this.apiKey = config.glm.apiKey;
         // Use GLM config values
-        this.model = config.glm.model || 'z-ai/glm-5';
-        this.labelingModel = config.openrouter.labelingModel || 'z-ai/glm-5-turbo';
+        this.model = config.glm.model || 'z-ai/glm-4.7-flash';
+        this.labelingModel = config.openrouter.labelingModel || 'z-ai/glm-4.7-flash';
         this.timeout = config.glm.timeout;
     }
 

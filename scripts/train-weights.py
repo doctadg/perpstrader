@@ -70,6 +70,10 @@ def load_current_thresholds():
 
 def analyze_trade_data(db_path):
     """Analyze trade outcomes by score buckets"""
+    # Normalize the path to be absolute
+    if not os.path.isabs(db_path):
+        db_path = os.path.abspath(db_path)
+    print(f"Connecting to database: {db_path}")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -236,7 +240,7 @@ def save_weights_and_thresholds(weights, threshold):
                     f.write(line)
 
 def main():
-    db_path = './data/pumpfun.db'
+    db_path = '/home/d/PerpsTrader/data/pumpfun.db'
     
     # Load current configuration
     current_weights = load_current_weights()

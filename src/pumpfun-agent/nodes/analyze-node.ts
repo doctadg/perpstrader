@@ -331,7 +331,7 @@ async function runOpenRouterAnalysis(data: {
   // Use GLM service via OpenRouter
   const apiKey = config.glm.apiKey;
   const baseUrl = config.glm.baseUrl;
-  const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.glm.model || 'z-ai/glm-5';
+  const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.glm.model || 'z-ai/glm-4.7-flash';
 
   if (!apiKey || apiKey.length === 0 || apiKey === 'your-api-key-here') {
     logger.warn('[AnalyzeNode] GLM API key not configured, using heuristic fallback');

@@ -66,7 +66,7 @@ async function performAIAnalysis(state) {
     const prompt = buildAnalysisPrompt(state);
     try {
         const response = await axios_1.default.post(`${config.openrouter?.baseUrl || 'https://openrouter.ai/api/v1'}/chat/completions`, {
-            model: config.openrouter?.labelingModel || 'z-ai/glm-5-turbo',
+            model: config.openrouter?.labelingModel || 'z-ai/glm-4.7-flash',
             messages: [
                 {
                     role: 'system',

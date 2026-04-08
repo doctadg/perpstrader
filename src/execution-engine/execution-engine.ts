@@ -209,6 +209,8 @@ export class ExecutionEngine {
   private exitPlanMonitor: NodeJS.Timeout | null = null;
   private lastPaperExitLogTime: number = 0;
   private isTestnet: boolean;
+  // CONCURRENCY GUARD: prevent overlapping enforceManagedExitPlans() calls
+  private isEnforcing = false;
 
   // Message bus price subscription state (singleton guard)
   private static priceSubscriptionInitialized = false;
@@ -662,11 +664,18 @@ export class ExecutionEngine {
   }
 
   private async enforceManagedExitPlans(): Promise<void> {
+    // CONCURRENCY GUARD: prevent overlapping invocations (fire-and-forget setInterval)
+    if (this.isEnforcing) return;
+    this.isEnforcing = true;
+
     // Paper trading branch: check paper portfolio positions against exit plans
     // BUG FIX: Was `!hyperliquidClient.isConfigured() && PAPER_TRADING` which skipped
     // this branch when HL wallet was configured. Changed to check PAPER_TRADING only.
     if (process.env.PAPER_TRADING === 'true') {
-      if (this.positionExitPlans.size === 0 && paperPortfolio.getPositions().length === 0) return;
+      if (this.positionExitPlans.size === 0 && paperPortfolio.getPositions().length === 0) {
+        this.isEnforcing = false;
+        return;
+      }
       try {
         const paperPositions = paperPortfolio.getPositions();
         const activeSymbols = new Set<string>();
@@ -815,6 +824,7 @@ export class ExecutionEngine {
       } catch (error) {
         logger.error('[PaperExit] Monitor failed:', error);
       }
+      this.isEnforcing = false;
       return;
     }
 
@@ -822,6 +832,7 @@ export class ExecutionEngine {
       !hyperliquidClient.isConfigured()
       || (this.positionExitPlans.size === 0 && this.nativeStopOrders.size === 0)
     ) {
+      this.isEnforcing = false;
       return;
     }
 
@@ -940,6 +951,7 @@ export class ExecutionEngine {
     } catch (error) {
       logger.error('[ExecutionEngine] Managed exit monitor failed:', error);
     }
+    this.isEnforcing = false;
   }
 
   async executeSignal(signal: TradingSignal, riskAssessment: RiskAssessment): Promise<Trade> {
@@ -1031,6 +1043,18 @@ export class ExecutionEngine {
         }
       } catch (dbErr) {
         logger.warn('[PaperPortfolio] Failed to persist trade:', dbErr);
+      }
+
+      // CRITICAL FIX: Clear exit plan after paper exit (matches live path L1351)
+      // Without this, the stale exit plan persists and causes duplicate exits
+      // when positions are re-opened for the same symbol.
+      if (isPaperExit || isRecoveryExit) {
+        this.clearManagedExitPlan(signal.symbol);
+        try {
+          const rm = require('../risk-manager/risk-manager').default;
+          const exitSide = signal.action === 'SELL' ? 'LONG' : 'SHORT';
+          rm.clearPositionTracking(signal.symbol, exitSide);
+        } catch (_) { /* non-critical */ }
       }
 
       // Feed trade result to safety monitor for breaker evaluation

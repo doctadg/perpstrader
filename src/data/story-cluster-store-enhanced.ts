@@ -356,13 +356,43 @@ class StoryClusterStoreEnhanced {
                 VALUES (?, ?, ?, ?, ?, ?)
             `).run(clusterId, safeHeatScore, safeArticleCount, safeUniqueTitleCount, velocity, now);
 
-            // Update cluster with current velocity
+            // Update cluster with current velocity and lifecycle stage
+            // Determine lifecycle based on heat trajectory
+            let lifecycleStage: string | null = null;
+            try {
+                const recentHistory = this.db.prepare(`
+                    SELECT heat_score FROM cluster_heat_history
+                    WHERE cluster_id = ? ORDER BY timestamp DESC LIMIT 6
+                `).all(clusterId) as any[];
+                if (recentHistory.length >= 2) {
+                    const currentHeat = recentHistory[0].heat_score;
+                    const maxHeat = Math.max(...recentHistory.map((r: any) => r.heat_score));
+                    const prevHeat = recentHistory[1].heat_score;
+                    const heatRatio = currentHeat / (maxHeat || 1);
+                    if (heatRatio < 0.3 && currentHeat > prevHeat) {
+                        lifecycleStage = 'EMERGING';
+                    } else if (heatRatio >= 0.7 && Math.abs(currentHeat - prevHeat) < maxHeat * 0.1) {
+                        lifecycleStage = 'SUSTAINED';
+                    } else if (currentHeat < prevHeat) {
+                        lifecycleStage = 'DECAYING';
+                    } else if (currentHeat < 5) {
+                        lifecycleStage = 'DEAD';
+                    } else {
+                        lifecycleStage = 'SUSTAINED';
+                    }
+                } else if (recentHistory.length === 1) {
+                    lifecycleStage = 'EMERGING';
+                }
+            } catch (_) {
+                // Non-critical — skip lifecycle if history query fails
+            }
+
             this.db.prepare(`
                 UPDATE story_clusters
                 SET heat_velocity = ?,
-                    updated_at = ?
+                    updated_at = ?${lifecycleStage ? ', lifecycle_stage = ?' : ''}
                 WHERE id = ?
-            `).run(velocity, now, clusterId);
+            `).run(...([velocity, now, ...(lifecycleStage ? [lifecycleStage] : []), clusterId] as any[]));
         } catch (error) {
             logger.error('[StoryClusterStoreEnhanced] Failed to record heat history:', error);
         }
