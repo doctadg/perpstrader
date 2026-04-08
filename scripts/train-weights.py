@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Pump.fun Weight Trainer
-import sqlite3, json, yaml, pathlib, sys
+import sqlite3, json, yaml, pathlib, sys, re
 from datetime import datetime
 
 def get_db_connection():
@@ -61,14 +61,30 @@ def get_current_weights():
         for line in content.split('\n'):
             if 'social:' in line and not line.strip().startswith('//'):
                 weights['social'] = float(line.split(':')[1].strip().rstrip(','))
+            elif 'freshness:' in line and not line.strip().startswith('//'):
+                weights['freshness'] = float(line.split(':')[1].strip().rstrip(','))
+            elif 'websiteQuality:' in line and not line.strip().startswith('//'):
+                weights['websiteQuality'] = float(line.split(':')[1].strip().rstrip(','))
             elif 'aiAnalysis:' in line and not line.strip().startswith('//'):
                 weights['aiAnalysis'] = float(line.split(':')[1].strip().rstrip(','))
+            elif 'tokenQuality:' in line and not line.strip().startswith('//'):
+                weights['tokenQuality'] = float(line.split(':')[1].strip().rstrip(','))
+            elif 'rugSafety:' in line and not line.strip().startswith('//'):
+                weights['rugSafety'] = float(line.split(':')[1].strip().rstrip(','))
         
-        return weights or {
-            'social': 0.20, 'freshness': 0.10, 'websiteQuality': 0.05,
-            'aiAnalysis': 0.25, 'tokenQuality': 0.10, 'rugSafety': 0.30, 'redFlagPenalty': 0.15
-        }
+        if not weights:
+            return {
+                'social': 0.20, 'freshness': 0.10, 'websiteQuality': 0.05,
+                'aiAnalysis': 0.25, 'tokenQuality': 0.10, 'rugSafety': 0.30, 'redFlagPenalty': 0.15
+            }
+        
+        # Add redFlagPenalty if missing
+        if 'redFlagPenalty' not in weights:
+            weights['redFlagPenalty'] = 0.15
+            
+        return weights
     except Exception as e:
+        print(f"Error reading weights: {e}")
         return {'social': 0.20, 'aiAnalysis': 0.25, 'redFlagPenalty': 0.15}
 
 def mutate_weights(weights, analysis):
@@ -77,17 +93,17 @@ def mutate_weights(weights, analysis):
     
     # EXTREME QUICK RUG RATE (>90%) - Emergency measures
     if quick_rug_rate > 90:
-        current_weights['social'] = max(0.05, current_weights.get('social', 0.20) - 0.20)
-        current_weights['aiAnalysis'] = min(0.50, current_weights.get('aiAnalysis', 0.25) + 0.20)
-        current_weights['redFlagPenalty'] = min(0.40, current_weights.get('redFlagPenalty', 0.15) + 0.15)
-        current_weights['rugSafety'] = min(0.50, current_weights.get('rugSafety', 0.10) + 0.10)
+        current_weights['social'] = max(0.05, current_weights['social'] - 0.20)
+        current_weights['aiAnalysis'] = min(0.50, current_weights['aiAnalysis'] + 0.20)
+        current_weights['redFlagPenalty'] = min(0.40, current_weights['redFlagPenalty'] + 0.15)
+        current_weights['rugSafety'] = min(0.50, current_weights['rugSafety'] + 0.10)
     
     # HIGH QUICK RUG RATE (>70%) - Aggressive red flag detection
     elif quick_rug_rate > 70:
-        current_weights['aiAnalysis'] = min(0.40, current_weights.get('aiAnalysis', 0.25) + 0.05)
-        current_weights['redFlagPenalty'] = min(0.35, current_weights.get('redFlagPenalty', 0.15) + 0.05)
-        current_weights['rugSafety'] = min(0.45, current_weights.get('rugSafety', 0.10) + 0.05)
-        current_weights['social'] = max(0.05, current_weights.get('social', 0.20) - 0.05)
+        current_weights['aiAnalysis'] = min(0.40, current_weights['aiAnalysis'] + 0.05)
+        current_weights['redFlagPenalty'] = min(0.35, current_weights['redFlagPenalty'] + 0.05)
+        current_weights['rugSafety'] = min(0.45, current_weights['rugSafety'] + 0.05)
+        current_weights['social'] = max(0.05, current_weights['social'] - 0.05)
     
     # NORMAL MUTATION BASED ON SCORE-OUTCOME CORRELATION
     else:
@@ -96,12 +112,12 @@ def mutate_weights(weights, analysis):
         
         if best_bucket in ['0.30-0.39', '0.40-0.49']:
             # Lower threshold would be better
-            if current_weights.get('social', 0.20) > 0.15:
-                current_weights['social'] = max(0.05, current_weights.get('social', 0.20) - 0.02)
+            if current_weights['social'] > 0.15:
+                current_weights['social'] -= 0.02
         elif best_bucket in ['0.70-1.00']:
             # High scores performing well - maintain high standards
-            if current_weights.get('aiAnalysis', 0.25) < 0.35:
-                current_weights['aiAnalysis'] = min(0.40, current_weights.get('aiAnalysis', 0.25) + 0.02)
+            if current_weights['aiAnalysis'] < 0.35:
+                current_weights['aiAnalysis'] += 0.02
     
     # Normalize weights to sum to 1.0 (except redFlagPenalty which is a deduction)
     positive_weights = {k: v for k, v in current_weights.items() if k != 'redFlagPenalty'}
@@ -114,58 +130,43 @@ def mutate_weights(weights, analysis):
     current_weights.update(positive_weights)
     return current_weights
 
-def write_weights_to_config(weights):
+def apply_weights(weights):
     try:
-        cfg_path = pathlib.Path('/home/d/PerpsTrader/config.yaml')
-        cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
+        score_node_path = pathlib.Path('/home/d/PerpsTrader/src/pumpfun-agent/nodes/score-node.ts')
+        content = score_node_path.read_text()
         
-        if 'pumpfun' not in cfg:
-            cfg['pumpfun'] = {}
+        # Update weights in the file
+        for key, value in weights.items():
+            if key == 'redFlagPenalty':
+                continue  # Skip as it's handled separately
+            
+            # Find and replace the weight
+            pattern = f'{key}:\\s*[0-9.]+'
+            replacement = f'{key}: {value}'
+            content = re.sub(pattern, replacement, content)
         
-        cfg['pumpfun']['weights'] = weights
+        # Write back to file
+        score_node_path.write_text(content)
         
-        cfg_path.write_text(yaml.dump(cfg, default_flow_style=False))
-        print("✅ Weights written to config.yaml")
+        # Also update config.yaml
+        config_path = pathlib.Path('/home/d/PerpsTrader/config.yaml')
+        if config_path.exists():
+            cfg = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+            if 'pumpfun' not in cfg:
+                cfg['pumpfun'] = {}
+            if 'weights' not in cfg['pumpfun']:
+                cfg['pumpfun']['weights'] = {}
+            
+            for key, value in weights.items():
+                if key != 'redFlagPenalty':
+                    cfg['pumpfun']['weights'][key] = value
+            
+            config_path.write_text(yaml.dump(cfg, default_flow_style=False))
+        
         return True
     except Exception as e:
-        print(f"❌ Failed to write weights: {e}")
+        print(f"Error applying weights: {e}")
         return False
-
-def log_training_cycle(analysis, old_weights, new_weights, threshold_change):
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = pathlib.Path('/home/d/PerpsTrader/data/pumpfun-training-history')
-    log_dir.mkdir(exist_ok=True)
-    
-    log_file = log_dir / f"cycle-{timestamp}.md"
-    
-    with open(log_file, 'w') as f:
-        f.write(f"# Pump.fun Training Cycle - {timestamp}\n\n")
-        f.write(f"## Metrics Summary\n")
-        f.write(f"- Total Trades: {analysis['total_trades']}\n")
-        f.write(f"- Overall Win Rate: {analysis['overall_win_rate']}%\n")
-        f.write(f"- Quick Rug Rate: {analysis['quick_rug_rate']}%\n")
-        f.write(f"- Average PnL%: {analysis.get('avg_pnl_pct', 'N/A')}\n\n")
-        
-        f.write(f"## Score Bucket Analysis\n")
-        for bucket, stats in analysis['analysis'].items():
-            f.write(f"- {bucket}: {stats['count']} trades, {stats['win_rate']}% win rate\n")
-        
-        f.write(f"\n## Weight Changes\n")
-        for key in old_weights:
-            old_val = old_weights.get(key, 0)
-            new_val = new_weights.get(key, 0)
-            if abs(old_val - new_val) > 0.001:
-                f.write(f"- {key}: {old_val:.3f} → {new_val:.3f}\n")
-        
-        f.write(f"\n## Threshold Adjustment\n")
-        f.write(f"- PUMPFUN_MIN_BUY_SCORE: {threshold_change}\n")
-        
-        if analysis['quick_rug_rate'] > 70:
-            f.write(f"\n## ⚠️ CRITICAL: High Quick Rug Rate Detected\n")
-            f.write(f"Applied emergency weight mutations to improve red flag detection.\n")
-    
-    print(f"📝 Training cycle logged to: {log_file}")
-    return log_file
 
 def main():
     print("🧠 Starting pump.fun weight training cycle...")
@@ -181,35 +182,29 @@ def main():
     
     print(f"📈 Analysis: {analysis['total_trades']} trades, {analysis['overall_win_rate']}% win rate")
     
-    if analysis['quick_rug_rate'] > 70:
-        print(f"⚠️  CRITICAL: Quick rug rate at {analysis['quick_rug_rate']}% - emergency measures applied")
-    
     current_weights = get_current_weights()
     print("⚖️ Current Weights:", current_weights)
     
-    # Mutate weights based on analysis
-    new_weights = mutate_weights(current_weights, analysis)
+    # Check if weights need mutation
+    mutated_weights = mutate_weights(current_weights, analysis)
     
-    # Check if weights actually changed
-    weights_changed = any(abs(current_weights.get(k, 0) - new_weights.get(k, 0)) > 0.001 
-                         for k in new_weights.keys())
-    
-    if weights_changed:
-        print("✅ New Weights:", new_weights)
+    if mutated_weights != current_weights:
+        print("🔄 Weights mutated:")
+        for key in current_weights:
+            if key in mutated_weights:
+                old_val = current_weights[key]
+                new_val = mutated_weights[key]
+                if abs(old_val - new_val) > 0.001:
+                    print(f"  {key}: {old_val:.3f} → {new_val:.3f}")
         
-        # Write weights to config
-        if write_weights_to_config(new_weights):
-            # Log the training cycle
-            log_training_cycle(analysis, current_weights, new_weights, "No change")
-            print("🎯 Weight training completed successfully")
+        if apply_weights(mutated_weights):
+            print("✅ New weights applied successfully")
             return True
         else:
-            print("❌ Failed to update weights in config")
+            print("❌ Failed to apply weights")
             return False
     else:
-        print("📊 No weight changes needed - current configuration optimal")
-        # Still log the analysis
-        log_training_cycle(analysis, current_weights, current_weights, "No change")
+        print("✅ No weight changes needed")
         return True
 
 if __name__ == "__main__":

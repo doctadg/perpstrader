@@ -23,10 +23,10 @@ interface ScoringWeights {
 }
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
-  social: 0.19230769230769232,
+  social: 0.425531914893617,
   freshness: 0.09615384615384616,
   websiteQuality: 0.04807692307692308,
-  aiAnalysis: 0.25961538461538464,
+  aiAnalysis: 0.574468085106383,
   tokenQuality: 0.09615384615384616,
   rugSafety: 0.3076923076923077,
   redFlagPenalty: 0.15,

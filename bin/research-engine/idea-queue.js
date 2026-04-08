@@ -399,14 +399,48 @@ class IdeaQueue {
         if (!this.db)
             return [];
         const placeholders = symbols.map(() => '?').join(', ');
-        // LIMIT to ~5000 rows max to prevent timeout (35.7M row table).
-        // 30d of 15m candles per symbol = ~2880. Cap at 5000 total.
+        // Aggregate raw tick data (53 rows/min/symbol) into 1-minute OHLCV candles.
+        // Without aggregation, the backtest engine treats every tick as a candle,
+        // producing thousands of meaningless trades and garbage results.
+        // Cap at ~5000 candles total for performance.
         const maxRows = Math.min(5000, symbols.length * 2000);
-        const rows = this.db.prepare(`SELECT symbol, timestamp, open, high, low, close, volume
-       FROM market_data
-       WHERE symbol IN (${placeholders}) AND timestamp >= ?
-       ORDER BY symbol, timestamp ASC
-       LIMIT ${maxRows}`).all(...symbols, cutoffTime);
+        const rows = this.db.prepare(`
+            SELECT 
+                sub.symbol,
+                sub.minute_ts AS timestamp,
+                sub.first_open  AS open,
+                sub.max_high    AS high,
+                sub.min_low     AS low,
+                sub.last_close  AS close,
+                sub.sum_volume  AS volume
+            FROM (
+                SELECT 
+                    symbol,
+                    strftime('%Y-%m-%dT%H:%M:00', timestamp) AS minute_ts,
+                    MIN(CASE WHEN rn = 1 THEN open END) AS first_open,
+                    MAX(high) AS max_high,
+                    MIN(low) AS min_low,
+                    MAX(CASE WHEN is_last = 1 THEN close END) AS last_close,
+                    SUM(volume) AS sum_volume
+                FROM (
+                    SELECT 
+                        m.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY symbol, strftime('%Y-%m-%dT%H:%M', timestamp)
+                            ORDER BY timestamp ASC
+                        ) AS rn,
+                        CASE WHEN ROW_NUMBER() OVER (
+                            PARTITION BY symbol, strftime('%Y-%m-%dT%H:%M', timestamp)
+                            ORDER BY timestamp DESC
+                        ) = 1 THEN 1 END AS is_last
+                    FROM market_data m
+                    WHERE symbol IN (${placeholders}) AND timestamp >= ?
+                ) ranked
+                GROUP BY symbol, strftime('%Y-%m-%dT%H:%M', timestamp)
+            ) sub
+            ORDER BY sub.symbol, sub.minute_ts ASC
+            LIMIT ${maxRows}
+        `).all(...symbols, cutoffTime);
         return rows.map(row => ({
             symbol: row.symbol,
             timestamp: new Date(row.timestamp),
