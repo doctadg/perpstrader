@@ -841,6 +841,23 @@ class StoryClusterStoreEnhanced {
     }
 
     /**
+     * Mark a cluster as cross-category (absorbed articles from different categories)
+     */
+    async markCrossCategory(clusterId: string): Promise<void> {
+        await this.initialize();
+        if (!this.db) return;
+        try {
+            this.db.prepare(`
+                UPDATE story_clusters
+                SET is_cross_category = 1, updated_at = ?
+                WHERE id = ?
+            `).run(new Date().toISOString(), clusterId);
+        } catch (error) {
+            logger.error('[StoryClusterStoreEnhanced] Failed to mark cross-category:', error);
+        }
+    }
+
+    /**
      * Create parent-child hierarchy
      */
     async createHierarchy(

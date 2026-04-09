@@ -596,6 +596,12 @@ async function processArticleEnhanced(article, aiLabel, entities, titleClusterId
         const existingCluster = await story_cluster_store_enhanced_1.default.getClusterById(assignedClusterId);
         const clusterTopic = existingCluster?.topic || '';
         const clusterKeywords = existingCluster?.keywords || [];
+        // FIX 9: Mark cross-category absorption — if article category differs from cluster category,
+        // flag the cluster so downstream consumers know the category label is not definitive.
+        if (existingCluster && article.categories[0] && article.categories[0] !== existingCluster.category) {
+            await story_cluster_store_enhanced_1.default.markCrossCategory(assignedClusterId);
+            logger_1.default.debug(`[EnhancedClusterNode] Cross-category absorption: ${article.categories[0]} article -> ${existingCluster.category} cluster ${assignedClusterId.slice(0, 8)}`);
+        }
         for (const entity of entities) {
             try {
                 const entityId = await story_cluster_store_enhanced_1.default.findOrCreateEntity(entity.name, entity.type);

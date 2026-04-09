@@ -1,7 +1,6 @@
 #!/bin/bash
 # Pump.fun Metrics Export Script
 set -e
-
 PROJECT_ROOT="/home/d/PerpsTrader"
 METRICS_DIR="$PROJECT_ROOT/data/pumpfun-metrics-history"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
