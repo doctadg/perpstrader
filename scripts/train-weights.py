@@ -4,16 +4,16 @@ import sqlite3, json, yaml, pathlib, sys, re
 from datetime import datetime
 
 def get_db_connection():
-    return sqlite3.connect('/home/d/PerpsTrader/pumpfun.db')
+    return sqlite3.connect('/home/d/PerpsTrader/data/pumpfun.db')
 
 def analyze_score_outcome_correlation():
     db = get_db_connection()
     rows = db.execute(
         "SELECT entry_score, pnl_sol, pnl_pct, outcome, "
-        "hold_time_minutes, trade_reason "
+        "hold_time_minutes, mint_address "
         "FROM pumpfun_trade_outcomes "
         "WHERE entry_score IS NOT NULL "
-        "ORDER BY created_at DESC"
+        "ORDER BY closed_at DESC"
     ).fetchall()
     db.close()
     
@@ -54,45 +54,15 @@ def analyze_score_outcome_correlation():
 
 def get_current_weights():
     try:
-        score_node_path = pathlib.Path('/home/d/PerpsTrader/src/pumpfun-agent/nodes/score-node.ts')
-        if not score_node_path.exists():
-            return {'social': 0.30, 'freshness': 0.20, 'websiteQuality': 0.10, 'aiAnalysis': 0.15, 'tokenQuality': 0.15, 'redFlagPenalty': 0.10}
+        # Check config.yaml first
+        config_path = pathlib.Path('/home/d/PerpsTrader/config.yaml')
+        if config_path.exists():
+            cfg = yaml.safe_load(config_path.read_text())
+            if 'pumpfun' in cfg and 'weights' in cfg['pumpfun']:
+                return cfg['pumpfun']['weights']
         
-        content = score_node_path.read_text()
-        weights = {}
-        
-        # Enhanced parsing to handle TypeScript comments
-        for line in content.split('\n'):
-            if 'social:' in line and not line.strip().startswith('//'):
-                match = re.search(r'social:\s*([0-9.]+)', line)
-                if match:
-                    weights['social'] = float(match.group(1))
-            elif 'freshness:' in line and not line.strip().startswith('//'):
-                match = re.search(r'freshness:\s*([0-9.]+)', line)
-                if match:
-                    weights['freshness'] = float(match.group(1))
-            elif 'websiteQuality:' in line and not line.strip().startswith('//'):
-                match = re.search(r'websiteQuality:\s*([0-9.]+)', line)
-                if match:
-                    weights['websiteQuality'] = float(match.group(1))
-            elif 'aiAnalysis:' in line and not line.strip().startswith('//'):
-                match = re.search(r'aiAnalysis:\s*([0-9.]+)', line)
-                if match:
-                    weights['aiAnalysis'] = float(match.group(1))
-            elif 'tokenQuality:' in line and not line.strip().startswith('//'):
-                match = re.search(r'tokenQuality:\s*([0-9.]+)', line)
-                if match:
-                    weights['tokenQuality'] = float(match.group(1))
-        
-        # Return default weights if none found
-        if not weights:
-            return {'social': 0.30, 'freshness': 0.20, 'websiteQuality': 0.10, 'aiAnalysis': 0.15, 'tokenQuality': 0.15, 'redFlagPenalty': 0.10}
-        
-        # Ensure redFlagPenalty exists
-        if 'redFlagPenalty' not in weights:
-            weights['redFlagPenalty'] = 0.10
-            
-        return weights
+        # Fallback to default weights if no config found
+        return {'social': 0.30, 'freshness': 0.20, 'websiteQuality': 0.10, 'aiAnalysis': 0.15, 'tokenQuality': 0.15, 'redFlagPenalty': 0.10}
     except Exception as e:
         print(f"⚠️ Error reading weights: {e}")
         return {'social': 0.30, 'freshness': 0.20, 'websiteQuality': 0.10, 'aiAnalysis': 0.15, 'tokenQuality': 0.15, 'redFlagPenalty': 0.10}
