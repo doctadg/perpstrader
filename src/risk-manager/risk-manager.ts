@@ -2,6 +2,14 @@ import { RiskAssessment, TradingSignal, Portfolio, Position, Strategy } from '..
 import config from '../shared/config';
 import logger from '../shared/logger';
 import hyperliquidClient from '../execution-engine/hyperliquid-client';
+import {
+  getState as getRiskState,
+  setState as setRiskState,
+  restoreState as restoreRiskState,
+  resetDaily as resetRiskDaily,
+  close as closeRiskStateStore,
+  RISK_KEYS,
+} from './risk-state-store';
 
 export class RiskManager {
   private maxPositionSize: number;
@@ -44,8 +52,25 @@ export class RiskManager {
     this.maxDailyLoss = riskConfig.maxDailyLoss;
     this.maxLeverage = riskConfig.maxLeverage ?? this.maxLeverage;
     this.emergencyStopActive = riskConfig.emergencyStop;
-    this.dailyPnL = 0;
-    this.lastResetDate = new Date();
+
+    // Restore persisted state from SQLite
+    const persisted = restoreRiskState();
+    this.dailyPnL = persisted[RISK_KEYS.dailyPnL] ?? 0;
+    this.consecutiveLosses = persisted[RISK_KEYS.consecutiveLosses] ?? 0;
+    this.cooldownUntil = persisted[RISK_KEYS.cooldownUntil] ?? null;
+    this.emergencyStopActive = persisted[RISK_KEYS.emergencyStopActive] ?? this.emergencyStopActive;
+    this.emergencyStopReason = persisted[RISK_KEYS.emergencyStopReason] ?? '';
+    this.dailyLossAlert40Triggered = persisted[RISK_KEYS.dailyLossAlert1Triggered] ?? false;
+    this.dailyLossAlert45Triggered = persisted[RISK_KEYS.dailyLossAlert2Triggered] ?? false;
+
+    const restoredDate = persisted[RISK_KEYS.lastResetDate];
+    this.lastResetDate = restoredDate ? new Date(restoredDate) : new Date();
+
+    logger.info(
+      `[RiskManager] State restored: dailyPnL=$${this.dailyPnL.toFixed(2)}, ` +
+      `consecutiveLosses=${this.consecutiveLosses}, ` +
+      `emergencyStop=${this.emergencyStopActive}`
+    );
   }
 
   async evaluateSignal(signal: TradingSignal, portfolio: Portfolio): Promise<RiskAssessment> {
@@ -510,12 +535,16 @@ export class RiskManager {
     if (won) {
       this.consecutiveLosses = 0;
       this.cooldownUntil = null;
+      setRiskState(RISK_KEYS.consecutiveLosses, 0);
+      setRiskState(RISK_KEYS.cooldownUntil, null);
       return;
     }
 
     this.consecutiveLosses += 1;
+    setRiskState(RISK_KEYS.consecutiveLosses, this.consecutiveLosses);
     if (this.consecutiveLosses >= 4 && !this.isCooldownActive()) {
       this.cooldownUntil = Date.now() + this.REVENGE_COOLDOWN_MS;
+      setRiskState(RISK_KEYS.cooldownUntil, this.cooldownUntil);
       logger.error(
         `[RiskManager] CRITICAL: ${this.consecutiveLosses} consecutive losses - trading halted for 1 hour cooldown until ${new Date(this.cooldownUntil).toISOString()}`
       );
@@ -752,6 +781,7 @@ export class RiskManager {
   updateDailyPnL(pnl: number): void {
     this.updateTradeResult(pnl);
     this.dailyPnL += pnl;
+    setRiskState(RISK_KEYS.dailyPnL, this.dailyPnL);
     logger.info(`Daily P&L updated: ${this.dailyPnL.toFixed(2)}`);
     this.logDailyLossApproachAlerts();
 
@@ -761,6 +791,7 @@ export class RiskManager {
         `(hard limit -$${this.DAILY_LOSS_CIRCUIT_BREAKER_USD.toFixed(2)})`
       );
       this.emergencyStopReason = `Daily loss limit exceeded: $${this.dailyPnL.toFixed(2)}`;
+      setRiskState(RISK_KEYS.emergencyStopReason, this.emergencyStopReason);
       void this.activateEmergencyStop();
     }
   }
@@ -774,6 +805,8 @@ export class RiskManager {
       this.lastResetDate = today;
       this.dailyLossAlert40Triggered = false;
       this.dailyLossAlert45Triggered = false;
+      resetRiskDaily();
+      setRiskState(RISK_KEYS.lastResetDate, today.toISOString());
       logger.info('Daily P&L reset for new day');
     }
   }
@@ -785,6 +818,8 @@ export class RiskManager {
         logger.error(`Emergency stop reason: ${this.emergencyStopReason}`);
       }
       this.emergencyStopActive = true;
+      setRiskState(RISK_KEYS.emergencyStopActive, true);
+      setRiskState(RISK_KEYS.emergencyStopReason, this.emergencyStopReason);
       await this.forceCloseAllPositions();
 
       logger.error('Emergency stop activated - all trading halted');
@@ -798,12 +833,15 @@ export class RiskManager {
   disableEmergencyStop(): void {
     this.emergencyStopActive = false;
     this.emergencyStopReason = '';
+    setRiskState(RISK_KEYS.emergencyStopActive, false);
+    setRiskState(RISK_KEYS.emergencyStopReason, '');
     logger.info('Emergency stop disabled - trading resumed');
   }
 
   private logDailyLossApproachAlerts(): void {
     if (this.dailyPnL <= -this.DAILY_LOSS_ALERT_1_USD && !this.dailyLossAlert40Triggered) {
       this.dailyLossAlert40Triggered = true;
+      setRiskState(RISK_KEYS.dailyLossAlert1Triggered, true);
       logger.error(
         `CRITICAL: Approaching daily loss breaker: PnL=$${this.dailyPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_1_USD.toFixed(2)})`
       );
@@ -811,6 +849,7 @@ export class RiskManager {
 
     if (this.dailyPnL <= -this.DAILY_LOSS_ALERT_2_USD && !this.dailyLossAlert45Triggered) {
       this.dailyLossAlert45Triggered = true;
+      setRiskState(RISK_KEYS.dailyLossAlert2Triggered, true);
       logger.error(
         `CRITICAL: Approaching daily loss breaker: PnL=$${this.dailyPnL.toFixed(2)} (threshold -$${this.DAILY_LOSS_ALERT_2_USD.toFixed(2)})`
       );

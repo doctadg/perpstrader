@@ -12,10 +12,14 @@
  *   AUTORESEARCH_AUTO_ADOPT_THRESHOLD — min Sharpe ratio to auto-adopt (default: 1.5)
  *   AUTORESEARCH_MAX_CONCURRENT     — max parallel experiments (default: 2)
  *   AUTORESEARCH_TIMEOUT_SECONDS    — max experiment runtime (default: 3600)
- *   AUTORESEARCH_DIR                — path to autoresearch repo (default: /home/d/autoresearch)
+ *   AUTORESEARCH_DIR                — path to autoresearch repo (default: ../../autoresearch)
  *   AUTORESEARCH_PYTHON             — python executable (default: python3)
  */
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+const path_1 = __importDefault(require("path"));
 const autoresearch_bridge_1 = require("./autoresearch-bridge");
 const logger = {
     info: (...args) => console.log('[INFO]', ...args),
@@ -41,7 +45,7 @@ async function main() {
     logger.info(`  Experiment interval: ${config.experimentInterval / 60000}min`);
     logger.info(`  Auto-adopt threshold (Sharpe): ${config.autoAdoptThreshold}`);
     logger.info(`  Max concurrent: ${config.maxConcurrentExperiments}`);
-    logger.info(`  AutoResearch dir: ${process.env.AUTORESEARCH_DIR || '/home/d/autoresearch'}`);
+    logger.info(`  AutoResearch dir: ${process.env.AUTORESEARCH_DIR || path_1.default.join(__dirname, '../../autoresearch')}`);
     const bridge = new autoresearch_bridge_1.AutoResearchBridge(config);
     // Graceful shutdown
     const shutdown = async (signal) => {

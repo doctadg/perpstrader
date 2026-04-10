@@ -58,7 +58,7 @@ services:
     networks:
       - perps-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/api/v1/heartbeat"]
       interval: 20s
       timeout: 10s
       retries: 3

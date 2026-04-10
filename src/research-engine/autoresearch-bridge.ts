@@ -15,7 +15,7 @@ import { ideaQueue, IdeaQueue, StrategyIdea } from './idea-queue';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6380';
 const PYTHON_EXECUTABLE = process.env.PYTHON_EXECUTABLE || 'python3';
-const AUTORESEARCH_DIR = process.env.AUTORESEARCH_DIR || '/home/d/autoresearch/';
+const AUTORESEARCH_DIR = process.env.AUTORESEARCH_DIR || path.join(__dirname, '../../autoresearch/');
 const EXPERIMENT_SCRIPT = path.join(AUTORESEARCH_DIR, 'experiment.py');
 
 export interface AutoResearchBridgeConfig {

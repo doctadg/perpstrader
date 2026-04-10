@@ -48,7 +48,7 @@ Before submitting a PR, make sure `npm run build` and `npm test` pass cleanly.
 
 ## Code Style
 
-- **TypeScript strict mode** is enabled — no `any`, explicit types everywhere.
+- **TypeScript with gradual typing** — the codebase uses `strict: false` to allow incremental typing. Add explicit types where practical and avoid unnecessary `any`, but don't block progress on perfect type coverage.
 - Follow existing patterns in the codebase. If a module uses a factory pattern or dependency injection, do the same.
 - Use named exports; avoid default exports.
 - Keep functions small and focused. Each module should have a single responsibility.
@@ -59,20 +59,21 @@ Before submitting a PR, make sure `npm run build` and `npm test` pass cleanly.
 
 ```
 src/
-  agents/         # LangGraph agents (news, prediction, strategy, etc.)
-  engine/         # Execution engine — order placement and management
-  risk/           # Risk manager — position sizing, drawdown limits
-  strategy/       # Strategy engine — signal generation and evaluation
-  evolution/      # Evolution engine — strategy adaptation and optimization
-  research/       # Research engine — backtesting and analysis
-  pumpfun/        # PumpFun agent — meme token detection and trading
-  safekeeping/    # Safekeeping fund — treasury management
-  api/            # REST API for external agent control
-  db/             # Database layer (SQLite, Redis, ChromaDB)
-  shared/         # Shared types, utils, constants
-config/           # Configuration files
-tests/            # Test files
-docs/             # Documentation
+  execution-engine/    # Execution engine — order placement and management
+  risk-manager/        # Risk manager — position sizing, drawdown limits, circuit breakers
+  news-agent/          # News agent — LangGraph pipeline for news ingestion and analysis
+  prediction-agent/    # Prediction agent — Polymarket integration
+  strategy-engine/     # Strategy engine — signal generation and evaluation
+  evolution-engine/    # Evolution engine — strategy adaptation and optimization
+  research-engine/     # Research engine — continuous market research and backtest jobs
+  pumpfun-agent/       # PumpFun agent — Solana meme token detection and trading
+  safekeeping-fund/    # Safekeeping fund — multi-chain treasury management
+  backtester/          # Backtester — historical backtesting engine
+  dashboard/           # Dashboard — Express server, API routes, web UI
+  shared/              # Shared types, utilities, constants
+config/                # Configuration files
+tests/                 # Test files
+docs/                  # Documentation
 ```
 
 ## Pull Request Process

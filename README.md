@@ -78,6 +78,17 @@ Designed for developers who want to build their own agent-controlled trading sys
 
 ---
 
+## Backtesting Engine
+
+Production-grade backtesting powered by Nautilus Trader integration:
+- Tick-accurate execution simulation with price-time priority matching
+- Full Hyperliquid venue adapter (bars, trades, quotes, funding rates)
+- Strategy parameter optimization via evolution engine
+- JSON-config-driven: run backtests via Agent API or CLI
+- Results persisted to SQLite for historical comparison
+
+---
+
 ## Quick Start
 
 ### Option 1: Docker Compose (recommended)
@@ -427,7 +438,7 @@ npm run wallets:setup      # Safekeeping fund wallet setup
 4. Ensure `npm run build` and `npm run lint` pass
 5. Submit a pull request with a clear description of the change
 
-This project uses TypeScript strict mode. The build script tolerates non-blocking type errors from external dependencies but will fail on genuine code issues.
+This project uses TypeScript with gradual typing (`strict: false` in tsconfig). Add explicit types where practical, but don't block progress on perfect type coverage.
 
 ---
 

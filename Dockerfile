@@ -26,6 +26,7 @@ FROM node:20-slim
 # Runtime deps for native modules
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -36,16 +37,21 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy built output
 COPY --from=builder /app/bin ./bin
 
-# Copy runtime files
+# Copy runtime files as root, then chown to node user
 COPY package.json ./
 COPY config/ ./config/
 COPY dashboard/ ./dashboard/
 COPY data/setup.sh ./data/setup.sh
 COPY database/ ./database/
 COPY migrations/ ./migrations/
+COPY .env.example ./
+COPY .env.enhanced.example ./
 
-# Create data directory for SQLite databases
-RUN mkdir -p /app/data
+# Create data directory and set ownership for non-root user
+RUN mkdir -p /app/data && chown -R node:node /app
+
+# Run as non-root user
+USER node
 
 # Environment defaults
 ENV NODE_ENV=production \
@@ -56,5 +62,8 @@ ENV NODE_ENV=production \
     CHROMA_PORT=8001
 
 EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD node -e "const http = require('http'); const req = http.get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1));"
 
 CMD ["node", "bin/dashboard-server.js"]

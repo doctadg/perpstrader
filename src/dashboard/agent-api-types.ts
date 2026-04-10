@@ -413,6 +413,249 @@ export interface EmergencyStopResponse {
 }
 
 // -----------------------------------------------------------------------------
+// Backtest Management
+// -----------------------------------------------------------------------------
+
+export interface BacktestRunRequest {
+  strategyId: string;
+  strategyName?: string;
+  strategyType?: string;
+  instruments: string[];
+  dateRange: {
+    from: string;   // ISO timestamp
+    to: string;     // ISO timestamp
+  };
+  initialCapital?: number;
+  parameters?: Record<string, any>;
+}
+
+export interface BacktestRunResponse {
+  success: boolean;
+  backtestId: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  message: string;
+  timestamp: string;
+}
+
+export interface BacktestTrade {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  size: number;
+  entryPrice: number;
+  exitPrice: number;
+  pnl: number;
+  timestamp: string;
+  strategyId: string;
+}
+
+export interface BacktestResultsResponse {
+  backtestId: string;
+  strategyId: string;
+  strategyName: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  dateRange: {
+    from: string;
+    to: string;
+  };
+  instruments: string[];
+  initialCapital: number;
+  finalCapital: number;
+  totalReturn: number;
+  annualizedReturn: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  winRate: number;
+  totalTrades: number;
+  profitFactor: number;
+  trades: BacktestTrade[];
+  equityCurve?: { timestamp: string; equity: number }[];
+  error?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface BacktestHistoryItem {
+  id: string;
+  strategyId: string;
+  strategyName: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  instruments: string[];
+  totalReturn: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  winRate: number;
+  totalTrades: number;
+  createdAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
+export interface BacktestHistoryResponse {
+  runs: BacktestHistoryItem[];
+  total: number;
+  timestamp: string;
+}
+
+// -----------------------------------------------------------------------------
+// Historical Data Queries
+// -----------------------------------------------------------------------------
+
+export interface CandleData {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface CandlesResponse {
+  instrument: string;
+  timeframe: string;
+  from: string;
+  to: string;
+  candles: CandleData[];
+  count: number;
+}
+
+export interface TradeData {
+  id: number;
+  timestamp: number;
+  price: number;
+  size: number;
+  side: 'BUY' | 'SELL';
+  symbol: string;
+}
+
+export interface TradesResponse {
+  instrument: string;
+  trades: TradeData[];
+  count: number;
+}
+
+export interface FundingRateData {
+  id: number;
+  symbol: string;
+  timestamp: number;
+  fundingRate: number;
+  nextFundingTime: number;
+}
+
+export interface FundingRatesResponse {
+  instrument: string;
+  rates: FundingRateData[];
+  count: number;
+  currentRate?: number;
+  nextFundingTime?: number;
+}
+
+// -----------------------------------------------------------------------------
+// Order Management
+// -----------------------------------------------------------------------------
+
+export interface OrderInfo {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type: 'MARKET' | 'LIMIT' | 'STOP' | 'STOP_LIMIT';
+  size: number;
+  price?: number;
+  stopPrice?: number;
+  filledSize?: number;
+  status: 'OPEN' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELLED';
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface OrdersResponse {
+  orders: OrderInfo[];
+  total: number;
+  timestamp: string;
+}
+
+export interface CancelOrderRequest {
+  orderId: string;
+}
+
+export interface CancelOrderResponse {
+  success: boolean;
+  orderId: string;
+  message: string;
+  previousStatus?: string;
+}
+
+export interface CancelAllOrdersResponse {
+  success: boolean;
+  cancelledCount: number;
+  message: string;
+  cancelledOrders: string[];
+}
+
+// -----------------------------------------------------------------------------
+// Log Streaming
+// -----------------------------------------------------------------------------
+
+export interface AgentLogEntry {
+  timestamp: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  agent?: string;
+  message: string;
+  meta?: Record<string, any>;
+}
+
+export interface AgentLogsResponse {
+  logs: AgentLogEntry[];
+  total: number;
+  limit: number;
+  agent?: string;
+  level?: string;
+  timestamp: string;
+}
+
+// -----------------------------------------------------------------------------
+// Webhook Management
+// -----------------------------------------------------------------------------
+
+export type WebhookEvent = 'trade' | 'signal' | 'risk_alert' | 'agent_status' | 'backtest_complete' | 'position_change';
+
+export interface WebhookConfig {
+  id: string;
+  url: string;
+  events: WebhookEvent[];
+  secret?: string;
+  active: boolean;
+  createdAt: string;
+  lastTriggered?: string;
+  description?: string;
+}
+
+export interface WebhookRegisterRequest {
+  url: string;
+  events: WebhookEvent[];
+  secret?: string;
+  description?: string;
+}
+
+export interface WebhookRegisterResponse {
+  success: boolean;
+  webhook: WebhookConfig;
+  message: string;
+}
+
+export interface WebhookDeleteResponse {
+  success: boolean;
+  webhookId: string;
+  message: string;
+}
+
+export interface WebhooksListResponse {
+  webhooks: WebhookConfig[];
+  total: number;
+  timestamp: string;
+}
+
+// -----------------------------------------------------------------------------
 // Generic error response
 // -----------------------------------------------------------------------------
 

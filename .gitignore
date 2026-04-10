@@ -16,6 +16,8 @@ logs/
 config/agent-wallets.json
 config/openclaw/wallets.json
 config/openclaw/clawdbot.wallets.env
+config/hyperliquid.keys
+config/redis.env
 
 # Dependencies
 node_modules/

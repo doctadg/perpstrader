@@ -11,10 +11,11 @@
  *   AUTORESEARCH_AUTO_ADOPT_THRESHOLD — min Sharpe ratio to auto-adopt (default: 1.5)
  *   AUTORESEARCH_MAX_CONCURRENT     — max parallel experiments (default: 2)
  *   AUTORESEARCH_TIMEOUT_SECONDS    — max experiment runtime (default: 3600)
- *   AUTORESEARCH_DIR                — path to autoresearch repo (default: /home/d/autoresearch)
+ *   AUTORESEARCH_DIR                — path to autoresearch repo (default: ../../autoresearch)
  *   AUTORESEARCH_PYTHON             — python executable (default: python3)
  */
 
+import path from 'path';
 import { AutoResearchBridge, AutoResearchBridgeConfig } from './autoresearch-bridge';
 import { experimentStore } from './experiment-store';
 
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
   logger.info(`  Experiment interval: ${config.experimentInterval / 60000}min`);
   logger.info(`  Auto-adopt threshold (Sharpe): ${config.autoAdoptThreshold}`);
   logger.info(`  Max concurrent: ${config.maxConcurrentExperiments}`);
-  logger.info(`  AutoResearch dir: ${process.env.AUTORESEARCH_DIR || '/home/d/autoresearch'}`);
+  logger.info(`  AutoResearch dir: ${process.env.AUTORESEARCH_DIR || path.join(__dirname, '../../autoresearch')}`);
 
   const bridge = new AutoResearchBridge(config);
   

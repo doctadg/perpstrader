@@ -66,32 +66,32 @@ interface ChildProcessConfig {
 const CHILD_PROCESS_CONFIGS: ChildProcessConfig[] = [
     {
         name: 'news-agent',
-        scriptPath: '/home/d/PerpsTrader/bin/news-agent.js',
+        scriptPath: path.join(__dirname, '../bin/news-agent.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'prediction-agent',
-        scriptPath: '/home/d/PerpsTrader/bin/prediction-agent.js',
+        scriptPath: path.join(__dirname, '../bin/prediction-agent.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'research-engine',
-        scriptPath: '/home/d/PerpsTrader/bin/research-engine/entry.js',
+        scriptPath: path.join(__dirname, '../bin/research-engine/entry.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'safekeeping-fund',
-        scriptPath: '/home/d/PerpsTrader/bin/safekeeping-fund/main.js',
+        scriptPath: path.join(__dirname, '../bin/safekeeping-fund/main.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'funding-arbitrage',
-        scriptPath: '/home/d/PerpsTrader/bin/market-ingester/funding-arbitrage-job.js',
+        scriptPath: path.join(__dirname, '../bin/market-ingester/funding-arbitrage-job.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'pumpfun-agent',
-        scriptPath: '/home/d/PerpsTrader/bin/pumpfun-agent/index.js',
+        scriptPath: path.join(__dirname, '../bin/pumpfun-agent/index.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
 ];

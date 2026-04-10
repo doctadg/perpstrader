@@ -22,6 +22,7 @@ import marketHeatmapRoutes from './market-heatmap-routes';
 import fundingArbitrageRoutes from './funding-arbitrage-routes';
 import newsHeatmapService from './news-heatmap-service';
 import agentApiRouter from './agent-api';
+import { agentAuthMiddleware, rateLimiter, helmet } from './auth-middleware';
 
 
 // Get database path from config
@@ -409,28 +410,14 @@ class DashboardServer {
   private setupMiddleware() {
     this.app.use(express.json());
 
-    // Security headers for production
+    // Security headers (replaces manual header setting — uses helmet)
+    this.app.use(helmet({
+      contentSecurityPolicy: false, // Dashboard needs inline scripts
+      crossOriginEmbedderPolicy: false,
+    }));
+
+    // CORS configuration
     this.app.use((req, res, next) => {
-      // HTTPS enforcement in production (redirect HTTP to HTTPS)
-      const isProduction = configManager.isProduction();
-      const proto = req.headers['x-forwarded-proto'] || 'http';
-
-      if (isProduction && proto !== 'https' && process.env.NODE_ENV !== 'development') {
-        // Allow localhost and 127.0.0.1 for development
-        const host = req.headers.host || '';
-        if (!host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
-          // In production with reverse proxy, this would redirect to HTTPS
-          logger.warn(`[Security] Insecure request on ${proto}://${host}`);
-        }
-      }
-
-      // Set security headers
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('X-Frame-Options', 'DENY');
-      res.setHeader('X-XSS-Protection', '1; mode=block');
-      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-
-      // CORS configuration
       const allowedOrigins = process.env.DASHBOARD_ALLOWED_ORIGINS
         ? process.env.DASHBOARD_ALLOWED_ORIGINS.split(',')
         : ['http://localhost:3001', 'https://localhost:3001', 'http://127.0.0.1:3001'];
@@ -445,11 +432,6 @@ class DashboardServer {
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
-
-      // Rate limiting headers
-      res.setHeader('X-RateLimit-Limit', '100');
-      res.setHeader('X-RateLimit-Remaining', '99');
-      res.setHeader('X-RateLimit-Reset', Date.now().toString());
 
       next();
     });
@@ -468,7 +450,8 @@ class DashboardServer {
     this.app.use('/api/funding', fundingArbitrageRoutes);
 
     // Mount agent control API (for Hermes, OpenClaw, external agents)
-    this.app.use('/api/agent', agentApiRouter);
+    // Protected by Bearer token auth and rate limiting
+    this.app.use('/api/agent', helmet, rateLimiter, agentAuthMiddleware, agentApiRouter);
 
     // Health check
     // Health check

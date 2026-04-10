@@ -55,6 +55,7 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const axios_1 = __importDefault(require("axios"));
 const logger_1 = __importDefault(require("./shared/logger"));
 const child_process_1 = require("child_process");
+const path_1 = __importDefault(require("path"));
 // Configuration
 let SYMBOLS = ['BTC', 'ETH', 'SOL']; // Default, will be updated dynamically
 const TIMEFRAME = '1m';
@@ -81,32 +82,32 @@ const INITIAL_RESTART_DELAY_MS = 5000; // Start with 5 seconds
 const CHILD_PROCESS_CONFIGS = [
     {
         name: 'news-agent',
-        scriptPath: '/home/d/PerpsTrader/bin/news-agent.js',
+        scriptPath: path_1.default.join(__dirname, '../bin/news-agent.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'prediction-agent',
-        scriptPath: '/home/d/PerpsTrader/bin/prediction-agent.js',
+        scriptPath: path_1.default.join(__dirname, '../bin/prediction-agent.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'research-engine',
-        scriptPath: '/home/d/PerpsTrader/bin/research-engine/entry.js',
+        scriptPath: path_1.default.join(__dirname, '../bin/research-engine/entry.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'safekeeping-fund',
-        scriptPath: '/home/d/PerpsTrader/bin/safekeeping-fund/main.js',
+        scriptPath: path_1.default.join(__dirname, '../bin/safekeeping-fund/main.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'funding-arbitrage',
-        scriptPath: '/home/d/PerpsTrader/bin/market-ingester/funding-arbitrage-job.js',
+        scriptPath: path_1.default.join(__dirname, '../bin/market-ingester/funding-arbitrage-job.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
     {
         name: 'pumpfun-agent',
-        scriptPath: '/home/d/PerpsTrader/bin/pumpfun-agent/index.js',
+        scriptPath: path_1.default.join(__dirname, '../bin/pumpfun-agent/index.js'),
         restartDelayMs: INITIAL_RESTART_DELAY_MS,
     },
 ];

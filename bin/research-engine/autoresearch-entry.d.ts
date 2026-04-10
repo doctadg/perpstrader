@@ -11,7 +11,7 @@
  *   AUTORESEARCH_AUTO_ADOPT_THRESHOLD — min Sharpe ratio to auto-adopt (default: 1.5)
  *   AUTORESEARCH_MAX_CONCURRENT     — max parallel experiments (default: 2)
  *   AUTORESEARCH_TIMEOUT_SECONDS    — max experiment runtime (default: 3600)
- *   AUTORESEARCH_DIR                — path to autoresearch repo (default: /home/d/autoresearch)
+ *   AUTORESEARCH_DIR                — path to autoresearch repo (default: ../../autoresearch)
  *   AUTORESEARCH_PYTHON             — python executable (default: python3)
  */
 export {};
