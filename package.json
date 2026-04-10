@@ -1,7 +1,7 @@
 {
   "name": "perps-trader",
   "version": "2.0.0",
-  "description": "Autonomous AI trading agent for Hyperliquid",
+  "description": "Agent-first autonomous hedge fund — modular AI trading floor for Hyperliquid",
   "main": "bin/main.js",
   "scripts": {
     "start": "node bin/main.js",

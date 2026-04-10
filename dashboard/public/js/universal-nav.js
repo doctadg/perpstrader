@@ -8,8 +8,8 @@
 
     const NAV_CONFIG = {
         brand: {
-            title: 'VEX CAPITAL',
-            subtitle: 'PerpsTrader v1'
+            title: 'PERPSTRADER',
+            subtitle: 'Agent Hedge Fund'
         },
         sections: [
             {
@@ -347,7 +347,7 @@
         let html = `
             <div class="nav-toggle" onclick="window.UniversalNav.toggle()">\u25C0</div>
             <div class="nav-header">
-                <div class="nav-brand-icon">VC</div>
+                <div class="nav-brand-icon">PT</div>
                 <div class="nav-brand-text">
                     <div class="nav-brand-title">${NAV_CONFIG.brand.title}</div>
                     <div class="nav-brand-sub">${NAV_CONFIG.brand.subtitle}</div>

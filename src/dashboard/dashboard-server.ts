@@ -21,6 +21,7 @@ import enhancedApiRoutes from './enhanced-api-routes';
 import marketHeatmapRoutes from './market-heatmap-routes';
 import fundingArbitrageRoutes from './funding-arbitrage-routes';
 import newsHeatmapService from './news-heatmap-service';
+import agentApiRouter from './agent-api';
 
 
 // Get database path from config
@@ -465,6 +466,9 @@ class DashboardServer {
 
     // Mount funding arbitrage API routes
     this.app.use('/api/funding', fundingArbitrageRoutes);
+
+    // Mount agent control API (for Hermes, OpenClaw, external agents)
+    this.app.use('/api/agent', agentApiRouter);
 
     // Health check
     // Health check

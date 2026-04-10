@@ -1242,4 +1242,4 @@ data/*.db               # SQLite databases
 
 ---
 
-*Built with ❤️ by Vex Capital*
+*Built with ❤️ by PerpsTrader*
