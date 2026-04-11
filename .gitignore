@@ -43,3 +43,15 @@ temp/
 
 # Training data
 training-dataset/
+
+# Redis dumps
+*.rdb
+
+# Systemd service files
+*.service
+
+# PM2 config
+ecosystem.config.json
+
+# Pumpfun logs (explicit, though *.log above covers these)
+pumpfun*.log
