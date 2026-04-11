@@ -61,4 +61,3 @@ export declare function ViewWrapper({ title, icon, loading, children, }: {
     loading: boolean;
     children: React.ReactNode;
 }): React.JSX.Element;
-//# sourceMappingURL=components.d.ts.map

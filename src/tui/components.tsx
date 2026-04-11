@@ -4,7 +4,6 @@
 
 import React from 'react';
 import { Box, Text, useStdout } from 'ink';
-import chalk from 'chalk';
 import * as T from './theme';
 
 // =============================================================================
@@ -46,27 +45,23 @@ export function Panel({
       borderColor={borderCol}
       paddingLeft={1}
       paddingRight={1}
-      paddingTop={compact ? 0 : 0}
+      paddingTop={0}
       paddingBottom={0}
       marginBottom={1}
     >
-      {/* Title line */}
       <Box>
         {icon && <Text color={iconColor}>{icon}</Text>}
-        {(icon) && <Text> </Text>}
-        <Text color={titleColor} bold>
-          {title}
-        </Text>
+        {icon && <Text> </Text>}
+        <Text color={titleColor} bold>{title}</Text>
         <Text color={T.colors.surface2}> {'\u2500'.repeat(3)}</Text>
       </Box>
-      {/* Content */}
       <Box flexDirection="column">{children}</Box>
     </Box>
   );
 }
 
 // =============================================================================
-// Header Bar — Gradient status bar
+// Header Bar
 // =============================================================================
 
 export interface HeaderBarProps {
@@ -83,63 +78,40 @@ export function HeaderBar({ connected, portfolio, refreshInterval, uptime, versi
 
   const portfolioValue = portfolio?.totalValue || 0;
   const unrealizedPnL = portfolio?.unrealizedPnL || 0;
-  const dailyPnL = portfolio?.dailyPnL || 0;
   const pnlPct = portfolioValue > 0 ? (unrealizedPnL / portfolioValue) * 100 : 0;
   const positionCount = portfolio?.positionCount || 0;
-
   const statusText = connected ? 'LIVE' : 'OFFLINE';
   const statusColor = connected ? T.colors.green : T.colors.red;
-  const healthText = connected ? '' : '';
   const uptimeStr = T.formatUptime(uptime);
-
-  const line = chalk.hex(T.colors.surface1)('\u2500'.repeat(w));
 
   return (
     <Box flexDirection="column">
-      <Text>{line}</Text>
+      <Text color={T.colors.surface1}>{'\u2500'.repeat(w)}</Text>
       <Box>
         <Text> </Text>
-        <Text color={T.colors.mauve} bold>
-          {T.icons.logo} PerpsTrader
-        </Text>
-        {version && (
-          <Text color={T.colors.overlay0}> {version}</Text>
-        )}
+        <Text color={T.colors.mauve} bold>{T.icons.logo} PerpsTrader</Text>
+        {version && <Text color={T.colors.overlay0}> {version}</Text>}
         <Text color={T.colors.surface2}> {'\u2502'}</Text>
         <Text color={statusColor}> {T.icons.dot} {statusText}</Text>
         <Text color={T.colors.surface2}> {'\u2502'}</Text>
-        <Text color={T.colors.subtext0}>
-          {' '}{T.icons.wallet} {T.formatUSD(portfolioValue)}
-        </Text>
+        <Text color={T.colors.subtext0}> {T.icons.wallet} {T.formatUSD(portfolioValue)}</Text>
         <Text color={T.colors.surface2}> {'\u2502'}</Text>
-        <Text color={T.pnlColor(unrealizedPnL)}>
-          {' '}{T.pnlIcon(unrealizedPnL)} {T.formatUSD(unrealizedPnL)}
-        </Text>
-        <Text color={T.colors.overlay1}>
-          {' '}({T.formatPct(pnlPct)})
-        </Text>
+        <Text color={T.pnlColor(unrealizedPnL)}> {T.pnlIcon(unrealizedPnL)} {T.formatUSD(unrealizedPnL)}</Text>
+        <Text color={T.colors.overlay1}> ({T.formatPct(pnlPct)})</Text>
         <Text color={T.colors.surface2}> {'\u2502'}</Text>
-        <Text color={T.colors.overlay0}>
-          {' '}{T.icons.clock} {uptimeStr}
-        </Text>
+        <Text color={T.colors.overlay0}> {T.icons.clock} {uptimeStr}</Text>
         <Text color={T.colors.surface2}> {'\u2502'}</Text>
-        <Text color={T.colors.overlay0}>
-          {' '}{positionCount} pos
-        </Text>
+        <Text color={T.colors.overlay0}> {positionCount} pos</Text>
         <Text color={T.colors.surface2}> {'\u2502'}</Text>
-        <Text color={T.colors.overlay0}>
-          {' '}{refreshInterval}s
-        </Text>
+        <Text color={T.colors.overlay0}> {refreshInterval}s</Text>
       </Box>
-      <Text>{line}</Text>
+      <Text color={T.colors.surface1}>{'\u2500'.repeat(w)}</Text>
     </Box>
   );
 }
 
-// createGradient removed — per-char chalk.rgb() caused terminal strikethrough artifacts
-
 // =============================================================================
-// Footer Bar — Keybinding hints
+// Footer Bar — Keybinding hints (no chalk — pure Ink Text components)
 // =============================================================================
 
 export interface FooterBarProps {
@@ -153,41 +125,35 @@ export function FooterBar({ activeView, refreshInterval, loading }: FooterBarPro
   const w = stdout?.columns || 100;
 
   const views = [
-    { key: '1', label: 'Dashboard', short: 'Dash' },
-    { key: '2', label: 'Positions', short: 'Pos' },
-    { key: '3', label: 'News', short: 'News' },
-    { key: '4', label: 'Risk', short: 'Risk' },
-    { key: '5', label: 'Strategies', short: 'Strat' },
-    { key: '6', label: 'Predictions', short: 'Pred' },
+    { key: '1', short: 'Dash' },
+    { key: '2', short: 'Pos' },
+    { key: '3', short: 'News' },
+    { key: '4', short: 'Risk' },
+    { key: '5', short: 'Strat' },
+    { key: '6', short: 'Pred' },
   ];
-
-  const sep = chalk.hex(T.colors.surface2)(' \u2502 ');
-
-  const left = [
-    chalk.hex(T.colors.overlay0)(`${T.icons.clock} ${loading ? 'refreshing...' : `every ${refreshInterval}s`}`),
-  ].join(sep);
-
-  const viewStr = views
-    .map((v, i) => {
-      const active = i === activeView;
-      const color = active ? T.colors.mauve : T.colors.overlay0;
-      return chalk.hex(color)(active ? `[${v.key}] ${v.short}` : `[${v.key}]${v.short}`);
-    })
-    .join(' ');
-
-  const right = [
-    chalk.hex(T.colors.overlay0)('[r]efresh'),
-    chalk.hex(T.colors.overlay0)('[+/-]speed'),
-    chalk.hex(T.colors.red)('[q]uit'),
-  ].join(sep);
 
   return (
     <Box flexDirection="column">
-      <Text>{chalk.hex(T.colors.surface0)('\u2500'.repeat(w))}</Text>
+      <Text color={T.colors.surface0}>{'\u2500'.repeat(w)}</Text>
       <Box>
-        <Text>
-          {' '}{left}{sep}{viewStr}{sep}{right}
-        </Text>
+        <Text> </Text>
+        <Text color={T.colors.overlay0}>{T.icons.clock} {loading ? 'refreshing...' : `every ${refreshInterval}s`}</Text>
+        <Text color={T.colors.surface2}> {'\u2502'} </Text>
+        {views.map((v, i) => (
+          <React.Fragment key={v.key}>
+            <Text color={i === activeView ? T.colors.mauve : T.colors.overlay0}>
+              {i === activeView ? `[${v.key}] ${v.short}` : ` ${v.key}  ${v.short}`}
+            </Text>
+            <Text> </Text>
+          </React.Fragment>
+        ))}
+        <Text color={T.colors.surface2}> {'\u2502'} </Text>
+        <Text color={T.colors.overlay0}>[r]efresh</Text>
+        <Text color={T.colors.surface2}> {'\u2502'} </Text>
+        <Text color={T.colors.overlay0}>[+/-]speed</Text>
+        <Text color={T.colors.surface2}> {'\u2502'} </Text>
+        <Text color={T.colors.red}>[q]uit</Text>
       </Box>
     </Box>
   );
@@ -207,11 +173,7 @@ export function Spinner({ text, color }: { text?: string; color?: string }) {
     return () => clearInterval(id);
   }, []);
 
-  return (
-    <Text color={c}>
-      {frames[frame]} {text || 'Loading'}
-    </Text>
-  );
+  return <Text color={c}>{frames[frame]} {text || 'Loading'}</Text>;
 }
 
 // =============================================================================
@@ -257,9 +219,7 @@ export function ProgressBar({
 // =============================================================================
 
 export function Label({ children, color }: { children: React.ReactNode; color?: string }) {
-  return (
-    <Text color={color || T.colors.overlay0}>{children}</Text>
-  );
+  return <Text color={color || T.colors.overlay0}>{children}</Text>;
 }
 
 // =============================================================================

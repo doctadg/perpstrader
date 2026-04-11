@@ -51,16 +51,15 @@ exports.Separator = Separator;
 exports.ViewWrapper = ViewWrapper;
 const react_1 = __importDefault(require("react"));
 const ink_1 = require("ink");
-const chalk_1 = __importDefault(require("chalk"));
 const T = __importStar(require("./theme"));
 function Panel({ title, icon, width, flex, children, borderColor, dim, compact, }) {
     const borderCol = borderColor || T.colors.surface1;
     const titleColor = dim ? T.colors.overlay1 : T.colors.subtext1;
     const iconColor = dim ? T.colors.overlay0 : T.colors.mauve;
-    return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", width: width, flexGrow: flex, flexShrink: 0, borderStyle: "round", borderColor: borderCol, paddingLeft: 1, paddingRight: 1, paddingTop: compact ? 0 : 0, paddingBottom: 0, marginBottom: 1 },
+    return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", width: width, flexGrow: flex, flexShrink: 0, borderStyle: "round", borderColor: borderCol, paddingLeft: 1, paddingRight: 1, paddingTop: 0, paddingBottom: 0, marginBottom: 1 },
         react_1.default.createElement(ink_1.Box, null,
             icon && react_1.default.createElement(ink_1.Text, { color: iconColor }, icon),
-            (icon) && react_1.default.createElement(ink_1.Text, null, " "),
+            icon && react_1.default.createElement(ink_1.Text, null, " "),
             react_1.default.createElement(ink_1.Text, { color: titleColor, bold: true }, title),
             react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
                 " ",
@@ -72,24 +71,21 @@ function HeaderBar({ connected, portfolio, refreshInterval, uptime, version }) {
     const w = stdout?.columns || 100;
     const portfolioValue = portfolio?.totalValue || 0;
     const unrealizedPnL = portfolio?.unrealizedPnL || 0;
-    const dailyPnL = portfolio?.dailyPnL || 0;
     const pnlPct = portfolioValue > 0 ? (unrealizedPnL / portfolioValue) * 100 : 0;
     const positionCount = portfolio?.positionCount || 0;
     const statusText = connected ? 'LIVE' : 'OFFLINE';
     const statusColor = connected ? T.colors.green : T.colors.red;
-    const healthText = connected ? '' : '';
     const uptimeStr = T.formatUptime(uptime);
-    const line = chalk_1.default.hex(T.colors.surface1)('\u2500'.repeat(w));
     return (react_1.default.createElement(ink_1.Box, { flexDirection: "column" },
-        react_1.default.createElement(ink_1.Text, null, line),
+        react_1.default.createElement(ink_1.Text, { color: T.colors.surface1 }, '\u2500'.repeat(w)),
         react_1.default.createElement(ink_1.Box, null,
             react_1.default.createElement(ink_1.Text, null, " "),
             react_1.default.createElement(ink_1.Text, { color: T.colors.mauve, bold: true },
                 T.icons.logo,
                 " PerpsTrader"),
-            version && (react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+            version && react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
                 " ",
-                version)),
+                version),
             react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
                 " ",
                 '\u2502'),
@@ -102,7 +98,7 @@ function HeaderBar({ connected, portfolio, refreshInterval, uptime, version }) {
                 " ",
                 '\u2502'),
             react_1.default.createElement(ink_1.Text, { color: T.colors.subtext0 },
-                ' ',
+                " ",
                 T.icons.wallet,
                 " ",
                 T.formatUSD(portfolioValue)),
@@ -110,20 +106,19 @@ function HeaderBar({ connected, portfolio, refreshInterval, uptime, version }) {
                 " ",
                 '\u2502'),
             react_1.default.createElement(ink_1.Text, { color: T.pnlColor(unrealizedPnL) },
-                ' ',
+                " ",
                 T.pnlIcon(unrealizedPnL),
                 " ",
                 T.formatUSD(unrealizedPnL)),
             react_1.default.createElement(ink_1.Text, { color: T.colors.overlay1 },
-                ' ',
-                "(",
+                " (",
                 T.formatPct(pnlPct),
                 ")"),
             react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
                 " ",
                 '\u2502'),
             react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
-                ' ',
+                " ",
                 T.icons.clock,
                 " ",
                 uptimeStr),
@@ -131,55 +126,59 @@ function HeaderBar({ connected, portfolio, refreshInterval, uptime, version }) {
                 " ",
                 '\u2502'),
             react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
-                ' ',
+                " ",
                 positionCount,
                 " pos"),
             react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
                 " ",
                 '\u2502'),
             react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
-                ' ',
+                " ",
                 refreshInterval,
                 "s")),
-        react_1.default.createElement(ink_1.Text, null, line)));
+        react_1.default.createElement(ink_1.Text, { color: T.colors.surface1 }, '\u2500'.repeat(w))));
 }
 function FooterBar({ activeView, refreshInterval, loading }) {
     const { stdout } = (0, ink_1.useStdout)();
     const w = stdout?.columns || 100;
     const views = [
-        { key: '1', label: 'Dashboard', short: 'Dash' },
-        { key: '2', label: 'Positions', short: 'Pos' },
-        { key: '3', label: 'News', short: 'News' },
-        { key: '4', label: 'Risk', short: 'Risk' },
-        { key: '5', label: 'Strategies', short: 'Strat' },
-        { key: '6', label: 'Predictions', short: 'Pred' },
+        { key: '1', short: 'Dash' },
+        { key: '2', short: 'Pos' },
+        { key: '3', short: 'News' },
+        { key: '4', short: 'Risk' },
+        { key: '5', short: 'Strat' },
+        { key: '6', short: 'Pred' },
     ];
-    const sep = chalk_1.default.hex(T.colors.surface2)(' \u2502 ');
-    const left = [
-        chalk_1.default.hex(T.colors.overlay0)(`${T.icons.clock} ${loading ? 'refreshing...' : `every ${refreshInterval}s`}`),
-    ].join(sep);
-    const viewStr = views
-        .map((v, i) => {
-        const active = i === activeView;
-        const color = active ? T.colors.mauve : T.colors.overlay0;
-        return chalk_1.default.hex(color)(active ? `[${v.key}] ${v.short}` : `[${v.key}]${v.short}`);
-    })
-        .join(' ');
-    const right = [
-        chalk_1.default.hex(T.colors.overlay0)('[r]efresh'),
-        chalk_1.default.hex(T.colors.overlay0)('[+/-]speed'),
-        chalk_1.default.hex(T.colors.red)('[q]uit'),
-    ].join(sep);
     return (react_1.default.createElement(ink_1.Box, { flexDirection: "column" },
-        react_1.default.createElement(ink_1.Text, null, chalk_1.default.hex(T.colors.surface0)('\u2500'.repeat(w))),
+        react_1.default.createElement(ink_1.Text, { color: T.colors.surface0 }, '\u2500'.repeat(w)),
         react_1.default.createElement(ink_1.Box, null,
-            react_1.default.createElement(ink_1.Text, null,
-                ' ',
-                left,
-                sep,
-                viewStr,
-                sep,
-                right))));
+            react_1.default.createElement(ink_1.Text, null, " "),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                T.icons.clock,
+                " ",
+                loading ? 'refreshing...' : `every ${refreshInterval}s`),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                " ",
+                '\u2502',
+                " "),
+            views.map((v, i) => (react_1.default.createElement(react_1.default.Fragment, { key: v.key },
+                react_1.default.createElement(ink_1.Text, { color: i === activeView ? T.colors.mauve : T.colors.overlay0 }, i === activeView ? `[${v.key}] ${v.short}` : ` ${v.key}  ${v.short}`),
+                react_1.default.createElement(ink_1.Text, null, " ")))),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                " ",
+                '\u2502',
+                " "),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 }, "[r]efresh"),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                " ",
+                '\u2502',
+                " "),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 }, "[+/-]speed"),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                " ",
+                '\u2502',
+                " "),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.red }, "[q]uit"))));
 }
 // =============================================================================
 // Spinner
@@ -192,10 +191,10 @@ function Spinner({ text, color }) {
         const id = setInterval(() => setFrame((f) => (f + 1) % frames.length), 80);
         return () => clearInterval(id);
     }, []);
-    return (react_1.default.createElement(ink_1.Text, { color: c },
+    return react_1.default.createElement(ink_1.Text, { color: c },
         frames[frame],
         " ",
-        text || 'Loading'));
+        text || 'Loading');
 }
 // =============================================================================
 // Empty State
@@ -225,7 +224,7 @@ function ProgressBar({ percent, width = 20, color, }) {
 // Section Label
 // =============================================================================
 function Label({ children, color }) {
-    return (react_1.default.createElement(ink_1.Text, { color: color || T.colors.overlay0 }, children));
+    return react_1.default.createElement(ink_1.Text, { color: color || T.colors.overlay0 }, children);
 }
 // =============================================================================
 // Data Row — key-value pair

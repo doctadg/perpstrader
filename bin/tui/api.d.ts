@@ -14,4 +14,3 @@ export declare function fetchAllData(): Promise<{
     connected: boolean;
 }>;
 export declare function getApiUrl(): string;
-//# sourceMappingURL=api.d.ts.map

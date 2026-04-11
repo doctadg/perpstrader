@@ -89,12 +89,9 @@ export async function fetchAllData(): Promise<{ data: ApiData; connected: boolea
   };
 
   try {
-    // Parallel fetch — mix of authenticated agent API and public endpoints
     const [agentStatus, health, portfolio, positions, signals, news, predictions, risk, strategies] =
       await Promise.all([
-        // Try agent API first (authed)
         apiFetch('/api/agent/status'),
-        // Also grab health for system-level data (no auth needed)
         publicFetch('/api/health'),
         apiFetch('/api/agent/portfolio'),
         apiFetch('/api/agent/positions'),
@@ -105,7 +102,6 @@ export async function fetchAllData(): Promise<{ data: ApiData; connected: boolea
         apiFetch('/api/agent/strategies'),
       ]);
 
-    // Fall back to public status endpoint if agent API returns null
     const status = agentStatus ?? (await publicFetch('/api/status'));
 
     return {
