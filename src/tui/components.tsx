@@ -92,11 +92,11 @@ export function HeaderBar({ connected, portfolio, refreshInterval, uptime, versi
   const healthText = connected ? '' : '';
   const uptimeStr = T.formatUptime(uptime);
 
-  const gradientLine = createGradient('\u2500'.repeat(w), T.colors.mauve, T.colors.blue);
+  const line = chalk.hex(T.colors.surface1)('\u2500'.repeat(w));
 
   return (
     <Box flexDirection="column">
-      <Text>{gradientLine}</Text>
+      <Text>{line}</Text>
       <Box>
         <Text> </Text>
         <Text color={T.colors.mauve} bold>
@@ -131,34 +131,12 @@ export function HeaderBar({ connected, portfolio, refreshInterval, uptime, versi
           {' '}{refreshInterval}s
         </Text>
       </Box>
-      <Text>{gradientLine}</Text>
+      <Text>{line}</Text>
     </Box>
   );
 }
 
-function createGradient(text: string, from: string, to: string): string {
-  const start = hexToRgb(from);
-  const end = hexToRgb(to);
-  const len = text.length;
-  if (len === 0) return '';
-  const chars = text.split('');
-  return chars
-    .map((char, i) => {
-      const ratio = len > 1 ? i / (len - 1) : 0;
-      const r = Math.round(start.r + (end.r - start.r) * ratio);
-      const g = Math.round(start.g + (end.g - start.g) * ratio);
-      const b = Math.round(start.b + (end.b - start.b) * ratio);
-      return chalk.rgb(r, g, b)(char);
-    })
-    .join('');
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return m
-    ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
-    : { r: 0, g: 0, b: 0 };
-}
+// createGradient removed — per-char chalk.rgb() caused terminal strikethrough artifacts
 
 // =============================================================================
 // Footer Bar — Keybinding hints

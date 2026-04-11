@@ -79,9 +79,9 @@ function HeaderBar({ connected, portfolio, refreshInterval, uptime, version }) {
     const statusColor = connected ? T.colors.green : T.colors.red;
     const healthText = connected ? '' : '';
     const uptimeStr = T.formatUptime(uptime);
-    const gradientLine = createGradient('\u2500'.repeat(w), T.colors.mauve, T.colors.blue);
+    const line = chalk_1.default.hex(T.colors.surface1)('\u2500'.repeat(w));
     return (react_1.default.createElement(ink_1.Box, { flexDirection: "column" },
-        react_1.default.createElement(ink_1.Text, null, gradientLine),
+        react_1.default.createElement(ink_1.Text, null, line),
         react_1.default.createElement(ink_1.Box, null,
             react_1.default.createElement(ink_1.Text, null, " "),
             react_1.default.createElement(ink_1.Text, { color: T.colors.mauve, bold: true },
@@ -141,30 +141,7 @@ function HeaderBar({ connected, portfolio, refreshInterval, uptime, version }) {
                 ' ',
                 refreshInterval,
                 "s")),
-        react_1.default.createElement(ink_1.Text, null, gradientLine)));
-}
-function createGradient(text, from, to) {
-    const start = hexToRgb(from);
-    const end = hexToRgb(to);
-    const len = text.length;
-    if (len === 0)
-        return '';
-    const chars = text.split('');
-    return chars
-        .map((char, i) => {
-        const ratio = len > 1 ? i / (len - 1) : 0;
-        const r = Math.round(start.r + (end.r - start.r) * ratio);
-        const g = Math.round(start.g + (end.g - start.g) * ratio);
-        const b = Math.round(start.b + (end.b - start.b) * ratio);
-        return chalk_1.default.rgb(r, g, b)(char);
-    })
-        .join('');
-}
-function hexToRgb(hex) {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return m
-        ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
-        : { r: 0, g: 0, b: 0 };
+        react_1.default.createElement(ink_1.Text, null, line)));
 }
 function FooterBar({ activeView, refreshInterval, loading }) {
     const { stdout } = (0, ink_1.useStdout)();
