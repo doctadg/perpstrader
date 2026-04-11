@@ -11,32 +11,12 @@
     <script src="/js/mobile-enhancements.js"></script>
     <script src="/js/mobile-native.js"></script>
     <link rel="stylesheet" href="/css/terminal-unified.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        /* === Legacy var aliases for JS/inline compat === */
-        :root {
-            --terminal-green: #4ade80;
-            --terminal-cyan: #3b82f6;
-            --terminal-amber: #f59e0b;
-            --terminal-red: #f87171;
-            --terminal-purple: #a78bfa;
-            --border-low: rgba(255,255,255,0.06);
-            --border-med: rgba(255,255,255,0.1);
-            --bg-panel: rgba(255,255,255,0.02);
-        }
-
         /* Remove CRT scanlines */
         body::before { display: none !important; }
 
-        /* === RESET & BASE === */
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            background: #000;
-            color: #e0e0e0;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 12px;
-            line-height: 1.4;
+        /* === Page-specific overrides (unified theme handles base styles) === */
+        body.unified-theme.page-funding-arbitrage {
             overflow-x: hidden;
         }
 
@@ -485,12 +465,6 @@
             from { transform: translateX(0); opacity: 1; }
             to { transform: translateX(100%); opacity: 0; }
         }
-
-        /* === SCROLLBAR === */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
 
         /* === CROSS-EXCHANGE ROW PROFIT HIGHLIGHT === */
         .data-table tbody tr[data-avg-spread="high"] td:nth-child(6),

@@ -19,6 +19,12 @@ body.unified-theme {
   --border-high: rgba(255,255,255,0.15);
   --font-mono: "JetBrains Mono", "IBM Plex Mono", monospace;
   --font-sans: "Inter", sans-serif;
+  /* Legacy aliases (JS/inline compat across pages) */
+  --terminal-green: #4ade80;
+  --terminal-cyan: #3b82f6;
+  --terminal-amber: #f59e0b;
+  --terminal-red: #f87171;
+  --terminal-purple: #a78bfa;
   font-family: var(--font-sans);
   color: rgba(255,255,255,0.5);
   background: #000000;
@@ -1230,6 +1236,34 @@ body.unified-theme.page-trace td[style*="color:#333"] {
 
 body.unified-theme.page-trace .swipe-hint[style] {
   top: 64px !important;
+}
+
+/* Safekeeping */
+body.unified-theme.page-safekeeping .top-bar {
+  padding: 12px 20px;
+}
+
+body.unified-theme.page-safekeeping .panel {
+  overflow: hidden;
+}
+
+body.unified-theme.page-safekeeping .hero-card .hero-value,
+body.unified-theme.page-safekeeping .stat-value {
+  font-family: var(--font-mono);
+}
+
+body.unified-theme.page-safekeeping td[style*="color:#666"],
+body.unified-theme.page-safekeeping td[style*="color: #666"] {
+  color: #666666 !important;
+}
+
+body.unified-theme.page-safekeeping div[style*="color:#666"],
+body.unified-theme.page-safekeeping span[style*="color:#666"] {
+  color: #666666 !important;
+}
+
+body.unified-theme.page-safekeeping div[style*="color:#444"] {
+  color: rgba(255,255,255,0.25) !important;
 }
 
 /* Responsive */

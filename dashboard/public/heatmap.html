@@ -11,43 +11,14 @@
     <link rel="stylesheet" href="/css/mobile-native.css">
     <script src="/js/mobile-enhancements.js"></script>
     <script src="/js/mobile-native.js"></script>
-    <link
-        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@400;600;800&display=swap"
-        rel="stylesheet">
+    <link rel="stylesheet" href="/css/terminal-unified.css">
     <style>
-        @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap");
-
-        :root {
-            --bg-body: #000000;
-            --bg-panel: rgba(255,255,255,0.02);
-            --bg-panel-hover: rgba(255,255,255,0.04);
-            --border-subtle: rgba(255,255,255,0.06);
-            --border-medium: rgba(255,255,255,0.1);
-            --border-strong: rgba(255,255,255,0.15);
-            --text-primary: rgba(255,255,255,0.9);
-            --text-body: rgba(255,255,255,0.5);
-            --text-label: rgba(255,255,255,0.3);
-            --text-dim: #a0a0a0;
-            --text-meta: #666666;
-            --good: #4ade80;
-            --bad: #f87171;
-            --warn: #f59e0b;
-            --accent: #3b82f6;
-            --mono: "JetBrains Mono", monospace;
-            --sans: "Inter", sans-serif;
-        }
-
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            font-family: var(--sans);
-            color: var(--text-body);
-            background: var(--bg-body);
+        /* Page-specific layout for heatmap */
+        body.unified-theme.page-heatmap {
             height: 100vh;
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            line-height: 1.5;
         }
 
         .top-bar {
@@ -333,9 +304,6 @@
             margin-top: 50px;
         }
     </style>
-    <script>window.location.replace('/heatmap');</script>
-    <!-- Conversational Agent Widget -->
-    <link rel="stylesheet" href="/css/terminal-unified.css">
 </head>
 
 <body class="unified-theme page-heatmap">

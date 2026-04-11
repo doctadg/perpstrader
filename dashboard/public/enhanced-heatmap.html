@@ -21,7 +21,7 @@
     <!-- Swipe Navigation Hint -->
     <div class="swipe-hint show-mobile">
         <span class="swipe-hint-icon left">‹</span>
-        <span style="font-size: 0.7em; color: #666;">SWIPE</span>
+        <span style="font-size: 0.7em; color: var(--text-meta, #666666);">SWIPE</span>
         <span class="swipe-hint-icon right">›</span>
     </div>
 
@@ -91,20 +91,20 @@
         <div class="cluster-modal">
             <div class="modal-header">
                 <div>
-                    <div style="font-family: var(--mono); font-size: 0.7em; color: var(--accent); margin-bottom: 5px;">
+                    <div style="font-family: var(--font-mono); font-size: 0.7em; color: var(--accent); margin-bottom: 5px;">
                     EVENT_CLUSTER</div>
                     <h2 style="color: rgba(255,255,255,0.9); font-size: 1.5em;" id="modalTopic">Topic</h2>
-                    <div id="modalMeta" style="font-family: var(--mono); font-size: 0.7em; color: #666; margin-top: 5px;"></div>
+                    <div id="modalMeta" style="font-family: var(--font-mono); font-size: 0.7em; color: var(--text-meta, #666666); margin-top: 5px;"></div>
                 </div>
                 <button onclick="closeModal()"
-                    style="background:none; border:none; color: #666; font-size: 1.5em; cursor: pointer;">&times;</button>
+                    style="background:none; border:none; color: var(--text-meta, #666666); font-size: 1.5em; cursor: pointer;">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="modalPredictionBadge" style="margin-bottom: 20px;"></div>
                 <div id="modalEntityTags" style="margin-bottom: 20px;"></div>
                 <div style="color: rgba(255,255,255,0.5); margin-bottom: 25px; line-height: 1.6;" id="modalSummary"></div>
 
-                <h3 style="font-family: var(--mono); font-size: 0.8em; color: #666; text-transform: uppercase;">
+                <h3 style="font-family: var(--font-mono); font-size: 0.8em; color: var(--text-meta, #666666); text-transform: uppercase;">
                     Related Coverage</h3>
                 <div class="article-list" id="modalArticles"></div>
             </div>
@@ -116,12 +116,12 @@
         <div class="cross-category-modal">
             <div class="modal-header">
                 <div>
-                    <div style="font-family: var(--mono); font-size: 0.7em; color: var(--accent); margin-bottom: 5px;">
+                    <div style="font-family: var(--font-mono); font-size: 0.7em; color: var(--accent); margin-bottom: 5px;">
                     CROSS_CATEGORY_CLUSTERS</div>
                     <h2 style="color: rgba(255,255,255,0.9); font-size: 1.3em;" id="crossCategoryTitle">Related Clusters</h2>
                 </div>
                 <button onclick="closeCrossCategoryModal()"
-                    style="background:none; border:none; color: #666; font-size: 1.5em; cursor: pointer;">&times;</button>
+                    style="background:none; border:none; color: var(--text-meta, #666666); font-size: 1.5em; cursor: pointer;">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="cross-category-list" id="crossCategoryList"></div>
