@@ -45,14 +45,29 @@ async function apiFetch<T>(path: string, timeoutMs = 8000): Promise<T | null> {
   }
 }
 
+// Unauthenticated fetch for public endpoints (health, old status)
+async function publicFetch<T>(path: string, timeoutMs = 5000): Promise<T | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(`${API_BASE}${path}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 // =============================================================================
 // Public API
 // =============================================================================
 
 export async function checkConnection(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/agent/status`, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
+    const res = await fetch(`${API_BASE}/api/health`, {
       signal: AbortSignal.timeout(3000),
     });
     return res.ok;
@@ -74,9 +89,13 @@ export async function fetchAllData(): Promise<{ data: ApiData; connected: boolea
   };
 
   try {
-    const [status, portfolio, positions, signals, news, predictions, risk, strategies] =
+    // Parallel fetch — mix of authenticated agent API and public endpoints
+    const [agentStatus, health, portfolio, positions, signals, news, predictions, risk, strategies] =
       await Promise.all([
+        // Try agent API first (authed)
         apiFetch('/api/agent/status'),
+        // Also grab health for system-level data (no auth needed)
+        publicFetch('/api/health'),
         apiFetch('/api/agent/portfolio'),
         apiFetch('/api/agent/positions'),
         apiFetch('/api/agent/signals'),
@@ -85,6 +104,9 @@ export async function fetchAllData(): Promise<{ data: ApiData; connected: boolea
         apiFetch('/api/agent/risk'),
         apiFetch('/api/agent/strategies'),
       ]);
+
+    // Fall back to public status endpoint if agent API returns null
+    const status = agentStatus ?? (await publicFetch('/api/status'));
 
     return {
       data: {
@@ -97,7 +119,7 @@ export async function fetchAllData(): Promise<{ data: ApiData; connected: boolea
         risk: risk ?? empty.risk,
         strategies: strategies ?? empty.strategies,
       },
-      connected: !!status,
+      connected: !!(agentStatus || status || health),
     };
   } catch {
     return { data: empty, connected: false };

@@ -451,7 +451,7 @@ class DashboardServer {
 
     // Mount agent control API (for Hermes, OpenClaw, external agents)
     // Protected by Bearer token auth and rate limiting
-    this.app.use('/api/agent', helmet, rateLimiter, agentAuthMiddleware, agentApiRouter);
+    this.app.use('/api/agent', helmet(), rateLimiter, agentAuthMiddleware, agentApiRouter);
 
     // Health check
     // Health check
