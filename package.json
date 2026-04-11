@@ -26,7 +26,13 @@
     "migrate:evolution": "sqlite3 data/trading.db < database/schema/evolution.sql",
     "research:worker": "node bin/backtest-worker/index.js",
     "research:evolve": "node bin/evolution-engine/index.js",
-    "research:evolve:verbose": "node bin/evolution-engine/index.js --verbose"
+    "research:evolve:verbose": "node bin/evolution-engine/index.js --verbose",
+    "tui": "node bin/perps-tui.js",
+    "tui:dev": "tsx src/tui/index.tsx",
+    "tui:build": "tsc --outDir ./bin --project tsconfig.json"
+  },
+  "bin": {
+    "perps-tui": "bin/perps-tui.js"
   },
   "dependencies": {
     "@langchain/core": "^1.1.8",
@@ -42,12 +48,14 @@
     "bs58": "^6.0.0",
     "bullmq": "^5.66.4",
     "ccxt": "^4.1.48",
+    "chalk": "^4.1.2",
     "chromadb": "^3.2.0",
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "express-rate-limit": "^8.3.2",
     "form-data": "^4.0.5",
     "helmet": "^8.1.0",
+    "ink": "^3.2.0",
     "ioredis": "^5.9.1",
     "lodash": "^4.17.21",
     "moment": "^2.29.4",
@@ -55,6 +63,7 @@
     "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.66.0",
     "pino": "^10.3.1",
+    "react": "^17.0.2",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "sqlite3": "^5.1.6",
@@ -73,6 +82,7 @@
     "@types/jest": "^29.5.8",
     "@types/lodash": "^4.14.202",
     "@types/node": "^20.19.27",
+    "@types/react": "^17.0.91",
     "@types/uuid": "^9.0.7",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^6.13.1",

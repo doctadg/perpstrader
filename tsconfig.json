@@ -22,7 +22,8 @@
     "noImplicitThis": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "downlevelIteration": true
+    "downlevelIteration": true,
+    "jsx": "react"
   },
   "include": [
     "src/**/*"
