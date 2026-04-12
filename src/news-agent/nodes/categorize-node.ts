@@ -8,7 +8,7 @@ import axios from 'axios';
 import logger from '../../shared/logger';
 import configManager from '../../shared/config';
 import { deriveTrend, deriveTrendTopic } from '../../shared/news-trend';
-import openrouterService from '../../shared/openrouter-service';
+import llmService from '../../shared/llm-service';
 import { generateEnhancedTitle, type EnhancedTitle } from '../../shared/market-title-generator';
 
 const config = configManager.get();
@@ -61,10 +61,10 @@ export async function categorizeNode(state: NewsAgentState): Promise<Partial<New
     };
   }
 
-  // Use OpenRouter with gpt-oss-20b
-  if (openrouterService.canUseService()) {
+  // Use LLM with gpt-oss-20b
+  if (llmService.canUseService()) {
     try {
-      const categorization = await openrouterService.categorizeArticles(
+      const categorization = await llmService.categorizeArticles(
         state.filteredArticles.map(a => ({
           id: a.id,
           title: a.title,
@@ -184,7 +184,7 @@ export async function categorizeNode(state: NewsAgentState): Promise<Partial<New
         };
       }
     } catch (error) {
-      logger.warn('[CategorizeNode] OpenRouter categorization failed, trying fallback:', error);
+      logger.warn('[CategorizeNode] LLM categorization failed, trying fallback:', error);
     }
   }
 

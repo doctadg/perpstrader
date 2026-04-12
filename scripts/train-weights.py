@@ -139,7 +139,7 @@ def main():
     print("🧠 Starting pump.fun weight training cycle...")
     
     # Check if database exists and has data
-    db_path = pathlib.Path('/home/d/PerpsTrader/pumpfun.db')
+    db_path = pathlib.Path('/home/d/PerpsTrader/data/pumpfun.db')
     if not db_path.exists() or db_path.stat().st_size == 0:
         print("❌ No pumpfun database found or database is empty")
         return False

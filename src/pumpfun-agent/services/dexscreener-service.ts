@@ -152,7 +152,7 @@ export async function getPairs(mintAddress: string): Promise<DexPair[]> {
       return [];
     }
 
-    const data = await resp.json();
+    const data = await resp.json() as { pairs?: DexPair[] } | null;
     const pairs: DexPair[] = data.pairs || [];
     setCachedPairs(mintAddress, pairs);
     return pairs;

@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PERPS_TRADER // SETTINGS</title>
+    <script src="/js/universal-nav.js"></script>
+    <link rel="stylesheet" href="/css/mobile-responsive.css">
+    <link rel="stylesheet" href="/css/mobile-native.css">
+    <script src="/js/mobile-enhancements.js"></script>
+    <script src="/js/mobile-native.js"></script>
+    <style>
+        /* ── Settings Dashboard ── */
+        body.unified-theme.page-settings .container {
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* ── Top Bar ── */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-low);
+        }
+        .top-bar .left { display: flex; align-items: center; gap: 16px; }
+        .top-bar .system-id { font-size: 11px; color: var(--text-meta, #666); letter-spacing: 0.06em; font-family: var(--font-mono); }
+        .top-bar .system-title { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.85); letter-spacing: -0.01em; }
+        .top-bar .system-title span { color: var(--accent); }
+        .top-bar .right { display: flex; align-items: center; gap: 16px; font-size: 11px; }
+        .top-bar .last-update { color: rgba(255,255,255,0.25); font-family: var(--font-mono); font-size: 11px; }
+        .refresh-btn {
+            font-family: var(--font-mono);
+            background: rgba(59,130,246,0.1);
+            color: var(--accent);
+            border: 1px solid rgba(59,130,246,0.2);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            transition: all 150ms ease;
+        }
+        .refresh-btn:hover {
+            background: rgba(59,130,246,0.15);
+            border-color: rgba(59,130,246,0.35);
+        }
+
+        /* ── Panels ── */
+        .panel {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-low);
+            border-radius: 10px;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+            transition: border-color 150ms ease;
+        }
+        .panel:hover { border-color: var(--border-med); }
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 18px;
+            border-bottom: 1px solid var(--border-low);
+        }
+        .panel-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.85);
+            letter-spacing: -0.01em;
+        }
+        .panel-subtitle {
+            font-size: 10px;
+            color: var(--text-meta, #666);
+            font-family: var(--font-mono);
+            letter-spacing: 0.03em;
+        }
+        .panel-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 4px;
+            letter-spacing: 0.04em;
+            font-family: var(--font-mono);
+        }
+        .panel-badge.live { background: rgba(74,222,128,0.08); color: var(--good); border: 1px solid rgba(74,222,128,0.2); }
+        .panel-badge.paper { background: rgba(59,130,246,0.08); color: var(--accent); border: 1px solid rgba(59,130,246,0.2); }
+        .panel-badge.testnet { background: rgba(245,158,11,0.08); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
+
+        /* ── Config Grid ── */
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1px;
+            background: rgba(255,255,255,0.04);
+        }
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 18px;
+            background: rgba(0,0,0,0.3);
+        }
+        .config-row.full-width {
+            grid-column: 1 / -1;
+        }
+        .config-key {
+            font-size: 11px;
+            color: var(--text-meta, #666);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 500;
+        }
+        .config-value {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: rgba(255,255,255,0.85);
+            font-weight: 500;
+            text-align: right;
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .config-value.green { color: var(--good); }
+        .config-value.amber { color: var(--warn); }
+        .config-value.red { color: var(--bad); }
+        .config-value.cyan { color: var(--accent); }
+        .config-value.masked { color: var(--text-meta, #555); letter-spacing: 0.08em; }
+
+        /* ── Symbols List ── */
+        .symbols-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 12px 18px;
+            background: rgba(0,0,0,0.3);
+            grid-column: 1 / -1;
+        }
+        .symbol-tag {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border-low);
+            color: rgba(255,255,255,0.7);
+        }
+
+        /* ── Agent Status Table ── */
+        .agent-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+        }
+        .agent-table th {
+            text-align: left;
+            padding: 10px 18px;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-meta, #666);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            background: rgba(0,0,0,0.2);
+            border-bottom: 1px solid var(--border-low);
+        }
+        .agent-table td {
+            padding: 10px 18px;
+            font-size: 12px;
+            color: rgba(255,255,255,0.8);
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .agent-table tr:hover td { background: rgba(255,255,255,0.02); }
+        .agent-table tr:last-child td { border-bottom: none; }
+
+        .agent-name { font-weight: 600; color: rgba(255,255,255,0.9); }
+        .agent-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 4px;
+        }
+        .agent-status.running { background: rgba(74,222,128,0.08); color: var(--good); }
+        .agent-status.idle { background: rgba(255,255,255,0.03); color: var(--text-meta, #666); }
+        .agent-status.error { background: rgba(248,113,113,0.08); color: var(--bad); }
+        .agent-status.disabled { background: rgba(255,255,255,0.02); color: var(--text-meta, #555); }
+        .agent-status-dot {
+            width: 5px; height: 5px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        .agent-status.running .agent-status-dot { animation: pulse-dot 2s infinite; }
+        @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .agent-uptime { color: var(--text-meta, #666); font-size: 11px; }
+        .agent-enabled { font-size: 11px; font-weight: 600; }
+        .agent-enabled.yes { color: var(--good); }
+        .agent-enabled.no { color: var(--bad); }
+
+        /* ── Environment Grid ── */
+        .env-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1px;
+            background: rgba(255,255,255,0.04);
+        }
+
+        /* ── Content Grid ── */
+        .content-grid {
+            display: grid;
+            gap: 16px;
+        }
+        .content-grid.dual { grid-template-columns: 1fr 1fr; }
+        @media (max-width: 1100px) {
+            .content-grid.dual { grid-template-columns: 1fr; }
+        }
+
+        /* ── Empty / Loading States ── */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 50px 20px;
+            color: var(--text-meta, #555);
+            text-align: center;
+        }
+        .empty-state-icon { font-family: var(--font-mono); font-size: 36px; color: rgba(255,255,255,0.1); margin-bottom: 12px; }
+        .empty-state-title { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.3); margin-bottom: 6px; }
+        .empty-state-desc { font-size: 12px; color: var(--text-meta, #444); max-width: 350px; line-height: 1.6; }
+
+        .loading-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text-meta, #555);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            gap: 10px;
+        }
+        .loading-spinner {
+            width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Read-Only Notice ── */
+        .readonly-notice {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(245,158,11,0.04);
+            border: 1px solid rgba(245,158,11,0.1);
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--warn);
+            font-family: var(--font-mono);
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            .config-grid { grid-template-columns: 1fr; }
+            .env-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+    <link rel="stylesheet" href="/css/terminal-unified.css">
+</head>
+
+<body class="unified-theme page-settings">
+    <div class="container">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <div class="left">
+                <div class="system-id">[ CFG.001 ]</div>
+                <div class="system-title"><span>SETTINGS</span>_CONFIG</div>
+            </div>
+            <div class="right">
+                <span class="last-update" id="last-update">--:--:--</span>
+                <button class="refresh-btn" id="refresh-btn">REFRESH</button>
+            </div>
+        </header>
+
+        <!-- Read-Only Notice -->
+        <div class="readonly-notice">
+            <span>\u26A0</span>
+            <span>READ-ONLY VIEW \u2014 Configuration is managed via config files and environment variables</span>
+        </div>
+
+        <!-- Content Grid -->
+        <div class="content-grid dual">
+            <!-- Trading Configuration -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">// Trading Configuration</div>
+                        <div class="panel-subtitle">Active trading parameters</div>
+                    </div>
+                </div>
+                <div class="config-grid" id="trading-config">
+                    <div class="loading-state"><div class="loading-spinner"></div><span>Loading...</span></div>
+                </div>
+            </div>
+
+            <!-- Risk Limits -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">// Risk Limits</div>
+                        <div class="panel-subtitle">Position and loss controls</div>
+                    </div>
+                </div>
+                <div class="config-grid" id="risk-config">
+                    <div class="loading-state"><div class="loading-spinner"></div><span>Loading...</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Status -->
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <div class="panel-title">// Agent Status</div>
+                    <div class="panel-subtitle">All registered agents and their current state</div>
+                </div>
+                <span class="panel-badge" id="agent-count-badge">0 agents</span>
+            </div>
+            <div id="agent-status-container">
+                <div class="loading-state"><div class="loading-spinner"></div><span>Loading agents...</span></div>
+            </div>
+        </div>
+
+        <!-- Environment -->
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <div class="panel-title">// Environment</div>
+                    <div class="panel-subtitle">Runtime environment and mode configuration</div>
+                </div>
+                <span class="panel-badge paper" id="env-mode-badge">--</span>
+            </div>
+            <div class="env-grid" id="env-config">
+                <div class="loading-state"><div class="loading-spinner"></div><span>Loading...</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        (function() {
+            'use strict';
+
+            // ── Utility ──
+            function formatUptime(ms) {
+                if (!ms || ms < 0) return 'N/A';
+                const s = Math.floor(ms / 1000);
+                const d = Math.floor(s / 86400);
+                const h = Math.floor((s % 86400) / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                if (d > 0) return `${d}d ${h}h ${m}m`;
+                if (h > 0) return `${h}h ${m}m`;
+                return `${m}m`;
+            }
+
+            function maskSecret(val) {
+                if (!val || typeof val !== 'string') return 'N/A';
+                if (val.length <= 8) return '***';
+                return val.slice(0, 3) + '-****-' + val.slice(-4);
+            }
+
+            function formatTime(date) {
+                if (!date) return '--:--:--';
+                const d = new Date(date);
+                return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            }
+
+            function isSecretKey(key) {
+                const secrets = ['key', 'secret', 'password', 'token', 'apikey', 'api_key', 'private', 'wallet', 'mnemonic', 'phrase'];
+                const k = key.toLowerCase();
+                return secrets.some(s => k.includes(s));
+            }
+
+            // ── State ──
+            let configData = {};
+            let statusData = {};
+
+            // ── Fetch All ──
+            async function loadAll() {
+                const [configRes, statusRes] = await Promise.allSettled([
+                    fetch('/api/config').then(r => r.json()),
+                    fetch('/api/agent/status').then(r => r.json()),
+                ]);
+
+                if (configRes.status === 'fulfilled') {
+                    configData = configRes.value.config || configRes.value.data || configRes.value || {};
+                }
+                if (statusRes.status === 'fulfilled') {
+                    statusData = statusRes.value.status || statusRes.value.data || statusRes.value || {};
+                }
+
+                // Merge agent data from status into config if available
+                if (statusData.agents) {
+                    configData._agents = statusData.agents;
+                }
+
+                renderTradingConfig();
+                renderRiskConfig();
+                renderAgentStatus();
+                renderEnvironment();
+                document.getElementById('last-update').textContent = formatTime(new Date());
+            }
+
+            // ── Render Trading Configuration ──
+            function renderTradingConfig() {
+                const container = document.getElementById('trading-config');
+                const c = configData.trading || configData;
+                const symbols = c.symbols || c.symbolList || c.activeSymbols || [];
+
+                let html = '';
+
+                // Symbols list (full width)
+                if (symbols.length > 0) {
+                    html += `<div class="symbols-list">`;
+                    html += `<div style="width:100%;margin-bottom:4px;">`;
+                    html += `<span class="config-key">Symbols List</span>`;
+                    html += `</div>`;
+                    symbols.forEach(sym => {
+                        html += `<span class="symbol-tag">${escapeHtml(sym)}</span>`;
+                    });
+                    html += `</div>`;
+                }
+
+                const fields = [
+                    { key: 'Timeframe', val: c.timeframe || c.tf || c.timeFrame || 'N/A' },
+                    { key: 'Max Active Symbols', val: c.maxActiveSymbols || c.maxSymbols || 'N/A' },
+                    { key: 'Cycle Interval', val: c.cycleInterval || c.interval ? (c.cycleInterval || c.interval) + 's' : 'N/A' },
+                    { key: 'Min Analysis Candles', val: c.minAnalysisCandles || c.minCandles || c.lookbackCandles || 'N/A' },
+                    { key: 'Exchange', val: c.exchange || c.dex || c.platform || 'N/A' },
+                    { key: 'Strategy', val: c.strategy || c.strategyType || 'N/A' },
+                ];
+
+                fields.forEach(f => {
+                    html += configRow(f.key, f.val);
+                });
+
+                container.innerHTML = html || emptyState('No trading config available');
+            }
+
+            // ── Render Risk Limits ──
+            function renderRiskConfig() {
+                const container = document.getElementById('risk-config');
+                const r = configData.risk || configData.riskLimits || configData;
+
+                const fields = [
+                    { key: 'Max Position Size', val: r.maxPositionSize || r.positionSize || 'N/A', cls: 'amber' },
+                    { key: 'Max Daily Loss', val: r.maxDailyLoss || r.dailyLossLimit || 'N/A', cls: 'red' },
+                    { key: 'Max Leverage', val: r.maxLeverage || r.leverage || 'N/A', cls: 'amber' },
+                    { key: 'Max Drawdown', val: r.maxDrawdown || r.drawdownLimit || 'N/A', cls: 'red' },
+                    { key: 'Daily Loss Limit', val: r.dailyLossLimit || r.stopLossDaily || 'N/A', cls: 'red' },
+                    { key: 'Take Profit', val: r.takeProfit || r.tp || 'N/A', cls: 'green' },
+                    { key: 'Stop Loss', val: r.stopLoss || r.sl || 'N/A', cls: 'red' },
+                    { key: 'Risk Per Trade', val: r.riskPerTrade || r.riskPercent || 'N/A', cls: 'amber' },
+                ];
+
+                let html = '';
+                fields.forEach(f => {
+                    html += configRow(f.key, f.val, f.cls);
+                });
+
+                container.innerHTML = html || emptyState('No risk config available');
+            }
+
+            // ── Render Agent Status ──
+            function renderAgentStatus() {
+                const container = document.getElementById('agent-status-container');
+                const agents = configData._agents || statusData.agents || statusData || [];
+
+                let agentList = [];
+                if (Array.isArray(agents)) {
+                    agentList = agents;
+                } else if (typeof agents === 'object') {
+                    // Could be an object keyed by agent name
+                    agentList = Object.entries(agents).map(([name, data]) => ({
+                        name: name,
+                        ...data,
+                        status: data.status || data.state || 'UNKNOWN',
+                        enabled: data.enabled !== false,
+                        uptime: data.uptime || data.uptimeMs || null,
+                    }));
+                }
+
+                // Also check for common agent fields in statusData
+                if (agentList.length === 0 && statusData) {
+                    const knownAgents = [
+                        { name: 'Trading Agent', status: statusData.status, uptime: statusData.uptime, enabled: statusData.enabled !== false },
+                    ];
+                    agentList = knownAgents;
+                }
+
+                document.getElementById('agent-count-badge').textContent = `${agentList.length} agent${agentList.length !== 1 ? 's' : ''}`;
+
+                if (agentList.length === 0) {
+                    container.innerHTML = emptyState('No agents found');
+                    return;
+                }
+
+                let html = `<table class="agent-table">
+                    <thead><tr>
+                        <th>Agent</th>
+                        <th>Status</th>
+                        <th>Uptime</th>
+                        <th>Enabled</th>
+                    </tr></thead><tbody>`;
+
+                agentList.forEach(a => {
+                    const name = a.name || a.id || 'Unknown';
+                    const status = (a.status || 'UNKNOWN').toUpperCase();
+                    const statusCls = status === 'RUNNING' || status === 'ACTIVE' ? 'running'
+                        : status === 'ERROR' ? 'error'
+                        : status === 'DISABLED' || status === 'STOPPED' ? 'disabled'
+                        : 'idle';
+                    const enabled = a.enabled !== false && a.enabled !== 'false';
+                    const uptime = formatUptime(a.uptime || a.uptimeMs);
+
+                    html += `<tr>
+                        <td class="agent-name">${escapeHtml(name)}</td>
+                        <td><span class="agent-status ${statusCls}"><span class="agent-status-dot"></span>${status}</span></td>
+                        <td class="agent-uptime">${uptime}</td>
+                        <td><span class="agent-enabled ${enabled ? 'yes' : 'no'}">${enabled ? '\u2713 ENABLED' : '\u2717 DISABLED'}</span></td>
+                    </tr>`;
+                });
+
+                html += `</tbody></table>`;
+                container.innerHTML = html;
+            }
+
+            // ── Render Environment ──
+            function renderEnvironment() {
+                const container = document.getElementById('env-config');
+                const env = configData.env || configData.environment || configData;
+                const modeBadge = document.getElementById('env-mode-badge');
+
+                const nodeEnv = env.NODE_ENV || env.nodeEnv || process.env?.NODE_ENV || 'unknown';
+                const logLevel = env.LOG_LEVEL || env.logLevel || 'info';
+                const dashPort = env.DASHBOARD_PORT || env.port || env.PORT || 'N/A';
+                const dexMode = env.DEX_MODE || env.dexMode || env.tradingMode || env.mode || 'unknown';
+                const network = env.NETWORK || env.network || env.chain || 'N/A';
+
+                // Update mode badge
+                const mode = dexMode.toLowerCase();
+                modeBadge.className = 'panel-badge';
+                if (mode.includes('live') || mode.includes('mainnet')) { modeBadge.classList.add('live'); modeBadge.textContent = 'LIVE'; }
+                else if (mode.includes('paper')) { modeBadge.classList.add('paper'); modeBadge.textContent = 'PAPER'; }
+                else if (mode.includes('test')) { modeBadge.classList.add('testnet'); modeBadge.textContent = 'TESTNET'; }
+                else { modeBadge.classList.add('paper'); modeBadge.textContent = dexMode.toUpperCase(); }
+
+                const fields = [
+                    { key: 'NODE_ENV', val: nodeEnv, cls: nodeEnv === 'production' ? 'green' : nodeEnv === 'development' ? 'amber' : '' },
+                    { key: 'LOG_LEVEL', val: logLevel },
+                    { key: 'DASHBOARD_PORT', val: String(dashPort), cls: 'cyan' },
+                    { key: 'DEX_MODE', val: dexMode.toUpperCase(), cls: mode.includes('live') ? 'red' : mode.includes('paper') ? 'green' : 'amber' },
+                    { key: 'Network', val: network },
+                    { key: 'API Base URL', val: env.API_URL || env.apiBaseUrl || env.apiUrl || 'N/A' },
+                    { key: 'RPC Endpoint', val: env.RPC_URL || env.rpcUrl || isSecretKey('RPC') ? maskSecret(env.RPC_URL || env.rpcUrl) : (env.RPC_URL || env.rpcUrl || 'N/A') },
+                ];
+
+                // Add any env vars that look secret
+                if (env.PRIVATE_KEY) fields.push({ key: 'Private Key', val: maskSecret(env.PRIVATE_KEY), masked: true });
+                if (env.WALLET_KEY) fields.push({ key: 'Wallet Key', val: maskSecret(env.WALLET_KEY), masked: true });
+                if (env.API_KEY) fields.push({ key: 'API Key', val: maskSecret(env.API_KEY), masked: true });
+                if (env.MNEMONIC) fields.push({ key: 'Mnemonic', val: maskSecret(env.MNEMONIC), masked: true });
+
+                // Scan top-level config for additional secret-like keys
+                Object.keys(configData).forEach(k => {
+                    if (isSecretKey(k) && !['_agents', 'trading', 'risk', 'env', 'environment', 'riskLimits'].includes(k)) {
+                        const already = fields.some(f => f.key.toLowerCase() === k.toLowerCase());
+                        if (!already) {
+                            fields.push({ key: k, val: maskSecret(configData[k]), masked: true });
+                        }
+                    }
+                });
+
+                let html = '';
+                fields.forEach(f => {
+                    html += configRow(f.key, f.val, f.cls, f.masked);
+                });
+
+                container.innerHTML = html || emptyState('No environment config available');
+            }
+
+            // ── Helpers ──
+            function configRow(key, val, cls = '', masked = false) {
+                return `<div class="config-row">
+                    <span class="config-key">${escapeHtml(key)}</span>
+                    <span class="config-value ${cls} ${masked ? 'masked' : ''}">${escapeHtml(String(val))}</span>
+                </div>`;
+            }
+
+            function emptyState(msg) {
+                return `<div class="empty-state" style="grid-column:1/-1;">
+                    <div class="empty-state-icon">[ ? ]</div>
+                    <div class="empty-state-title">NO DATA</div>
+                    <div class="empty-state-desc">${msg || 'Configuration not available. Ensure the API is running.'}</div>
+                </div>`;
+            }
+
+            function escapeHtml(str) {
+                if (!str) return '';
+                return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+
+            // ── Events ──
+            document.getElementById('refresh-btn').addEventListener('click', loadAll);
+            window.addEventListener('nav-refresh-data', loadAll);
+
+            try {
+                const socket = io();
+                socket.on('config_updated', loadAll);
+                socket.on('agent_status_change', loadAll);
+            } catch (e) { /* no socket */ }
+
+            // ── Init ──
+            loadAll();
+            // Auto-refresh every 60s
+            setInterval(loadAll, 60000);
+        })();
+    </script>
+</body>
+</html>

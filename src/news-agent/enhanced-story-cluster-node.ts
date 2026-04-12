@@ -23,7 +23,7 @@ import storyClusterStoreEnhanced from '../data/story-cluster-store-enhanced';
 import storyClusterStore from '../data/story-cluster-store';
 import crypto from 'crypto';
 import glmService from '../../shared/glm-service';
-import openrouterService from '../../shared/openrouter-service';
+import llmService from '../../shared/llm-service';
 import { getTitleFingerprint, isNonMarketMoving, formatTitle as validateAndFormatTopic } from '../../shared/title-cleaner';
 import { validateAndFormatTopic as formatTopic } from '../../shared/human-title-formatter';
 import { messageBus, Channel } from '../../shared/message-bus';
@@ -135,12 +135,12 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
 
     logger.info(`[EnhancedClusterNode] Mode: Vector=${useVectorMode}, GLM=${glmAvailable}, Enhanced=${USE_ENHANCED_CLUSTERING}`);
 
-    // Check OpenRouter availability
-    if (!openrouterService.canUseService()) {
-        logger.error('[EnhancedClusterNode] OpenRouter not available');
+    // Check LLM availability
+    if (!llmService.canUseService()) {
+        logger.error('[EnhancedClusterNode] LLM not available');
         return {
-            currentStep: 'CLUSTERING_FAILED_NO_OPENROUTER',
-            errors: ['OpenRouter service not available']
+            currentStep: 'CLUSTERING_FAILED_NO_LLM',
+            errors: ['LLM service not available']
         };
     }
 
@@ -214,8 +214,8 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
 
     const aiLabelsMap = new Map<string, any>();
 
-    // Batch OpenRouter labeling
-    const batchLabels = await openrouterService.batchEventLabels(
+    // Batch LLM labeling
+    const batchLabels = await llmService.batchEventLabels(
         filteredArticles.map(a => ({
             id: a.id,
             title: a.title,
@@ -228,7 +228,7 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
         aiLabelsMap.set(id, label);
     }
 
-    logger.info(`[EnhancedClusterNode] OpenRouter labeled ${batchLabels.size} articles`);
+    logger.info(`[EnhancedClusterNode] LLM labeled ${batchLabels.size} articles`);
 
     // GLM fallback for unlabeled
     if (glmAvailable && batchLabels.size < filteredArticles.length) {
@@ -319,7 +319,7 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
                 titleClusterId: titleCluster?.id
             });
         } else {
-            // FIX: When OpenRouter labeling fails entirely, use fallback label
+            // FIX: When LLM labeling fails entirely, use fallback label
             // but still process the article with extracted entities
             processedArticles.push({
                 article,

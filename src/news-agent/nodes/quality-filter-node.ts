@@ -4,7 +4,7 @@
 
 import { NewsAgentState, FilteredArticle, RawArticle, EXCLUDED_CATEGORIES } from '../state';
 import logger from '../../shared/logger';
-import openrouterService from '../../shared/openrouter-service';
+import llmService from '../../shared/llm-service';
 import { detectLanguage } from '../../shared/filters/language';
 import { calculateQualityScore } from '../../shared/filters/quality';
 
@@ -160,9 +160,9 @@ async function applyQualityGate(article: RawArticle): Promise<QualityGateResult>
     const config = (await import('../../shared/config')).default.get();
 
     const response = await axios.post(
-      `${config.openrouter.baseUrl}/chat/completions`,
+      `${config.glm.baseUrl}/chat/completions`,
       {
-        model: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
+        model: process.env.GLM_MODEL || 'z-ai/glm-4.7-flash',
         messages: [
           {
             role: 'system',
@@ -178,7 +178,7 @@ async function applyQualityGate(article: RawArticle): Promise<QualityGateResult>
       },
       {
         headers: {
-          'Authorization': `Bearer ${config.openrouter.apiKey}`,
+          'Authorization': `Bearer ${config.glm.apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://perps-trader.ai',
           'X-Title': 'PerpsTrader News System',

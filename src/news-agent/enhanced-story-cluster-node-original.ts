@@ -7,7 +7,7 @@ import newsVectorStore from '../data/news-vector-store';
 import storyClusterStoreEnhanced from '../data/story-cluster-store-enhanced';
 import crypto from 'crypto';
 import glmService from '../../shared/glm-service';
-import openrouterService from '../../shared/openrouter-service';
+import llmService from '../../shared/llm-service';
 import { getTitleFingerprint, isNonMarketMoving } from '../../shared/title-cleaner';
 import { validateAndFormatTopic } from '../../shared/human-title-formatter';
 import { messageBus, Channel } from '../../shared/message-bus';
@@ -98,12 +98,12 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
 
     logger.info(`[EnhancedClusterNode] Mode: Vector=${useVectorMode}, GLM=${glmAvailable}`);
 
-    // Check OpenRouter availability
-    if (!openrouterService.canUseService()) {
-        logger.error('[EnhancedClusterNode] OpenRouter not available');
+    // Check LLM availability
+    if (!llmService.canUseService()) {
+        logger.error('[EnhancedClusterNode] LLM not available');
         return {
-            currentStep: 'CLUSTERING_FAILED_NO_OPENROUTER',
-            errors: ['OpenRouter service not available']
+            currentStep: 'CLUSTERING_FAILED_NO_LLM',
+            errors: ['LLM service not available']
         };
     }
 
@@ -114,8 +114,8 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
 
     const aiLabelsMap = new Map<string, any>();
 
-    // Batch OpenRouter labeling
-    const batchLabels = await openrouterService.batchEventLabels(
+    // Batch LLM labeling
+    const batchLabels = await llmService.batchEventLabels(
         filteredArticles.map(a => ({
             id: a.id,
             title: a.title,
@@ -128,7 +128,7 @@ export async function enhancedStoryClusterNode(state: any): Promise<Partial<Enha
         aiLabelsMap.set(id, label);
     }
 
-    logger.info(`[EnhancedClusterNode] OpenRouter labeled ${batchLabels.size} articles`);
+    logger.info(`[EnhancedClusterNode] LLM labeled ${batchLabels.size} articles`);
 
     // GLM fallback for unlabeled
     if (glmAvailable && batchLabels.size < filteredArticles.length) {

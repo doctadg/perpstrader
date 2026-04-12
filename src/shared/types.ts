@@ -234,13 +234,6 @@ export interface Config {
     model: string;
     timeout: number;
   };
-  openrouter: {
-    apiKey: string;
-    baseUrl: string;
-    labelingModel: string;
-    embeddingModel: string;
-    timeout: number;
-  };
   database: {
     type: 'sqlite' | 'postgresql';
     connection: string;

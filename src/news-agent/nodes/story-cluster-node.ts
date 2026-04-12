@@ -1,6 +1,6 @@
 // Story Cluster Node
 // Analyzes new articles and groups them into specific event clusters
-// Uses OpenRouter (required) > GLM (optional fallback)
+// Uses LLM (required) > GLM (optional fallback)
 // Enhanced with Redis message bus and parallel clustering
 
 import { NewsAgentState } from '../state';
@@ -10,7 +10,7 @@ import newsVectorStore from '../../data/news-vector-store';
 import storyClusterStore, { StoryCluster } from '../../data/story-cluster-store';
 import crypto from 'crypto';
 import glmService from '../../shared/glm-service';
-import openrouterService from '../../shared/openrouter-service';
+import llmService from '../../shared/llm-service';
 import { getTitleFingerprint, isNonMarketMoving } from '../../shared/title-cleaner';
 import { validateAndFormatTopic } from '../../shared/human-title-formatter';
 import messageBus, { Channel } from '../../shared/message-bus';
@@ -22,7 +22,7 @@ const VECTOR_SIMILARITY_THRESHOLD = Number.isFinite(Number.parseFloat(process.en
     : 0.70;
 const KEYWORD_SIMILARITY_THRESHOLD = 0.60;
 const FILTER_VECTOR_BY_CATEGORY = process.env.NEWS_VECTOR_FILTER_BY_CATEGORY === 'true';
-// GLM fallback enabled by default since OpenRouter API key is dead (401)
+// GLM fallback enabled by default since LLM API key is dead (401)
 // Set NEWS_USE_GLM=false to disable if needed
 const USE_GLM_FALLBACK = process.env.NEWS_USE_GLM !== 'false';
 const CLUSTER_MERGE_HOURS_THRESHOLD = 48; // Only consider clusters within 48 hours for matching
@@ -71,17 +71,17 @@ export async function storyClusterNode(state: NewsAgentState): Promise<Partial<N
     const glmAvailable = glmService.canUseService() && USE_GLM_FALLBACK;
 
     if (useVectorMode) {
-        logger.info(`[StoryClusterNode] Mode: OpenRouter Only${glmAvailable ? ' + GLM Fallback' : ''} (Vector)`);
+        logger.info(`[StoryClusterNode] Mode: LLM Only${glmAvailable ? ' + GLM Fallback' : ''} (Vector)`);
     } else {
-        logger.warn(`[StoryClusterNode] Mode: OpenRouter Only${glmAvailable ? ' + GLM Fallback' : ''} (Keyword Match)`);
+        logger.warn(`[StoryClusterNode] Mode: LLM Only${glmAvailable ? ' + GLM Fallback' : ''} (Keyword Match)`);
     }
 
-    // Check if OpenRouter is available - if not, we can't proceed
-    if (!openrouterService.canUseService()) {
-        logger.error('[StoryClusterNode] OpenRouter is not configured. Cannot cluster without AI labels.');
+    // Check if LLM is available - if not, we can't proceed
+    if (!llmService.canUseService()) {
+        logger.error('[StoryClusterNode] LLM is not configured. Cannot cluster without AI labels.');
         return {
-            currentStep: 'CLUSTERING_FAILED_NO_OPENROUTER',
-            errors: [...state.errors, 'OpenRouter service not available for topic generation']
+            currentStep: 'CLUSTERING_FAILED_NO_LLM',
+            errors: [...state.errors, 'LLM service not available for topic generation']
         };
     }
 
@@ -94,9 +94,9 @@ export async function storyClusterNode(state: NewsAgentState): Promise<Partial<N
         keywords: string[];
     }>();
 
-    // Batch OpenRouter labeling (required)
-    logger.info('[StoryClusterNode] Batch labeling articles with OpenRouter...');
-    const batchLabels = await openrouterService.batchEventLabels(
+    // Batch LLM labeling (required)
+    logger.info('[StoryClusterNode] Batch labeling articles with LLM...');
+    const batchLabels = await llmService.batchEventLabels(
         articles.map(a => ({
             id: a.id,
             title: a.title,
@@ -108,7 +108,7 @@ export async function storyClusterNode(state: NewsAgentState): Promise<Partial<N
         aiLabelsMap.set(id, label);
         aiLabeled++;
     }
-    logger.info(`[StoryClusterNode] OpenRouter labeled ${batchLabels.size} articles`);
+    logger.info(`[StoryClusterNode] LLM labeled ${batchLabels.size} articles`);
 
     // Optional GLM fallback for unlabeled articles
     if (glmAvailable && batchLabels.size < articles.length) {
@@ -233,7 +233,7 @@ export async function storyClusterNode(state: NewsAgentState): Promise<Partial<N
             newClusters,
             existingClusters,
             filtered: filteredCount,
-            cacheStats: openrouterService.getCacheStats(),
+            cacheStats: llmService.getCacheStats(),
         });
 
         logger.info(`[StoryClusterNode] Published NEWS_CLUSTERED event to message bus`);

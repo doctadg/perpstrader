@@ -15,6 +15,8 @@ export interface ViewProps {
   data: any;
   loading: boolean;
   scrollOffset: number;
+  selectedIndex?: number;
+  onAction?: (type: string, data: any) => void;
 }
 
 // =============================================================================
@@ -215,10 +217,12 @@ export function DashboardView({ data, loading }: ViewProps) {
 }
 
 // =============================================================================
-// 2. POSITIONS VIEW — Detailed position cards
+// 2. POSITIONS VIEW — Detailed position cards with scrolling
 // =============================================================================
 
-export function PositionsView({ data, loading }: ViewProps) {
+const POSITION_CARD_HEIGHT = 8; // approximate lines per position card
+
+export function PositionsView({ data, loading, scrollOffset, selectedIndex = 0, onAction }: ViewProps) {
   const positions: any[] = data.positions?.positions || [];
   const totalPnL = data.positions?.totalUnrealizedPnL || 0;
 
@@ -229,6 +233,11 @@ export function PositionsView({ data, loading }: ViewProps) {
       </Box>
     );
   }
+
+  // Calculate visible window
+  const maxVisible = Math.max(1, Math.floor(20 / POSITION_CARD_HEIGHT)); // ~20 rows available
+  const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, positions.length - maxVisible)));
+  const visiblePositions = positions.slice(clampedOffset, clampedOffset + maxVisible);
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -241,6 +250,20 @@ export function PositionsView({ data, loading }: ViewProps) {
         <Text color={T.pnlColor(totalPnL)}>
           {' '}{T.pnlIcon(totalPnL)} Total PnL: {T.formatUSD(totalPnL)}
         </Text>
+        {positions.length > maxVisible && (
+          <>
+            <Text color={T.colors.surface2}> {'\u2502'}</Text>
+            <Text color={T.colors.overlay0}>
+              {' '}{clampedOffset + selectedIndex + 1}/{positions.length}
+            </Text>
+          </>
+        )}
+        {positions.length > 0 && onAction && (
+          <>
+            <Text color={T.colors.surface2}> {'\u2502'}</Text>
+            <Text color={T.colors.overlay0}> {' '}[c] close selected</Text>
+          </>
+        )}
       </Box>
 
       {positions.length === 0 ? (
@@ -248,7 +271,9 @@ export function PositionsView({ data, loading }: ViewProps) {
           <EmptyState message="No open positions found" />
         </Panel>
       ) : (
-        positions.map((pos: any, i: number) => {
+        visiblePositions.map((pos: any, i: number) => {
+          const realIndex = clampedOffset + i;
+          const isSelected = realIndex === selectedIndex;
           const pnl = pos.unrealizedPnL || 0;
           const entryPx = pos.entryPrice || pos.averageEntryPrice || 0;
           const markPx = pos.markPrice || pos.currentPrice || 0;
@@ -263,10 +288,10 @@ export function PositionsView({ data, loading }: ViewProps) {
 
           return (
             <Panel
-              key={i}
-              title={`${pos.symbol || '???'} ${side.toLowerCase()} ${leverage}x`}
+              key={realIndex}
+              title={`${isSelected ? '\u25b6 ' : ''}${pos.symbol || '???'} ${side.toLowerCase()} ${leverage}x`}
               icon={side === 'LONG' ? T.icons.up : T.icons.down}
-              borderColor={side === 'LONG' ? '#2d4a2d' : '#4a2d2d'}
+              borderColor={isSelected ? T.colors.mauve : (side === 'LONG' ? '#2d4a2d' : '#4a2d2d')}
             >
               <Box flexDirection="row">
                 <Box flexDirection="column" flexGrow={1}>
@@ -560,10 +585,12 @@ export function RiskView({ data, loading }: ViewProps) {
 }
 
 // =============================================================================
-// 5. STRATEGIES VIEW — Strategy leaderboard
+// 5. STRATEGIES VIEW — Strategy leaderboard with scrolling
 // =============================================================================
 
-export function StrategiesView({ data, loading }: ViewProps) {
+const STRATEGY_CARD_HEIGHT = 10;
+
+export function StrategiesView({ data, loading, scrollOffset, selectedIndex = 0 }: ViewProps) {
   const strategies: any[] = data.strategies?.strategies || [];
   const activeCount = data.strategies?.activeCount || 0;
 
@@ -582,12 +609,25 @@ export function StrategiesView({ data, loading }: ViewProps) {
     return sb - sa;
   });
 
+  // Calculate visible window
+  const maxVisible = Math.max(1, Math.floor(20 / STRATEGY_CARD_HEIGHT));
+  const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, sorted.length - maxVisible)));
+  const visible = sorted.slice(clampedOffset, clampedOffset + maxVisible);
+
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Box marginBottom={1}>
         <Text color={T.colors.subtext1} bold>
           {'  '}{T.icons.strategy} Strategies ({activeCount}/{strategies.length} active)
         </Text>
+        {sorted.length > maxVisible && (
+          <>
+            <Text color={T.colors.surface2}> {'\u2502'}</Text>
+            <Text color={T.colors.overlay0}>
+              {' '}{clampedOffset + selectedIndex + 1}/{sorted.length}
+            </Text>
+          </>
+        )}
       </Box>
 
       {strategies.length === 0 ? (
@@ -595,7 +635,9 @@ export function StrategiesView({ data, loading }: ViewProps) {
           <EmptyState message="No strategies configured" />
         </Panel>
       ) : (
-        sorted.map((strat: any, i: number) => {
+        visible.map((strat: any, i: number) => {
+          const realIndex = clampedOffset + i;
+          const isSelected = realIndex === selectedIndex;
           const perf = strat.performance || {};
           const isActive = strat.isActive !== false;
           const symbols = (strat.symbols || []).join(', ');
@@ -609,10 +651,10 @@ export function StrategiesView({ data, loading }: ViewProps) {
 
           return (
             <Panel
-              key={i}
-              title={T.truncate(strat.name || 'Unnamed Strategy', 35)}
+              key={realIndex}
+              title={`${isSelected ? '\u25b6 ' : ''}${T.truncate(strat.name || 'Unnamed Strategy', 35)}`}
               icon={isActive ? T.icons.dot : T.icons.bullet}
-              borderColor={isActive ? T.colors.surface1 : T.colors.surface0}
+              borderColor={isSelected ? T.colors.mauve : (isActive ? T.colors.surface1 : T.colors.surface0)}
             >
               {/* Status & Type */}
               <Box>
@@ -822,6 +864,257 @@ export function PredictionsView({ data, loading }: ViewProps) {
             );
           })}
         </>
+      )}
+    </Box>
+  );
+}
+
+// =============================================================================
+// 7. ORDERS VIEW — Open orders with cancel action
+// =============================================================================
+
+export function OrdersView({ data, loading, scrollOffset, selectedIndex = 0, onAction }: ViewProps) {
+  const orders: any[] = data.orders?.orders || [];
+
+  if (loading && orders.length === 0) {
+    return (
+      <Box flexDirection="column" alignItems="center" flexGrow={1} paddingTop={2}>
+        <Spinner text="Loading orders..." />
+      </Box>
+    );
+  }
+
+  // Calculate visible window
+  const maxVisible = 15;
+  const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, orders.length - maxVisible)));
+  const visible = orders.slice(clampedOffset, clampedOffset + maxVisible);
+
+  const statusColor = (status: string): string => {
+    switch ((status || '').toUpperCase()) {
+      case 'FILLED':
+        return T.colors.green;
+      case 'OPEN':
+      case 'PENDING':
+        return T.colors.yellow;
+      case 'CANCELLED':
+      case 'CANCELED':
+        return T.colors.red;
+      case 'PARTIALLY_FILLED':
+        return T.colors.peach;
+      default:
+        return T.colors.overlay0;
+    }
+  };
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {/* Header */}
+      <Box marginBottom={1}>
+        <Text color={T.colors.subtext1} bold>
+          {'  '}{T.icons.chart} Orders ({orders.length} open)
+        </Text>
+        {orders.length > maxVisible && (
+          <>
+            <Text color={T.colors.surface2}> {'\u2502'}</Text>
+            <Text color={T.colors.overlay0}>
+              {' '}{clampedOffset + selectedIndex + 1}/{orders.length}
+            </Text>
+          </>
+        )}
+        {orders.length > 0 && onAction && (
+          <>
+            <Text color={T.colors.surface2}> {'\u2502'}</Text>
+            <Text color={T.colors.overlay0}> {' '}[x] cancel selected</Text>
+          </>
+        )}
+      </Box>
+
+      {/* Column headers */}
+      {orders.length > 0 && (
+        <Box paddingLeft={2} marginBottom={1}>
+          <Text color={T.colors.overlay1} bold>
+            {'  '}{'ID'.padEnd(12)}{'Symbol'.padEnd(10)}{'Side'.padEnd(6)}{'Type'.padEnd(8)}{'Price'.padEnd(12)}{'Size'.padEnd(10)}{'Status'.padEnd(12)}
+          </Text>
+          <Text color={T.colors.surface0}>{' '.repeat(80)}</Text>
+        </Box>
+      )}
+
+      {orders.length === 0 ? (
+        <Panel title="No Orders" icon={T.icons.bullet}>
+          <EmptyState message="No open orders found" />
+        </Panel>
+      ) : (
+        visible.map((order: any, i: number) => {
+          const realIndex = clampedOffset + i;
+          const isSelected = realIndex === selectedIndex;
+          const id = T.truncate(order.id || order.orderId || '???', 12);
+          const symbol = (order.symbol || '???').padEnd(10);
+          const side = order.side === 'BUY' ? 'BUY ' : 'SELL';
+          const type = (order.type || 'LIMIT').padEnd(8);
+          const price = (order.price != null ? T.formatNum(order.price) : 'MARKET').padEnd(12);
+          const size = T.formatNum(order.size || 0, 4).padEnd(10);
+          const status = (order.status || 'OPEN').padEnd(12);
+          const created = order.createdAt ? T.timeAgo(order.createdAt) : '';
+
+          return (
+            <Box key={realIndex} paddingLeft={2}>
+              <Text
+                color={isSelected ? T.colors.mauve : T.colors.text}
+                bold={isSelected}
+              >
+                {isSelected ? '\u25b6 ' : '  '}
+                <Text color={T.colors.overlay0}>{id}</Text>
+                {' '}
+                <Text bold>{symbol}</Text>
+                {' '}
+                <Text color={order.side === 'BUY' ? T.colors.green : T.colors.red}>{side}</Text>
+                {' '}
+                <Text color={T.colors.overlay0}>{type}</Text>
+                {' '}
+                <Text>{price}</Text>
+                {' '}
+                <Text>{size}</Text>
+                {' '}
+                <Text color={statusColor(order.status)}>{status}</Text>
+                {created && (
+                  <Text color={T.colors.overlay1}> {created}</Text>
+                )}
+              </Text>
+            </Box>
+          );
+        })
+      )}
+    </Box>
+  );
+}
+
+// =============================================================================
+// 8. BACKTEST VIEW — Backtest history and results
+// =============================================================================
+
+export function BacktestView({ data, loading, scrollOffset, selectedIndex = 0 }: ViewProps) {
+  const runs: any[] = data.backtest?.runs || [];
+
+  if (loading && runs.length === 0) {
+    return (
+      <Box flexDirection="column" alignItems="center" flexGrow={1} paddingTop={2}>
+        <Spinner text="Loading backtests..." />
+      </Box>
+    );
+  }
+
+  // Calculate visible window
+  const maxVisible = 10;
+  const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, runs.length - maxVisible)));
+  const visible = runs.slice(clampedOffset, clampedOffset + maxVisible);
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {/* Header */}
+      <Box marginBottom={1}>
+        <Text color={T.colors.subtext1} bold>
+          {'  '}{T.icons.strategy} Backtest History ({runs.length} runs)
+        </Text>
+        {runs.length > maxVisible && (
+          <>
+            <Text color={T.colors.surface2}> {'\u2502'}</Text>
+            <Text color={T.colors.overlay0}>
+              {' '}{clampedOffset + selectedIndex + 1}/{runs.length}
+            </Text>
+          </>
+        )}
+      </Box>
+
+      {runs.length === 0 ? (
+        <Panel title="No Backtests" icon={T.icons.bullet}>
+          <EmptyState message="No backtest results found" />
+        </Panel>
+      ) : (
+        visible.map((run: any, i: number) => {
+          const realIndex = clampedOffset + i;
+          const isSelected = realIndex === selectedIndex;
+          const runStatusColor = run.status === 'COMPLETED'
+            ? T.colors.green
+            : run.status === 'RUNNING'
+            ? T.colors.yellow
+            : run.status === 'FAILED'
+            ? T.colors.red
+            : T.colors.overlay0;
+
+          return (
+            <Panel
+              key={realIndex}
+              title={`${isSelected ? '\u25b6 ' : ''}${run.strategyName || 'Unnamed Strategy'}`}
+              icon={T.icons.strategy}
+              borderColor={isSelected ? T.colors.mauve : T.colors.surface1}
+              compact
+            >
+              {/* Status row */}
+              <Box>
+                <Text color={runStatusColor} bold>{run.status || 'UNKNOWN'}</Text>
+                <Text color={T.colors.overlay0}>
+                  {' '}ID: {T.truncate(String(run.id || ''), 12)}
+                </Text>
+                {run.completedAt && (
+                  <Text color={T.colors.overlay1}>
+                    {' '}completed {T.timeAgo(run.completedAt)}
+                  </Text>
+                )}
+              </Box>
+
+              {/* Metrics grid */}
+              <Box flexDirection="row" marginTop={1}>
+                <Box flexDirection="column" flexGrow={1}>
+                  <DataRow
+                    label="Return"
+                    value={T.formatPct((run.totalReturn || 0) * 100)}
+                    valueColor={T.pnlColor(run.totalReturn || 0)}
+                    indent={0}
+                  />
+                  <DataRow
+                    label="Win Rate"
+                    value={`${((run.winRate || 0) * 100).toFixed(1)}%`}
+                    valueColor={(run.winRate || 0) > 0.5 ? T.colors.green : T.colors.red}
+                    indent={0}
+                  />
+                  <DataRow
+                    label="Trades"
+                    value={`${run.totalTrades || 0}`}
+                    indent={0}
+                  />
+                </Box>
+                <Box flexDirection="column" flexGrow={1}>
+                  <DataRow
+                    label="Sharpe"
+                    value={(run.sharpeRatio || 0).toFixed(2)}
+                    valueColor={(run.sharpeRatio || 0) > 1 ? T.colors.green : T.colors.text}
+                    indent={0}
+                  />
+                  <DataRow
+                    label="Max DD"
+                    value={`${(run.maxDrawdown || 0).toFixed(1)}%`}
+                    valueColor={(run.maxDrawdown || 0) > 15 ? T.colors.red : T.colors.yellow}
+                    indent={0}
+                  />
+                </Box>
+              </Box>
+
+              {/* Error message if failed */}
+              {run.error && (
+                <Box marginTop={1}>
+                  <Text color={T.colors.red}>{'  '}{T.icons.cross} Error: {run.error}</Text>
+                </Box>
+              )}
+
+              {/* Instruments */}
+              {run.instruments && run.instruments.length > 0 && (
+                <Text color={T.colors.overlay1}>
+                  {'  '}Instruments: {run.instruments.slice(0, 5).join(', ')}
+                </Text>
+              )}
+            </Panel>
+          );
+        })
       )}
     </Box>
   );

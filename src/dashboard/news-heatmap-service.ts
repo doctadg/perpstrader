@@ -2,7 +2,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import crypto from 'crypto';
 import configManager from '../shared/config';
 import logger from '../shared/logger';
-import openrouterService from '../shared/openrouter-service';
+import llmService from '../shared/llm-service';
 import { NewsCategory, NewsImportance, NewsSentiment } from '../shared/types';
 
 type ClusterCategory = NewsCategory | 'GENERAL';
@@ -211,7 +211,7 @@ class NewsHeatmapService {
     this.maxArticleScan = Number.parseInt(process.env.NEWS_HEATMAP_MAX_ARTICLES || '1200', 10);
     this.maxLlmLabelArticles = Number.parseInt(process.env.NEWS_HEATMAP_MAX_LLM_ARTICLES || '450', 10);
     this.llmTimeoutMs = Math.max(1000, Number.parseInt(process.env.NEWS_HEATMAP_LLM_TIMEOUT_MS || '8000', 10));
-    this.configuredLabelingModel = configManager.get().openrouter.labelingModel;
+    this.configuredLabelingModel = configManager.get().glm.model;
   }
 
   async initialize(): Promise<void> {
@@ -693,7 +693,7 @@ class NewsHeatmapService {
 
   private async labelArticlesWithLlm(articles: SourceArticle[]): Promise<Map<string, LlmEventLabel>> {
     const labels = new Map<string, LlmEventLabel>();
-    if (!openrouterService.canUseService()) return labels;
+    if (!llmService.canUseService()) return labels;
     if (Date.now() < this.llmBlockedUntil) return labels;
 
     const labelInputs = articles.slice(0, this.maxLlmLabelArticles).map(article => ({
@@ -707,7 +707,7 @@ class NewsHeatmapService {
 
     try {
       const llmLabels = await this.withTimeout(
-        openrouterService.batchEventLabels(labelInputs) as Promise<Map<string, any>>,
+        llmService.batchEventLabels(labelInputs) as Promise<Map<string, any>>,
         this.llmTimeoutMs,
         `LLM labeling timed out after ${this.llmTimeoutMs}ms`
       );
@@ -731,7 +731,7 @@ class NewsHeatmapService {
         this.llmConsecutiveEmpty += 1;
         if (this.llmConsecutiveEmpty >= 2) {
           this.llmBlockedUntil = Date.now() + (10 * 60 * 1000);
-          logger.warn('[NewsHeatmapService] OpenRouter returned zero labels repeatedly; disabling LLM labeling for 10 minutes');
+          logger.warn('[NewsHeatmapService] LLM returned zero labels repeatedly; disabling LLM labeling for 10 minutes');
           this.llmConsecutiveEmpty = 0;
         }
       } else {
@@ -1069,7 +1069,7 @@ class NewsHeatmapService {
     const llmCoverage = articles.length > 0
       ? llmLabels.size / Math.min(articles.length, this.maxLlmLabelArticles)
       : 0;
-    const llmEnabled = openrouterService.canUseService() && Date.now() >= this.llmBlockedUntil;
+    const llmEnabled = llmService.canUseService() && Date.now() >= this.llmBlockedUntil;
 
     return {
       generatedAt: timestamp,

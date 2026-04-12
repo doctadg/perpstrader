@@ -157,7 +157,7 @@ NEWS_VECTOR_DISTANCE_THRESHOLD=0.65
 CLUSTER_MERGE_SIMILARITY_THRESHOLD=0.80
 ```
 
-### OpenRouter Model Recommendations
+### LLM Model Recommendations
 
 **Current:**
 - Labeling: `openai/gpt-oss-20b`
@@ -261,7 +261,7 @@ npm run test:enhanced
 - [ ] Backup database
 - [ ] Run migration if needed
 - [ ] Test benchmark script
-- [ ] Verify OpenRouter API access
+- [ ] Verify LLM API access
 - [ ] Check Redis connectivity
 
 ### Deployment Steps

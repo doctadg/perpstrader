@@ -11,7 +11,7 @@ import { Strategy, ResearchData, PredictionIdea, PredictionMarket, NewsItem } fr
 const config = configManager.get();
 
 interface GLMResponse {
-    choices: { message: { content: string } }[];
+    choices: { message: { content: string; reasoning?: string; reasoning_details?: Array<{ type: string; text?: string }> } }[];
 }
 
 /**
@@ -29,7 +29,7 @@ export class GLMAIService {
         this.apiKey = config.glm.apiKey;
         // Use GLM config values
         this.model = config.glm.model || 'z-ai/glm-4.7-flash';
-        this.labelingModel = config.openrouter.labelingModel || 'z-ai/glm-4.7-flash';
+        this.labelingModel = config.glm.model || 'z-ai/glm-4.7-flash';
         this.timeout = config.glm.timeout;
     }
 

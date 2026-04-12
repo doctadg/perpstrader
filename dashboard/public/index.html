@@ -642,7 +642,7 @@
         <div class="hero-top">
           <div class="brand">
             <div class="brand-title">PerpsTrader Unified Terminal</div>
-            <div class="brand-sub">Monolithic Trading, News, Heatmap, Prediction, Risk, Monitoring</div>
+            <div class="brand-sub">Modular Agent Trading Floor — News, Risk, Execution, Predictions</div>
           </div>
           <div class="status-strip">
             <div class="chip online">Socket<strong id="chip-conn">BOOTING</strong></div>
@@ -705,56 +705,56 @@
         <div class="key-metric-card">
           <span class="key-metric-icon">&#9632;</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">847</span>
+            <span class="key-metric-value" id="km-total-trades">—</span>
             <span class="key-metric-label">Total Trades</span>
           </div>
         </div>
         <div class="key-metric-card highlight-good">
           <span class="key-metric-icon">◆</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">67.3%</span>
+            <span class="key-metric-value" id="km-win-rate">—</span>
             <span class="key-metric-label">Win Rate</span>
           </div>
         </div>
         <div class="key-metric-card highlight-good">
           <span class="key-metric-icon">◆</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">+$12,847.32</span>
+            <span class="key-metric-value" id="km-total-pnl">—</span>
             <span class="key-metric-label">Total PnL</span>
           </div>
         </div>
         <div class="key-metric-card">
           <span class="key-metric-icon">▲</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">4</span>
+            <span class="key-metric-value" id="km-active-positions">—</span>
             <span class="key-metric-label">Active Positions</span>
           </div>
         </div>
         <div class="key-metric-card">
           <span class="key-metric-icon">↻</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">$156,420</span>
+            <span class="key-metric-value" id="km-24h-volume">—</span>
             <span class="key-metric-label">24h Volume</span>
           </div>
         </div>
         <div class="key-metric-card">
           <span class="key-metric-icon">◼</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">$1,245</span>
+            <span class="key-metric-value" id="km-avg-trade">—</span>
             <span class="key-metric-label">Avg Trade Size</span>
           </div>
         </div>
         <div class="key-metric-card highlight-good">
           <span class="key-metric-icon">★</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">+$892.45</span>
+            <span class="key-metric-value" id="km-best-trade">—</span>
             <span class="key-metric-label">Best Trade</span>
           </div>
         </div>
         <div class="key-metric-card highlight-good">
           <span class="key-metric-icon">◈</span>
           <div class="key-metric-content">
-            <span class="key-metric-value">2.14</span>
+            <span class="key-metric-value" id="km-sharpe">—</span>
             <span class="key-metric-label">Sharpe Ratio</span>
           </div>
         </div>
@@ -781,19 +781,23 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Side</th>
-                  <th>Size</th>
-                  <th>Entry</th>
-                  <th>Mark</th>
-                  <th>PnL</th>
-                </tr>
-              </thead>
-              <tbody id="positions-body">
-                <tr><td colspan="6" class="empty">No Active Positions</td></tr>
-              </tbody>
+             <thead>
+               <tr>
+                 <th>Asset</th>
+                 <th>Side</th>
+                 <th>Size</th>
+                 <th>Entry</th>
+                 <th>Mark</th>
+                 <th>PnL</th>
+                 <th>Leverage</th>
+                 <th>Liq. Price</th>
+                 <th>Funding</th>
+                 <th>Age</th>
+               </tr>
+             </thead>
+             <tbody id="positions-body">
+               <tr><td colspan="10" class="empty">No Active Positions</td></tr>
+             </tbody>
             </table>
           </div>
         </article>
@@ -978,8 +982,19 @@
     function renderPositions(positions) {
       const body = byId("positions-body");
       if (!Array.isArray(positions) || positions.length === 0) {
-        body.innerHTML = `<tr><td colspan="6" class="empty">No Active Positions</td></tr>`;
+        body.innerHTML = `<tr><td colspan="10" class="empty">No Active Positions</td></tr>`;
         return;
+      }
+      function fmtAge(createdAt) {
+        if (!createdAt) return "—";
+        const ms = Date.now() - new Date(createdAt).getTime();
+        if (ms < 0) return "—";
+        const mins = Math.floor(ms / 60000);
+        if (mins < 60) return `${mins}m`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+        const days = Math.floor(hrs / 24);
+        return `${days}d ${hrs % 24}h`;
       }
       body.innerHTML = positions.slice(0, 16).map((p) => `
         <tr>
@@ -989,6 +1004,10 @@
           <td>${fmtMoney(p.entryPrice)}</td>
           <td>${fmtMoney(p.markPrice)}</td>
           <td class="${classForNumeric(p.unrealizedPnL)}">${fmtMoney(p.unrealizedPnL, true)}</td>
+          <td>${p.leverage ? p.leverage + "x" : "—"}</td>
+          <td class="bad">${p.liquidationPrice ? fmtMoney(p.liquidationPrice) : "—"}</td>
+          <td class="${classForNumeric(p.fundingRate)}">${p.fundingRate != null ? (p.fundingRate >= 0 ? "+" : "") + Number(p.fundingRate * 100).toFixed(4) + "%" : "—"}</td>
+          <td class="warn">${fmtAge(p.openTime || p.createdAt)}</td>
         </tr>
       `).join("");
     }
@@ -1118,9 +1137,12 @@
 
     async function refreshDashboard() {
       try {
-        const [portfolioRes, statusRes, predStatusRes, predMarketsRes, newsRes, heatRes, fundingRes, healthRes] = await Promise.all([
+        const [portfolioRes, statusRes, agentStatusRes, agentPortfolioRes, agentPositionsRes, predStatusRes, predMarketsRes, newsRes, heatRes, fundingRes, healthRes] = await Promise.allSettled([
           fetch("/api/portfolio"),
           fetch("/api/status"),
+          fetch("/api/agent/status"),
+          fetch("/api/agent/portfolio"),
+          fetch("/api/agent/positions"),
           fetch("/api/predictions/status"),
           fetch("/api/predictions/markets"),
           fetch("/api/news/clusters?limit=12"),
@@ -1129,14 +1151,45 @@
           fetch("/api/health"),
         ]);
 
-        const portfolio = await portfolioRes.json();
-        const status = await statusRes.json();
-        const prediction = await predStatusRes.json();
-        const predictionMarkets = await predMarketsRes.json();
-        const clusters = await newsRes.json();
-        const heat = await heatRes.json();
-        const funding = await fundingRes.json();
-        const health = await healthRes.json();
+        const portfolio = portfolioRes.status === "fulfilled" ? await portfolioRes.value.json() : {};
+        const status = statusRes.status === "fulfilled" ? await statusRes.value.json() : {};
+        const agentStatus = agentStatusRes.status === "fulfilled" ? await agentStatusRes.value.json() : {};
+        const agentPortfolio = agentPortfolioRes.status === "fulfilled" ? await agentPortfolioRes.value.json() : {};
+        const agentPositions = agentPositionsRes.status === "fulfilled" ? await agentPositionsRes.value.json() : {};
+        const prediction = predStatusRes.status === "fulfilled" ? await predStatusRes.value.json() : {};
+        const predictionMarkets = predMarketsRes.status === "fulfilled" ? await predMarketsRes.value.json() : [];
+        const clusters = newsRes.status === "fulfilled" ? await newsRes.value.json() : [];
+        const heat = heatRes.status === "fulfilled" ? await heatRes.value.json() : {};
+        const funding = fundingRes.status === "fulfilled" ? await fundingRes.value.json() : {};
+        const health = healthRes.status === "fulfilled" ? await healthRes.value.json() : {};
+
+        /* ── Key Metrics (live from Agent API) ── */
+        const aPos = agentPositions?.positions || [];
+        const aTrades = Array.isArray(agentStatus?.agents) ? agentStatus.agents.reduce((sum, a) => sum + (a.totalTrades || a.trades || 0), 0) : (agentStatus?.totalTrades || 0);
+        const aWinRate = agentStatus?.winRate != null ? (agentStatus.winRate * 100).toFixed(1) + "%" : (agentStatus?.agents?.[0]?.winRate != null ? (agentStatus.agents[0].winRate * 100).toFixed(1) + "%" : "—");
+        const aSharpe = agentStatus?.sharpeRatio != null ? Number(agentStatus.sharpeRatio).toFixed(2) : "—";
+        const aTotalPnl = agentPortfolio?.totalValue != null ? fmtMoney(agentPortfolio.totalValue - (agentPortfolio?.initialValue || agentPortfolio.totalValue), true) : (agentPortfolio?.unrealizedPnL != null ? fmtMoney(agentPortfolio.unrealizedPnL, true) : "—");
+        const aPosCount = agentPortfolio?.positionCount != null ? String(agentPortfolio.positionCount) : (aPos.length != null ? String(aPos.length) : "—");
+        const aVolume24h = agentPortfolio?.dailyPnL != null ? fmtMoney(Math.abs(agentPortfolio.dailyPnL) * 10) : "—"; // approx until real volume field exists
+        const aAvgTrade = aTrades > 0 && agentPortfolio?.totalValue ? fmtMoney(agentPortfolio.totalValue / aTrades) : "—";
+        const aBestTrade = agentStatus?.bestTrade != null ? fmtMoney(agentStatus.bestTrade, true) : (agentStatus?.agents?.[0]?.bestTrade != null ? fmtMoney(agentStatus.agents[0].bestTrade, true) : "—");
+
+        const kmTotalTrades = byId("km-total-trades");
+        const kmWinRate = byId("km-win-rate");
+        const kmTotalPnl = byId("km-total-pnl");
+        const kmActivePos = byId("km-active-positions");
+        const km24hVolume = byId("km-24h-volume");
+        const kmAvgTrade = byId("km-avg-trade");
+        const kmBestTrade = byId("km-best-trade");
+        const kmSharpe = byId("km-sharpe");
+        if (kmTotalTrades) kmTotalTrades.textContent = aTrades || "—";
+        if (kmWinRate) kmWinRate.textContent = aWinRate;
+        if (kmTotalPnl) kmTotalPnl.textContent = aTotalPnl;
+        if (kmActivePos) kmActivePos.textContent = aPosCount;
+        if (km24hVolume) km24hVolume.textContent = aVolume24h;
+        if (kmAvgTrade) kmAvgTrade.textContent = aAvgTrade;
+        if (kmBestTrade) kmBestTrade.textContent = aBestTrade;
+        if (kmSharpe) kmSharpe.textContent = aSharpe;
 
         const p = portfolio?.portfolio || {};
         setMetric("m-nav", fmtMoney(p.totalValue), "good");

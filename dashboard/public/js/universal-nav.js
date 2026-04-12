@@ -9,7 +9,7 @@
     const NAV_CONFIG = {
         brand: {
             title: 'PERPSTRADER',
-            subtitle: 'Agent Hedge Fund'
+            subtitle: 'Agent Trading Floor'
         },
         sections: [
             {
@@ -18,6 +18,7 @@
                     { id: 'dashboard', label: 'Dashboard', path: '/', icon: '\u25A1', shortcut: 'D' },
                     { id: 'trace', label: 'Trace Viewer', path: '/trace', icon: '\u25C9', shortcut: 'T' },
                     { id: 'research', label: 'Research Lab', path: '/research', icon: '\u25C6', shortcut: 'R' },
+                    { id: 'settings', label: 'Settings', path: '/settings', icon: '\u2699', shortcut: 'G' },
                 ]
             },
             {

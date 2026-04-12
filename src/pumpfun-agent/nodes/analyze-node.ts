@@ -4,7 +4,7 @@
 
 import logger from '../../shared/logger';
 import configManager from '../../shared/config';
-import openrouterService from '../../shared/openrouter-service';
+import llmService from '../../shared/llm-service';
 import glmService from '../../shared/glm-service';
 import { PumpFunAgentState, TokenAnalysis, TokenRecommendation } from '../../shared/types';
 import { addThought, updateStep } from '../state';
@@ -196,7 +196,7 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
         if (aiCallCount > 0) {
           await new Promise(r => setTimeout(r, AI_INTER_CALL_DELAY_MS));
         }
-        aiAnalysis = await runOpenRouterAnalysis({
+        aiAnalysis = await runLLMAnalysis({
           token,
           metadata,
           website,
@@ -246,7 +246,7 @@ export async function analyzeNode(state: PumpFunAgentState): Promise<Partial<Pum
         cycleId: state.cycleId,
         errors: [],
         onChainData: onChainData,
-      } as TokenAnalysis);
+      } as unknown as TokenAnalysis);
     } catch (error) {
       logger.debug(`[AnalyzeNode] Failed to analyze ${token.symbol}: ${error}`);
     }
@@ -315,7 +315,7 @@ function normalizeWebsiteUrl(raw?: string): string {
  * Run AI analysis for a token using GLM service (z.ai).
  * On failure, returns null so caller can use heuristic fallback.
  */
-async function runOpenRouterAnalysis(data: {
+async function runLLMAnalysis(data: {
   token: any;
   metadata: any;
   website: any;
@@ -328,10 +328,10 @@ async function runOpenRouterAnalysis(data: {
   const prompt = buildAnalysisPrompt(data);
   const config = configManager.get();
 
-  // Use GLM service via OpenRouter
+  // Use GLM service via LLM
   const apiKey = config.glm.apiKey;
   const baseUrl = config.glm.baseUrl;
-  const model = process.env.PUMPFUN_OPENROUTER_MODEL || config.glm.model || 'z-ai/glm-4.7-flash';
+  const model = process.env.PUMPFUN_MODEL || config.glm.model || 'z-ai/glm-4.7-flash';
 
   if (!apiKey || apiKey.length === 0 || apiKey === 'your-api-key-here') {
     logger.warn('[AnalyzeNode] GLM API key not configured, using heuristic fallback');
@@ -439,7 +439,7 @@ async function runOpenRouterAnalysis(data: {
 }
 
 /**
- * Build the OpenRouter analysis prompt
+ * Build the LLM analysis prompt
  */
 function buildAnalysisPrompt(data: {
   token: any;

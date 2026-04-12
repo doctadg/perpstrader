@@ -6,7 +6,7 @@
 import logger from '../../shared/logger';
 import { PumpFunAgentState, ContractSecurity } from '../../shared/types';
 import { addThought, updateStep } from '../state';
-import { rugCheckGate, getRugCheckReport, extractRugCheckRedFlags, rugCheckToScoreFactor } from '../services/rugcheck-service';
+import { rugCheckGate, getFullReport as getRugCheckReport, extractRugCheckRedFlags, rugCheckToScoreFactor } from '../services/rugcheck-service';
 import { dexScreenerGate } from '../services/dexscreener-service';
 import type { RugCheckReport } from '../services/rugcheck-service';
 

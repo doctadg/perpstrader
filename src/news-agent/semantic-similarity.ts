@@ -3,7 +3,7 @@
 // Uses both local embeddings and LLM-based similarity scoring
 
 import logger from '../shared/logger';
-import openrouterService from '../shared/openrouter-service';
+import llmService from '../shared/llm-service';
 import { embedText } from '../shared/local-embeddings';
 import { enhancedEntityExtractor, ExtractedEntity } from './enhanced-entity-extraction';
 
@@ -73,7 +73,7 @@ class SemanticSimilarityService {
 
     // Try LLM-based similarity if enabled
     let llmSim: number | undefined;
-    if (this.useLLM && openrouterService.canUseService()) {
+    if (this.useLLM && llmService.canUseService()) {
       llmSim = await this.calculateLLMSimilarity(article1, article2);
     }
 
@@ -206,12 +206,12 @@ class SemanticSimilarityService {
    * Generate embedding for text
    */
   private async generateEmbedding(text: string): Promise<number[]> {
-    // Try OpenRouter first for better quality
-    if (openrouterService.canUseService()) {
+    // Try LLM first for better quality
+    if (llmService.canUseService()) {
       try {
-        const openrouterEmbedding = await openrouterService.generateEmbedding(text);
-        if (openrouterEmbedding && openrouterEmbedding.length > 0) {
-          return openrouterEmbedding;
+        const llmEmbedding = await llmService.generateEmbedding(text);
+        if (llmEmbedding && llmEmbedding.length > 0) {
+          return llmEmbedding;
         }
       } catch {
         // Fall through to local embedding
@@ -379,8 +379,8 @@ Consider:
 
 Return only a number from 0-100 representing similarity percentage.`;
 
-      // Use OpenRouter to generate a similarity score
-      const response = await openrouterService.generateEventLabel({
+      // Use LLM to generate a similarity score
+      const response = await llmService.generateEventLabel({
         title: `Compare: ${article1.title} vs ${article2.title}`,
         category: 'GENERAL'
       });

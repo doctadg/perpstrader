@@ -3,7 +3,7 @@
 // Addresses "weak title clustering" issue in the original system
 
 import logger from '../shared/logger';
-import openrouterService from '../shared/openrouter-service';
+import llmService from './llm-service';
 import { getTitleFingerprint } from './title-cleaner';
 
 export interface TitleSimilarityResult {
@@ -202,7 +202,7 @@ class TitleSemanticClustering {
   }
 
   /**
-   * Analyze a title using OpenRouter for entities and topic
+   * Analyze a title using LLM for entities and topic
    */
   private async analyzeTitle(title: string): Promise<TitleAnalysis> {
     // For now, use local analysis as fallback

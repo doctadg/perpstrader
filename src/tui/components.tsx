@@ -131,6 +131,8 @@ export function FooterBar({ activeView, refreshInterval, loading }: FooterBarPro
     { key: '4', short: 'Risk' },
     { key: '5', short: 'Strat' },
     { key: '6', short: 'Pred' },
+    { key: '7', short: 'Ordr' },
+    { key: '8', short: 'Btst' },
   ];
 
   return (

@@ -31,19 +31,10 @@ class ConfigManager {
         timeout: parseInt(process.env.SEARCH_API_TIMEOUT || '30000')
       },
       glm: {
-        // GLM via OpenRouter
-        apiKey: process.env.OPENROUTER_API_KEY || process.env.GLM_API_KEY || '',
-        baseUrl: process.env.OPENROUTER_BASE_URL || process.env.GLM_BASE_URL || 'https://openrouter.ai/api/v1',
-        model: process.env.OPENROUTER_LABELING_MODEL || process.env.GLM_MODEL || 'z-ai/glm-4.7-flash',
-        timeout: parseInt(process.env.OPENROUTER_TIMEOUT || process.env.GLM_TIMEOUT || '60000')
-      },
-      openrouter: {
-        // All LLM calls go through OpenRouter
-        apiKey: process.env.OPENROUTER_API_KEY || '',
-        baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-        labelingModel: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
-        embeddingModel: process.env.OPENROUTER_EMBEDDING_MODEL || 'openai/text-embedding-3-small',
-        timeout: parseInt(process.env.OPENROUTER_TIMEOUT || '60000')
+        apiKey: process.env.GLM_API_KEY || '',
+        baseUrl: process.env.GLM_BASE_URL || 'config.glm.baseUrl',
+        model: process.env.GLM_MODEL || 'z-ai/glm-4.7-flash',
+        timeout: parseInt(process.env.GLM_TIMEOUT || '60000')
       },
       database: {
         type: 'sqlite',
@@ -104,14 +95,6 @@ class ConfigManager {
           if (!mergedConfig.glm.baseUrl) mergedConfig.glm.baseUrl = defaultConfig.glm.baseUrl;
           if (!mergedConfig.glm.model) mergedConfig.glm.model = defaultConfig.glm.model;
           if (!Number.isFinite(mergedConfig.glm.timeout)) mergedConfig.glm.timeout = defaultConfig.glm.timeout;
-        }
-        if (parsed.openrouter) {
-          mergedConfig.openrouter = { ...defaultConfig.openrouter, ...parsed.openrouter };
-          if (!mergedConfig.openrouter.apiKey) mergedConfig.openrouter.apiKey = defaultConfig.openrouter.apiKey;
-          if (!mergedConfig.openrouter.baseUrl) mergedConfig.openrouter.baseUrl = defaultConfig.openrouter.baseUrl;
-          if (!mergedConfig.openrouter.labelingModel) mergedConfig.openrouter.labelingModel = defaultConfig.openrouter.labelingModel;
-          if (!mergedConfig.openrouter.embeddingModel) mergedConfig.openrouter.embeddingModel = defaultConfig.openrouter.embeddingModel;
-          if (!Number.isFinite(mergedConfig.openrouter.timeout)) mergedConfig.openrouter.timeout = defaultConfig.openrouter.timeout;
         }
         if (parsed.searchApi) {
           mergedConfig.searchApi = { ...defaultConfig.searchApi, ...parsed.searchApi };

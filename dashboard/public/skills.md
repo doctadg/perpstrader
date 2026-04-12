@@ -589,12 +589,12 @@ HYPERLIQUID_TESTNET=false
 HYPERLIQUID_BASE_URL=https://api.hyperliquid.xyz
 
 # ============================================
-# OPTIONAL: OpenRouter (for embeddings/classification)
+# OPTIONAL: LLM Provider (for embeddings/classification)
 # ============================================
-OPENROUTER_API_KEY=REDACTED_SK_OR_PREFIX...
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_LABELING_MODEL=google/gemini-flash-1.5
-OPENROUTER_EMBEDDING_MODEL=text-embedding-3-small
+# GLM_API_KEY=your-key-here
+# GLM_BASE_URL=https://api.glm.ai/v1
+# GLM_LABELING_MODEL=z-ai/glm-4.7-flash
+# GLM_EMBEDDING_MODEL=text-embedding-3-small
 
 # ============================================
 # OPTIONAL: Redis (for message bus)
@@ -852,28 +852,26 @@ HYPERLIQUID_TESTNET=false  # Set to true for testnet
 
 **Security note:** Never share your private key. Store it in `.env` only.
 
-#### 2. OpenRouter (Required for AI Analysis)
+#### 2. LLM Provider (Required for AI Analysis)
 
 **What it's for:** Accessing LLMs for news analysis, strategy generation, and predictions
 
 **How to obtain:**
-1. Visit https://openrouter.ai
-2. Create an account
-3. Go to Settings → API Keys
-4. Generate a new API key
-5. Copy the key (starts with `REDACTED_SK_OR_PREFIX...`)
+1. Choose an LLM provider (e.g., GLM, OpenAI, Anthropic, etc.)
+2. Create an account and obtain an API key
+3. Configure the API key in your `.env` file
 
 **Environment variables:**
 ```bash
-OPENROUTER_API_KEY=REDACTED_SK_OR_PREFIXyour-key-here
+GLM_API_KEY=your-key-here
 ```
 
 **Models used:**
-- `google/gemini-2.0-flash-001` - Fast news analysis
-- `anthropic/claude-3.5-sonnet` - Strategy generation
-- `meta-llama/llama-3.3-70b-instruct` - Predictions
+- `z-ai/glm-4.7-flash` - Fast news analysis
+- Strategy generation model (provider-dependent)
+- Prediction model (provider-dependent)
 
-#### 3. GLM API (Alternative to OpenRouter)
+#### 3. GLM API (Alternative LLM Provider)
 
 **What it's for:** Chinese LLM for strategy generation (optional alternative)
 
@@ -977,13 +975,10 @@ HYPERLIQUID_ADDRESS=0x1234567890abcdef...
 HYPERLIQUID_TESTNET=false
 
 # ============================================
-# REQUIRED: AI/LLM (Choose OpenRouter OR GLM)
+# REQUIRED: AI/LLM Provider
 # ============================================
-# Option 1: OpenRouter (Recommended)
-OPENROUTER_API_KEY=REDACTED_SK_OR_PREFIXv1-1234567890abcdef...
-
-# Option 2: GLM (Alternative)
-# GLM_API_KEY=your_glm_key_here
+# Configure your preferred LLM provider
+GLM_API_KEY=your-key-here
 
 # ============================================
 # OPTIONAL: Notifications
@@ -1035,7 +1030,7 @@ TRADING_DB_PATH=./data/trading.db
 
 3. **Rotate keys regularly**
    - Hyperliquid: Generate new wallet for each deployment
-   - OpenRouter: Regenerate keys monthly
+   - LLM Provider: Regenerate keys monthly
    - Telegram: Revoke and recreate bot if compromised
 
 4. **Use environment-specific keys**
@@ -1043,7 +1038,7 @@ TRADING_DB_PATH=./data/trading.db
    - `.env.production` - Production keys (never shared)
 
 5. **Monitor usage**
-   - Check OpenRouter dashboard for unexpected usage
+   - Check LLM provider dashboard for unexpected usage
    - Monitor Hyperliquid wallet for unauthorized trades
 
 #### 5. Set Up Databases

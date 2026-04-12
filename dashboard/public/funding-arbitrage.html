@@ -40,7 +40,7 @@
         }
         .system-id {
             font-size: 10px;
-            color: #555;
+            color: var(--text-meta);
             letter-spacing: 0.5px;
         }
         .system-title {
@@ -69,7 +69,7 @@
             50% { opacity: 0.3; }
         }
         #connection-status { color: var(--terminal-green); font-weight: 600; font-size: 11px; }
-        #last-update-time { color: #555; }
+        #last-update-time { color: var(--text-meta); }
 
         /* === SUMMARY METRICS BAR === */
         .metrics-bar {
@@ -91,7 +91,7 @@
             font-size: 9px;
             text-transform: uppercase;
             letter-spacing: 1.2px;
-            color: #555;
+            color: var(--text-meta);
             font-weight: 500;
         }
         .metric-value {
@@ -106,7 +106,7 @@
         .metric-value.blue { color: #3b82f6; }
         .metric-sub {
             font-size: 9px;
-            color: #444;
+            color: var(--text-meta);
             font-weight: 400;
         }
 
@@ -127,7 +127,7 @@
         }
         .filter-label {
             font-size: 10px;
-            color: #555;
+            color: var(--text-meta);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
@@ -234,7 +234,7 @@
             font-size: 9px;
             text-transform: uppercase;
             letter-spacing: 1px;
-            color: #444;
+            color: var(--text-meta);
             font-weight: 500;
             padding: 7px 14px;
             text-align: left;
@@ -285,7 +285,7 @@
         }
         .coin-category {
             font-size: 9px;
-            color: #444;
+            color: var(--text-meta);
         }
 
         /* === RATE DISPLAY === */
@@ -337,7 +337,7 @@
         .trend-arrow { font-size: 10px; }
         .trend-up { background: rgba(248,113,113,0.08); color: #f87171; }
         .trend-down { background: rgba(74,222,128,0.08); color: #4ade80; }
-        .trend-stable { background: rgba(255,255,255,0.03); color: #555; }
+        .trend-stable { background: rgba(255,255,255,0.03); color: var(--text-meta); }
 
         /* === ACTION BUTTONS === */
         .action-btns {
@@ -365,7 +365,7 @@
         /* === PROFIT COLOR BANDS (for cross-exchange) === */
         .profit-high { color: #4ade80 !important; }
         .profit-medium { color: #f59e0b !important; }
-        .profit-low { color: #555 !important; }
+        .profit-low { color: var(--text-meta) !important; }
 
         /* === EXCHANGE STATUS === */
         .exchange-status {
@@ -1032,16 +1032,16 @@
                                 <div><span class="coin-symbol">${opp.symbol}</span></div>
                             </div>
                         </td>
-                        <td><span style="font-size: 10px; color: #555;">${pairLabel}</span></td>
+                        <td><span style="font-size: 10px; color: var(--text-meta);">${pairLabel}</span></td>
                         <td>
                             <div>
-                                <span style="display: block; font-size: 9px; color: #444; margin-bottom: 2px;">${exchangeAName}</span>
+                                <span style="display: block; font-size: 9px; color: var(--text-meta); margin-bottom: 2px;">${exchangeAName}</span>
                                 <span class="rate-value" style="color: ${rateAColor}">${rateA}%</span>
                             </div>
                         </td>
                         <td>
                             <div>
-                                <span style="display: block; font-size: 9px; color: #444; margin-bottom: 2px;">${exchangeBName}</span>
+                                <span style="display: block; font-size: 9px; color: var(--text-meta); margin-bottom: 2px;">${exchangeBName}</span>
                                 <span class="rate-value" style="color: ${rateBColor}">${rateB}%</span>
                             </div>
                         </td>

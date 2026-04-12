@@ -197,7 +197,7 @@
                             <span class="trace-symbol">${t.symbol || '?'}</span>
                             <span class="trace-status ${t.tradeExecuted ? 'exec' : 'idle'}">${t.tradeExecuted ? 'EXEC' : 'IDLE'}</span>
                         </div>
-                        <div style="color:#444;font-size:0.7em;margin-top:4px">${t.regime || ''} • ${new Date(t.startTime).toLocaleTimeString()}</div>
+                        <div style="color:var(--text-meta);font-size:0.7em;margin-top:4px">${t.regime || ''} • ${new Date(t.startTime).toLocaleTimeString()}</div>
                     </div>
                 `).join('');
         }
@@ -439,7 +439,7 @@
     <!-- Swipe Navigation Hint -->
     <div class="swipe-hint show-mobile" style="position: fixed; top: 60px; left: 0; right: 0; z-index: 100;">
         <span class="swipe-hint-icon left">‹</span>
-        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
+        <span style="font-size: 0.7em; color: var(--text-meta);">SWIPE</span>
         <span class="swipe-hint-icon right">›</span>
     </div>
 </body>

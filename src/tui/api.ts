@@ -18,6 +18,8 @@ export interface ApiData {
   predictions: any;
   risk: any;
   strategies: any;
+  orders?: any;
+  backtest?: any;
 }
 
 // =============================================================================
@@ -120,6 +122,69 @@ export async function fetchAllData(): Promise<{ data: ApiData; connected: boolea
   } catch {
     return { data: empty, connected: false };
   }
+}
+
+// =============================================================================
+// POST Helper (for actions)
+// =============================================================================
+
+async function apiPost<T>(path: string, body?: any, timeoutMs = 8000): Promise<T | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+// =============================================================================
+// Action Endpoints
+// =============================================================================
+
+export async function closePosition(positionId: string): Promise<any> {
+  return apiPost(`/api/agent/close/${positionId}`);
+}
+
+export async function cancelOrder(orderId: string): Promise<any> {
+  return apiPost('/api/agent/orders/cancel', { orderId });
+}
+
+export async function emergencyStop(): Promise<any> {
+  return apiPost('/api/agent/emergency-stop');
+}
+
+export async function triggerCycle(symbol?: string): Promise<any> {
+  return apiPost('/api/agent/cycle/trigger', symbol ? { symbol } : {});
+}
+
+export async function startAgent(agentName: string): Promise<any> {
+  return apiPost(`/api/agent/start/${agentName}`);
+}
+
+export async function stopAgent(agentName: string): Promise<any> {
+  return apiPost(`/api/agent/stop/${agentName}`);
+}
+
+export async function fetchOrders(): Promise<any> {
+  return apiFetch<{ orders: any[]; total: number }>('/api/agent/orders');
+}
+
+export async function fetchBacktestHistory(): Promise<any> {
+  return apiFetch<{ runs: any[]; total: number }>('/api/agent/backtest/history');
 }
 
 export function getApiUrl(): string {

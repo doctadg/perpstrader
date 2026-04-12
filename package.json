@@ -1,20 +1,23 @@
 {
   "name": "perps-trader",
   "version": "2.0.0",
-  "description": "Agent-first autonomous hedge fund — modular AI trading floor for Hyperliquid",
+  "description": "Agent-first modular AI trading floor for Hyperliquid — robust agents with tunable parameters",
   "main": "bin/main.js",
   "scripts": {
     "start": "node bin/main.js",
     "start:predictions": "node bin/prediction-agent.js",
     "start:pumpfun": "node bin/pumpfun-agent/index.js",
     "start:news-agent": "node bin/news-agent.js",
-    "start:dashboard": "node bin/dashboard-server.js",
+    "start:dashboard": "node bin/main.js --dashboard-only",
     "wallets:setup": "ts-node src/safekeeping-fund/wallet-setup.ts",
     "wallets:openclaw": "node scripts/openclaw-wallets.js addresses",
     "wallets:openclaw:env": "node scripts/openclaw-wallets.js export-env",
     "dev": "node --watch bin/main.js",
-    "build": "npm run build:typescript",
-    "build:typescript": "tsc; R=$?; if [ $R -eq 2 ] && ls bin/main.js >/dev/null 2>&1; then echo 'Build emitted (ignoring ox type errors)'; exit 0; elif [ $R -ne 0 ]; then exit $R; fi",
+    "build": "npm run build:esbuild && npm run build:cli",
+    "build:esbuild": "npx esbuild src/main.ts --bundle --platform=node --outfile=bin/main.js --format=cjs --external:better-sqlite3 --external:sharp --external:sqlite3 --external:pino-pretty && npx esbuild src/news-agent/index.ts --bundle --platform=node --outfile=bin/news-agent.js --format=cjs --external:better-sqlite3 --external:sharp --external:sqlite3 --external:pino-pretty && npx esbuild src/prediction-agent.ts --bundle --platform=node --outfile=bin/prediction-agent.js --format=cjs --external:better-sqlite3 --external:sharp --external:sqlite3 --external:pino-pretty && npx esbuild src/tui/index.tsx --bundle --platform=node --outfile=bin/perps-tui.js --format=cjs --jsx=automatic --external:better-sqlite3 --external:sharp --external:sqlite3 --external:pino-pretty",
+    "build:cli": "npx esbuild src/cli/perps-cli.ts --bundle --platform=node --outfile=bin/perps.js --format=cjs",
+    "build:tsc": "tsc",
+    "typecheck": "tsc --noEmit",
     "test": "bash scripts/test.sh",
     "test:unit": "jest --runInBand",
     "test:ingestion": "ts-node scripts/test-ingestion-reliability.ts",
@@ -32,7 +35,8 @@
     "tui:build": "tsc --outDir ./bin --project tsconfig.json"
   },
   "bin": {
-    "perps-tui": "bin/perps-tui.js"
+    "perps-tui": "bin/perps-tui.js",
+    "perps": "./bin/perps.js"
   },
   "dependencies": {
     "@langchain/core": "^1.1.8",
@@ -41,6 +45,7 @@
     "@nktkas/hyperliquid": "^0.17.0",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.95.0",
+    "@types/commander": "^2.12.0",
     "@uniswap/sdk-core": "^7.10.1",
     "@uniswap/v3-sdk": "^3.27.0",
     "axios": "^1.6.2",
@@ -50,6 +55,7 @@
     "ccxt": "^4.1.48",
     "chalk": "^4.1.2",
     "chromadb": "^3.2.0",
+    "commander": "^14.0.3",
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "express-rate-limit": "^8.3.2",
@@ -62,6 +68,7 @@
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.66.0",
+    "ox": "0.11.3",
     "pino": "^10.3.1",
     "react": "^17.0.2",
     "sharp": "^0.34.5",

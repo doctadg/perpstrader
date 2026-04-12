@@ -3,7 +3,7 @@
 // Supports the semantic clustering system
 
 import logger from '../shared/logger';
-import openrouterService from '../shared/openrouter-service';
+import llmService from '../shared/llm-service';
 
 export interface ExtractedEntity {
   name: string;
@@ -318,7 +318,7 @@ class EnhancedEntityExtractor {
    * Extract entities using LLM for higher accuracy
    */
   async extractWithLLM(title: string, content?: string): Promise<ExtractedEntity[]> {
-    if (!openrouterService.canUseService()) {
+    if (!llmService.canUseService()) {
       return [];
     }
 
@@ -357,7 +357,7 @@ Return JSON only:
   "primaryEntity": "The main entity this article is about"
 }`;
 
-      const response = await openrouterService.generateEventLabel({
+      const response = await llmService.generateEventLabel({
         title,
         content: content?.slice(0, 500),
         category: 'GENERAL'
@@ -403,7 +403,7 @@ Return JSON only:
 
     // Try LLM extraction if available
     let llmEntities: ExtractedEntity[] = [];
-    if (openrouterService.canUseService()) {
+    if (llmService.canUseService()) {
       llmEntities = await this.extractWithLLM(title, content);
     }
 

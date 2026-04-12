@@ -7,32 +7,38 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 mkdir -p "$METRICS_DIR"
 
+# Check if database exists and has data
+if [ ! -f "$PROJECT_ROOT/data/pumpfun.db" ]; then
+    echo "❌ No pumpfun database found"
+    exit 1
+fi
+
+# Get basic stats
+TOTAL_TRADES=$(sqlite3 "$PROJECT_ROOT/data/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes;" 2>/dev/null || echo "0")
+WINNING_TRADES=$(sqlite3 "$PROJECT_ROOT/data/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE pnl_pct > 0;" 2>/dev/null || echo "0")
+LOSING_TRADES=$(sqlite3 "$PROJECT_ROOT/data/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE pnl_pct <= 0;" 2>/dev/null || echo "0")
+QUICK_RUGS=$(sqlite3 "$PROJECT_ROOT/data/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE hold_time_minutes < 5;" 2>/dev/null || echo "0")
+
 # Create comprehensive metrics report
-cat > "/tmp/pumpfun-stats-$TIMESTAMP.json" << JSON_EOF
+cat > "$METRICS_DIR/pumpfun-stats-$TIMESTAMP.json" << JSON_EOF
 {
   "export_timestamp": "$(date -Iseconds)",
-  "total_trades": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes;"),
-  "winning_trades": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE pnl_pct > 0;"),
-  "losing_trades": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE pnl_pct <= 0;"),
-  "total_sol_pnl": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT SUM(pnl_sol) FROM pumpfun_trade_outcomes;"),
-  "avg_pnl_pct": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT AVG(pnl_pct) FROM pumpfun_trade_outcomes;"),
-  "quick_rugs": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE hold_time_minutes < 5;"),
-  "avg_hold_time": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT AVG(hold_time_minutes) FROM pumpfun_trade_outcomes;"),
-  "score_distribution": {
-    "0.00-0.29": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score < 0.3;"),
-    "0.30-0.39": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.3 AND entry_score < 0.4;"),
-    "0.40-0.49": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.4 AND entry_score < 0.5;"),
-    "0.50-0.59": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.5 AND entry_score < 0.6;"),
-    "0.60-0.69": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.6 AND entry_score < 0.7;"),
-    "0.70+": $(sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT COUNT(*) FROM pumpfun_trade_outcomes WHERE entry_score >= 0.7;")
-  }
+  "total_trades": $TOTAL_TRADES,
+  "winning_trades": $WINNING_TRADES,
+  "losing_trades": $LOSING_TRADES,
+  "quick_rugs": $QUICK_RUGS,
+  "quick_rug_rate": $(echo "scale=1; $QUICK_RUGS * 100 / $TOTAL_TRADES" | bc -l 2>/dev/null || echo "0"),
+  "win_rate": $(echo "scale=1; $WINNING_TRADES * 100 / $TOTAL_TRADES" | bc -l 2>/dev/null || echo "0"),
+  "threshold": $(grep -o "PUMPFUN_MIN_BUY_SCORE=[0-9.]*" .env 2>/dev/null | cut -d= -f2 || echo "0.35")
 }
 JSON_EOF
 
-cp "/tmp/pumpfun-stats-$TIMESTAMP.json" "$METRICS_DIR/"
+# Create latest symlink
 ln -sf "$METRICS_DIR/pumpfun-stats-$TIMESTAMP.json" "$PROJECT_ROOT/data/pumpfun-metrics-latest.json"
-rm "/tmp/pumpfun-stats-$TIMESTAMP.json"
 
 echo "✅ Metrics exported to: $METRICS_DIR/"
 echo "📈 Summary:"
-sqlite3 "$PROJECT_ROOT/pumpfun.db" "SELECT 'Total Trades: ' || COUNT(*) as total, 'Win Rate: ' || ROUND(CAST(COUNT(CASE WHEN pnl_pct > 0 THEN 1 END) AS REAL) / COUNT(*) * 100, 1) || '%' as win_rate, 'Avg PnL%: ' || ROUND(AVG(pnl_pct), 2) as avg_pnl FROM pumpfun_trade_outcomes;"
+echo "Total Trades: $TOTAL_TRADES"
+echo "Win Rate: $(echo "scale=1; $WINNING_TRADES * 100 / $TOTAL_TRADES" | bc -l 2>/dev/null || echo "0")%"
+echo "Quick Rugs: $QUICK_RUGS ($(echo "scale=1; $QUICK_RUGS * 100 / $TOTAL_TRADES" | bc -l 2>/dev/null || echo "0")%)"
+echo "Current Threshold: $(grep -o "PUMPFUN_MIN_BUY_SCORE=[0-9.]*" .env 2>/dev/null | cut -d= -f2 || echo "0.35")"

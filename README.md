@@ -307,9 +307,9 @@ TRADING_EXCLUDED_SYMBOLS=               # Comma-separated symbols to skip
 TRADING_CYCLE_INTERVAL_MS=60000         # Milliseconds between cycles
 
 # ── AI / LLM ──
-OPENROUTER_API_KEY=sk-or-...            # OpenRouter API key
-GLM_MODEL=z-ai/glm-4.7-flash            # Default LLM model
-OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
+GLM_API_KEY=***                     # Your LLM API key
+GLM_MODEL=z-ai/glm-4.7-flash        # Default LLM model
+GLM_EMBEDDING_MODEL=openai/text-embedding-3-small
 
 # ── Redis ──
 REDIS_HOST=localhost

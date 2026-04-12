@@ -1,5 +1,5 @@
 // Safekeeping Fund System - AI Analysis Node
-// Uses OpenRouter for AI-powered market analysis and recommendations
+// Uses LLM for AI-powered market analysis and recommendations
 
 import logger from '../../shared/logger';
 import axios from 'axios';
@@ -10,7 +10,7 @@ const config = (global as any).config || require('../../shared/config').default?
 
 /**
  * AI Analysis Node
- * Leverages OpenRouter to analyze market conditions and provide recommendations
+ * Leverages LLM to analyze market conditions and provide recommendations
  */
 export async function aiAnalysisNode(
   state: SafekeepingFundState
@@ -18,13 +18,13 @@ export async function aiAnalysisNode(
   logger.info('[AIAnalysis] Starting AI-powered market analysis');
 
   try {
-    // Check if OpenRouter is available via config
-    const apiKey = config.openrouter?.apiKey;
+    // Check if LLM is available via config
+    const apiKey = config.llm?.apiKey;
     if (!apiKey) {
-      logger.warn('[AIAnalysis] OpenRouter not available, skipping AI analysis');
+      logger.warn('[AIAnalysis] LLM not available, skipping AI analysis');
       return {
         currentStep: 'AI_ANALYSIS_SKIPPED',
-        thoughts: [...state.thoughts, 'AI analysis skipped - OpenRouter not configured'],
+        thoughts: [...state.thoughts, 'AI analysis skipped - LLM not configured'],
       };
     }
 
@@ -62,10 +62,10 @@ export async function aiAnalysisNode(
 }
 
 /**
- * Perform AI analysis using OpenRouter
+ * Perform AI analysis using LLM
  */
 async function performAIAnalysis(state: SafekeepingFundState): Promise<AIAnalysis> {
-  const apiKey = config.openrouter?.apiKey;
+  const apiKey = config.llm?.apiKey;
   if (!apiKey) {
     return getFallbackAnalysis();
   }
@@ -74,9 +74,9 @@ async function performAIAnalysis(state: SafekeepingFundState): Promise<AIAnalysi
 
   try {
     const response = await axios.post(
-      `${config.openrouter?.baseUrl || 'https://openrouter.ai/api/v1'}/chat/completions`,
+      `${config.glm.baseUrl || 'config.glm.baseUrl'}/chat/completions`,
       {
-        model: config.openrouter?.labelingModel || 'z-ai/glm-4.7-flash',
+        model: config.glm.model || 'z-ai/glm-4.7-flash',
         messages: [
           {
             role: 'system',
@@ -103,7 +103,7 @@ async function performAIAnalysis(state: SafekeepingFundState): Promise<AIAnalysi
 
     return parseAIResponse(response.data.choices[0]?.message?.content || '');
   } catch (error) {
-    logger.debug(`[AIAnalysis] OpenRouter request failed: ${error}`);
+    logger.debug(`[AIAnalysis] LLM request failed: ${error}`);
     return getFallbackAnalysis();
   }
 }

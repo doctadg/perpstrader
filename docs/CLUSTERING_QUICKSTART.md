@@ -180,7 +180,7 @@ Monitor these in your logs:
 
 **Solutions:**
 1. Lower `SEMANTIC_SIMILARITY_THRESHOLD` to 0.60
-2. Check OpenRouter API connectivity
+2. Check LLM API connectivity
 3. Verify embedding generation is working
 
 ### Issue: Too many clusters

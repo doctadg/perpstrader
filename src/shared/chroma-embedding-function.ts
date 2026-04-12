@@ -44,7 +44,7 @@ export class ManualPatternEmbeddingFunction {
 
 /**
  * Embedding function for news collections (e.g., global_news_local_64).
- * These use OpenRouter or local hash embeddings, always passed directly.
+ * These use LLM embeddings or local hash embeddings, always passed directly.
  */
 export class ManualNewsEmbeddingFunction {
     readonly name = 'manual-news-embed';

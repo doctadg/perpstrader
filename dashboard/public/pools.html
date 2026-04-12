@@ -67,7 +67,7 @@
     <!-- Swipe Navigation Hint -->
     <div class="swipe-hint show-mobile">
         <span class="swipe-hint-icon left">‹</span>
-        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
+        <span style="font-size: 0.7em; color: var(--text-meta);">SWIPE</span>
         <span class="swipe-hint-icon right">›</span>
     </div>
 
@@ -195,7 +195,7 @@
                             </thead>
                             <tbody id="opportunities-tbody">
                                 <tr class="empty-state">
-                                    <td colspan="6" style="text-align: center; color: #555; padding: 40px;">
+                                    <td colspan="6" style="text-align: center; color: var(--text-meta); padding: 40px;">
                                         // SCANNING_FOR_OPPORTUNITIES...
                                     </td>
                                 </tr>
@@ -224,7 +224,7 @@
                             </thead>
                             <tbody id="positions-tbody">
                                 <tr class="empty-state">
-                                    <td colspan="6" style="text-align: center; color: #555; padding: 40px;">
+                                    <td colspan="6" style="text-align: center; color: var(--text-meta); padding: 40px;">
                                         // NO_ACTIVE_POSITIONS
                                     </td>
                                 </tr>
@@ -254,7 +254,7 @@
                             </thead>
                             <tbody id="rebalance-tbody">
                                 <tr class="empty-state">
-                                    <td colspan="7" style="text-align: center; color: #555; padding: 20px;">
+                                    <td colspan="7" style="text-align: center; color: var(--text-meta); padding: 20px;">
                                         // NO_REBALANCE_HISTORY
                                     </td>
                                 </tr>
@@ -319,7 +319,7 @@
                     </div>
                     <div class="panel-body">
                         <div id="anomalies-container" style="padding: 16px;">
-                            <div style="text-align: center; color: #555; padding: 20px; font-family: var(--font-mono); font-size: 0.8em;">
+                            <div style="text-align: center; color: var(--text-meta); padding: 20px; font-family: var(--font-mono); font-size: 0.8em;">
                                 // NO_ANOMALIES_DETECTED
                             </div>
                         </div>
@@ -536,7 +536,7 @@
         function updateOpportunities(opportunities) {
             const tbody = document.getElementById('opportunities-tbody');
             if (!opportunities.length) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #555; padding: 40px;">// NO_OPPORTUNITIES_FOUND</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-meta); padding: 40px;">// NO_OPPORTUNITIES_FOUND</td></tr>';
                 return;
             }
 
@@ -561,7 +561,7 @@
         function updatePositions(positions) {
             const tbody = document.getElementById('positions-tbody');
             if (!positions.length) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #555; padding: 40px;">// NO_ACTIVE_POSITIONS</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-meta); padding: 40px;">// NO_ACTIVE_POSITIONS</td></tr>';
                 return;
             }
 
@@ -580,7 +580,7 @@
         function updateRebalances(rebalances) {
             const tbody = document.getElementById('rebalance-tbody');
             if (!rebalances.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #555; padding: 20px;">// NO_REBALANCE_HISTORY</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-meta); padding: 20px;">// NO_REBALANCE_HISTORY</td></tr>';
                 return;
             }
 
@@ -629,7 +629,7 @@
                     </div>
                 `).join('');
             } else {
-                anomaliesContainer.innerHTML = '<div style="text-align: center; color: #555; padding: 20px; font-family: var(--font-mono); font-size: 0.8em;">// NO_ANOMALIES_DETECTED</div>';
+                anomaliesContainer.innerHTML = '<div style="text-align: center; color: var(--text-meta); padding: 20px; font-family: var(--font-mono); font-size: 0.8em;">// NO_ANOMALIES_DETECTED</div>';
             }
         }
 

@@ -3,7 +3,7 @@
 
 import { Worker, Job } from 'bullmq';
 import redisCache from '../shared/redis-cache';
-import openrouterService from '../shared/openrouter-service';
+import llmService from '../shared/llm-service';
 import glmService from '../shared/glm-service';
 import { getTitleFingerprint } from '../shared/title-cleaner';
 import logger from '../shared/logger';
@@ -48,11 +48,11 @@ async function processCategorizeBatch(job: Job): Promise<any> {
 
   logger.info(`[NewsWorker] Cache hit: ${cachedResults.size}/${articles.length}`);
 
-  // Process uncached articles with OpenRouter
+  // Process uncached articles with LLM
   let results = new Map(cachedResults);
 
   if (uncached.length > 0) {
-    const llmResults = await openrouterService.categorizeArticles(uncached);
+    const llmResults = await llmService.categorizeArticles(uncached);
 
     // Store results in cache
     for (const [id, result] of llmResults) {
@@ -101,7 +101,7 @@ async function processLabelBatch(job: Job): Promise<any> {
   let results = new Map(cachedResults);
 
   if (uncached.length > 0) {
-    const llmResults = await openrouterService.batchEventLabels(uncached);
+    const llmResults = await llmService.batchEventLabels(uncached);
 
     // Store results in cache
     for (const [id, result] of llmResults) {
@@ -152,7 +152,7 @@ async function processEmbedBatch(job: Job): Promise<any> {
     // Generate embeddings in parallel
     const embeddings = await Promise.all(
       uncached.map(async (item) => {
-        const embedding = await openrouterService.generateEmbedding(item.text);
+        const embedding = await llmService.generateEmbedding(item.text);
         if (embedding) {
           await redisCache.setEmbedding(item.text, embedding);
         }

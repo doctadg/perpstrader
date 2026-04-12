@@ -987,7 +987,7 @@ class BondingCurveService {
    */
   
     // Map exit reasons to outcomes
-    const outcomeMap: Record<string, string> = {
+    outcomeMap: Record<string, string> = {
         'STOP_LOSS': 'LOSS_STOP',
         'STALE_EXIT': 'STALE_EXIT', 
         'TIME_EXIT': 'TIME_EXIT',

@@ -5,7 +5,9 @@
     "lib": ["ES2022"],
     "outDir": "./bin",
     "rootDir": "./src",
+    // TODO: Enable strict mode — see tsconfig.strict.json for progress
     "strict": false,
+    "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

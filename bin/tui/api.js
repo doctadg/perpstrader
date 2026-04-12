@@ -5,6 +5,14 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkConnection = checkConnection;
 exports.fetchAllData = fetchAllData;
+exports.closePosition = closePosition;
+exports.cancelOrder = cancelOrder;
+exports.emergencyStop = emergencyStop;
+exports.triggerCycle = triggerCycle;
+exports.startAgent = startAgent;
+exports.stopAgent = stopAgent;
+exports.fetchOrders = fetchOrders;
+exports.fetchBacktestHistory = fetchBacktestHistory;
 exports.getApiUrl = getApiUrl;
 const API_BASE = process.env.AGENT_API_URL || 'http://localhost:3001';
 const API_KEY = process.env.AGENT_API_KEY || 'perpstrader-dev-key';
@@ -104,6 +112,59 @@ async function fetchAllData() {
         return { data: empty, connected: false };
     }
 }
+// =============================================================================
+// POST Helper (for actions)
+// =============================================================================
+async function apiPost(path, body, timeoutMs = 8000) {
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(`${API_BASE}${path}`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: body ? JSON.stringify(body) : undefined,
+            signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok)
+            return null;
+        return (await res.json());
+    }
+    catch {
+        return null;
+    }
+}
+// =============================================================================
+// Action Endpoints
+// =============================================================================
+async function closePosition(positionId) {
+    return apiPost(`/api/agent/close/${positionId}`);
+}
+async function cancelOrder(orderId) {
+    return apiPost('/api/agent/orders/cancel', { orderId });
+}
+async function emergencyStop() {
+    return apiPost('/api/agent/emergency-stop');
+}
+async function triggerCycle(symbol) {
+    return apiPost('/api/agent/cycle/trigger', symbol ? { symbol } : {});
+}
+async function startAgent(agentName) {
+    return apiPost(`/api/agent/start/${agentName}`);
+}
+async function stopAgent(agentName) {
+    return apiPost(`/api/agent/stop/${agentName}`);
+}
+async function fetchOrders() {
+    return apiFetch('/api/agent/orders');
+}
+async function fetchBacktestHistory() {
+    return apiFetch('/api/agent/backtest/history');
+}
 function getApiUrl() {
     return API_BASE;
 }
+//# sourceMappingURL=api.js.map

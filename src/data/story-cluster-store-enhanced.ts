@@ -1246,7 +1246,7 @@ class StoryClusterStoreEnhanced {
             }
 
             // FIX: Fallback — prefix search for first 50 chars of topicKey.
-            // Handles cases where OpenRouter truncates topics differently,
+            // Handles cases where LLM truncates topics differently,
             // or where WAL snapshot isolation delays visibility of new rows.
             const prefix = topicKey.slice(0, 50);
             if (prefix.length >= 20) {

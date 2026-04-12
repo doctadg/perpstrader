@@ -47,7 +47,7 @@ export class PumpFunOrchestrator {
         };
       }
 
-      // Step 3: Run OpenRouter website-first analysis
+      // Step 3: Run LLM website-first analysis
       state = { ...state, ...await analyzeNode(state) };
 
       if (state.analyzedTokens.length === 0) {

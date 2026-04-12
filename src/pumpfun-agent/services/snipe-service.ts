@@ -608,7 +608,7 @@ class SnipeService {
         // ── RUGCHECK LIVE MONITORING (every ~2 min via 5s loop interval) ──
         // Only check RugCheck if position is older than 1 min and check every ~24th iteration
         // This avoids hammering the API while still catching rugs in real-time
-        if (ageMinutes > 1 && position.rugChecksPerformed === undefined) {
+        if (ageMinutes > 1 && (position as any).rugChecksPerformed === undefined) {
           (position as any).rugChecksPerformed = 0;
         }
         const rugCheckInterval = 24; // Every ~2 minutes at 5s polling

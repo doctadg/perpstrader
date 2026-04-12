@@ -4,7 +4,7 @@
 
 import { NewsAgentState, LabeledArticle, FilteredArticle } from '../state';
 import logger from '../../shared/logger';
-import openrouterService from '../../shared/openrouter-service';
+import llmService from '../../shared/llm-service';
 
 /**
  * Reject patterns for topic validation
@@ -256,9 +256,9 @@ async function generateTopic(article: FilteredArticle, timeoutMs: number = 8000)
     const config = (await import('../../shared/config')).default.get();
 
     const response = await axios.post(
-      `${config.openrouter.baseUrl}/chat/completions`,
+      `${config.glm.baseUrl}/chat/completions`,
       {
-        model: process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash',
+        model: process.env.GLM_MODEL || 'z-ai/glm-4.7-flash',
         messages: [
           {
             role: 'system',
@@ -274,7 +274,7 @@ async function generateTopic(article: FilteredArticle, timeoutMs: number = 8000)
       },
       {
         headers: {
-          'Authorization': `Bearer ${config.openrouter.apiKey}`,
+          'Authorization': `Bearer ${config.glm.apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://perps-trader.ai',
           'X-Title': 'PerpsTrader News System',

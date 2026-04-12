@@ -1136,6 +1136,7 @@ class PumpFunStore {
       analyzedAt: new Date(row.analyzed_at),
       cycleId: row.cycle_id,
       errors: [],
+      rugcheckScore: 0,
     };
   }
 

@@ -88,9 +88,9 @@ exports.box = {
 function formatUSD(value) {
     const prefix = value > 0 ? '+' : value < 0 ? '-' : '';
     const abs = Math.abs(value);
-    if (abs >= 1000000)
-        return `${prefix}$${(abs / 1000000).toFixed(2)}M`;
-    if (abs >= 1000)
+    if (abs >= 1_000_000)
+        return `${prefix}$${(abs / 1_000_000).toFixed(2)}M`;
+    if (abs >= 1_000)
         return `${prefix}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return `${prefix}$${abs.toFixed(2)}`;
 }
@@ -209,3 +209,4 @@ function sentimentColor(sentiment) {
             return exports.colors.yellow;
     }
 }
+//# sourceMappingURL=theme.js.map

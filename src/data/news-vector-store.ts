@@ -8,7 +8,7 @@ import { exec } from 'child_process';
 import util from 'util';
 import { embedText } from '../shared/local-embeddings';
 import { deriveTrend } from '../shared/news-trend';
-import openrouterService from '../shared/openrouter-service';
+import llmService from '../shared/llm-service';
 import { ensureEmbeddingFunctionsRegistered, ManualNewsEmbeddingFunction } from '../shared/chroma-embedding-function';
 
 const execAsync = util.promisify(exec);
@@ -171,20 +171,20 @@ export class NewsVectorStore {
 
     /**
      * Generate embedding for article text
-     * Tries OpenRouter first (semantic), falls back to local (feature hashing)
+     * Tries LLM embeddings first (semantic), falls back to local (feature hashing)
      */
     private async generateEmbedding(text: string): Promise<number[] | null> {
         const safeText = (text || '').slice(0, 8000);
 
-        // Try OpenRouter embeddings first (better semantic quality)
+        // Try LLM embeddings first (better semantic quality)
         try {
-            const openrouterEmbedding = await openrouterService.generateEmbedding(safeText);
-            if (openrouterEmbedding && openrouterEmbedding.length > 0) {
-                logger.debug('[NewsVectorStore] Using OpenRouter embedding');
-                return openrouterEmbedding;
+            const llmEmbedding = await llmService.generateEmbedding(safeText);
+            if (llmEmbedding && llmEmbedding.length > 0) {
+                logger.debug('[NewsVectorStore] Using LLM embedding');
+                return llmEmbedding;
             }
         } catch (error) {
-            logger.debug('[NewsVectorStore] OpenRouter embedding failed, falling back to local');
+            logger.debug('[NewsVectorStore] LLM embedding failed, falling back to local');
         }
 
         // Fallback to local embeddings

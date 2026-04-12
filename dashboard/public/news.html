@@ -487,7 +487,7 @@
     <!-- Swipe Navigation Hint -->
     <div class="swipe-hint show-mobile">
         <span class="swipe-hint-icon left">‹</span>
-        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
+        <span style="font-size: 0.7em; color: var(--text-meta);">SWIPE</span>
         <span class="swipe-hint-icon right">›</span>
     </div>
 
@@ -736,7 +736,7 @@
             const container = document.getElementById('newsFeed');
 
             if (news.length === 0) {
-                container.innerHTML = '<div style="padding: 100px; text-align: center; font-family: var(--font-mono); color: #555;">NO_INTELLIGENCE_DATA_FOUND</div>';
+                container.innerHTML = '<div style="padding: 100px; text-align: center; font-family: var(--font-mono); color: var(--text-meta);">NO_INTELLIGENCE_DATA_FOUND</div>';
                 return;
             }
 
@@ -764,7 +764,7 @@
                                 ${item.summary.length > 250 ? item.summary.substring(0, 250) + '...' : item.summary}
                             </div>
                         ` : `
-                            <div class="news-summary" style="font-style: italic; color: #555;">
+                            <div class="news-summary" style="font-style: italic; color: var(--text-meta);">
                                 ${item.snippet}
                             </div>
                         `}
@@ -837,16 +837,16 @@
                 const content = article.content || article.snippet;
                 contentEl.innerHTML = content ?
                     content.split('\n').map(p => `<p style="margin-bottom: 20px;">${p}</p>`).join('') :
-                    `<p style="font-style: italic; color: #555;">Full content unavailable.</p>`;
+                    `<p style="font-style: italic; color: var(--text-meta);">Full content unavailable.</p>`;
 
                 detailsEl.innerHTML = `
                     <div>STATUS: <span style="color: var(--good)">VERIFIED</span></div>
                     <div>TIMESTAMP: ${article.createdAt ? new Date(article.createdAt).toLocaleString() : 'UNKNOWN'}</div>
                     <div>IMPORTANCE: <span class="badge imp-badge imp-${(article.importance || 'MEDIUM').toLowerCase()}">${article.importance || 'MEDIUM'}</span></div>
                     <div>SENTIMENT: <span class="sentiment sent-${(article.sentiment || 'NEUTRAL').toLowerCase()}">${article.sentiment || 'NEUTRAL'}</span></div>
-                    <div style="margin-top: 10px; color: #555;">CATEGORIES:</div>
+                    <div style="margin-top: 10px; color: var(--text-meta);">CATEGORIES:</div>
                     <div style="padding-left: 10px;">${(article.categories || []).join(', ') || 'NONE'}</div>
-                    <div style="margin-top: 10px; color: #555;">SYSTEM_TAGS:</div>
+                    <div style="margin-top: 10px; color: var(--text-meta);">SYSTEM_TAGS:</div>
                     <div style="padding-left: 10px;">${(article.tags || []).join(', ') || 'NONE'}</div>
                 `;
 

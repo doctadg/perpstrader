@@ -872,7 +872,7 @@ class DashboardServer {
     this.app.get('/api/cache/stats', async (req, res) => {
       try {
         const cacheStats = await redisCache.getStats();
-        const llmStats = (require('../shared/openrouter-service') as any).default?.getCacheStats?.() || {
+        const llmStats = (require('../shared/llm-service') as any).default?.getCacheStats?.() || {
           hits: 0,
           misses: 0,
           hitRate: 0,
@@ -1146,7 +1146,7 @@ class DashboardServer {
           byCategory: {},
           llm: {
             enabled: false,
-            model: configManager.get().openrouter.labelingModel,
+            model: configManager.get().glm.model,
             labeledArticles: 0,
             coverage: 0,
           },

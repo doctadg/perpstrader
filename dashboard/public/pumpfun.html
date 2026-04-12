@@ -4,103 +4,489 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PERPS_TRADER // PUMPFUN_ANALYZER</title>
+    <title>PERPS_TRADER // PUMPFUN_SCANNER</title>
     <script src="/js/universal-nav.js"></script>
     <link rel="stylesheet" href="/css/mobile-responsive.css">
     <link rel="stylesheet" href="/css/mobile-native.css">
     <script src="/js/mobile-enhancements.js"></script>
     <script src="/js/mobile-native.js"></script>
-        <style>
-        body::before { display: none !important; }
+    <style>
+        /* ── PumpFun Scanner Dashboard ── */
+        body.unified-theme.page-pumpfun .container {
+            width: 100%;
+            max-width: 1920px;
+            margin: 0 auto;
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
 
-        .stat-value { color: var(--text-primary, rgba(255,255,255,0.9)); }
+        /* ── Top Bar ── */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-low);
+        }
+        .top-bar .left { display: flex; align-items: center; gap: 16px; }
+        .top-bar .system-id { font-size: 11px; color: var(--text-meta, #666); letter-spacing: 0.06em; font-family: var(--font-mono); }
+        .top-bar .system-title { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.85); letter-spacing: -0.01em; }
+        .top-bar .system-title span { color: var(--accent); }
+        .top-bar .right { display: flex; align-items: center; gap: 12px; }
+        .status-indicator { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #555; flex-shrink: 0; }
+        .status-dot.active { background: var(--good); animation: pulse-dot 2s infinite; }
+        .status-dot.idle { background: var(--warn); }
+        .status-dot.error { background: var(--bad); }
+        .status-label { color: var(--text-meta, #666); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; }
+        .last-scan-time { color: rgba(255,255,255,0.25); font-family: var(--font-mono); font-size: 11px; }
+        @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-        .token-score.high { color: var(--good, #4ade80); }
-        .token-score.medium { color: var(--warn, #f59e0b); }
-        .token-score.low { color: var(--bad, #f87171); }
+        /* ── Stats Strip ── */
+        .stats-strip {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1px;
+            background: var(--border-low);
+            border: 1px solid var(--border-low);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .stats-module {
+            background: rgba(0,0,0,0.5);
+            padding: 14px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .stats-module-label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-meta, #666);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .stats-module-value {
+            font-family: var(--font-mono);
+            font-size: 20px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.9);
+        }
+        .stats-module-value.green { color: var(--good); }
+        .stats-module-value.amber { color: var(--warn); }
+        .stats-module-value.red { color: var(--bad); }
+        .stats-module-value.cyan { color: var(--accent); }
+        .stats-module-sub {
+            font-size: 11px;
+            color: var(--text-meta, #666);
+            font-family: var(--font-mono);
+        }
 
-        .token-card.high-confidence { border-left-color: var(--good, #4ade80); box-shadow: none; }
-        .token-card.medium-confidence { border-left-color: var(--warn, #f59e0b); }
-        .token-card.low-confidence { border-left-color: var(--bad, #f87171); }
-        .token-card:hover { border-color: var(--border-med); transform: none; }
+        /* ── Filter Bar ── */
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 20px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-low);
+            border-radius: 10px;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .filter-label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-meta, #666);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            white-space: nowrap;
+        }
+        .filter-group select,
+        .filter-group input {
+            background: rgba(0,0,0,0.4);
+            border: 1px solid var(--border-low);
+            color: rgba(255,255,255,0.85);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            outline: none;
+        }
+        .filter-group select:focus,
+        .filter-group input:focus {
+            border-color: var(--accent);
+        }
+        .filter-group select option { background: #111; }
+        .filter-group input[type="range"] {
+            width: 120px;
+            padding: 0;
+            border: none;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+        .filter-btn {
+            font-family: var(--font-mono);
+            background: rgba(59,130,246,0.1);
+            color: var(--accent);
+            border: 1px solid rgba(59,130,246,0.2);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            transition: all 150ms ease;
+        }
+        .filter-btn:hover {
+            background: rgba(59,130,246,0.15);
+            border-color: rgba(59,130,246,0.35);
+        }
 
-        .token-recommendation { border-radius: 4px; }
-        .rec-STRONG_BUY, .rec-BUY { background: rgba(74,222,128,0.1); color: var(--good, #4ade80); }
-        .rec-HOLD { background: rgba(245,158,11,0.1); color: var(--warn, #f59e0b); }
-        .rec-AVOID, .rec-STRONG_AVOID { background: rgba(248,113,113,0.1); color: var(--bad, #f87171); }
+        /* ── Main Grid ── */
+        .content-grid {
+            display: grid;
+            gap: 16px;
+        }
+        .content-grid.main-layout {
+            grid-template-columns: 2fr 1fr;
+        }
+        @media (max-width: 1280px) {
+            .content-grid.main-layout { grid-template-columns: 1fr; }
+        }
 
-        .flag.green { background: rgba(74,222,128,0.08); color: var(--good, #4ade80); border-color: rgba(74,222,128,0.15); }
-        .flag.red { background: rgba(248,113,113,0.08); color: var(--bad, #f87171); border-color: rgba(248,113,113,0.15); }
+        /* ── Panels ── */
+        .panel {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-low);
+            border-radius: 10px;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+            transition: border-color 150ms ease;
+        }
+        .panel:hover { border-color: var(--border-med); }
+        .panel-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.85);
+            padding: 12px 18px;
+            border-bottom: 1px solid var(--border-low);
+            letter-spacing: -0.01em;
+        }
+        .panel-title .count {
+            font-size: 11px;
+            font-weight: 400;
+            color: var(--text-meta, #666);
+            margin-left: 8px;
+        }
 
-        .score-fill.high { background: var(--good, #4ade80); }
-        .score-fill.medium { background: var(--warn, #f59e0b); }
-        .score-fill.low { background: var(--bad, #f87171); }
+        /* ── Token Cards Grid ── */
+        .token-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 12px;
+            padding: 16px;
+            max-height: 700px;
+            overflow-y: auto;
+        }
+        .token-card {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-low);
+            border-radius: 8px;
+            padding: 16px;
+            border-left: 3px solid var(--border-low);
+            transition: all 150ms ease;
+            cursor: pointer;
+        }
+        .token-card:hover {
+            border-color: var(--border-med);
+            background: rgba(255,255,255,0.02);
+        }
+        .token-card.score-high { border-left-color: var(--good); }
+        .token-card.score-medium { border-left-color: var(--warn); }
+        .token-card.score-low { border-left-color: var(--bad); }
 
-        .token-meta-item.active { color: var(--good, #4ade80); }
-        .token-meta-item.inactive { color: var(--bad, #f87171); }
+        .token-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+        .token-card-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: rgba(255,255,255,0.9);
+            line-height: 1.2;
+        }
+        .token-card-symbol {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-meta, #666);
+            margin-top: 2px;
+        }
+        .token-card-score {
+            font-family: var(--font-mono);
+            font-size: 24px;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .token-card-score.high { color: var(--good); }
+        .token-card-score.medium { color: var(--warn); }
+        .token-card-score.low { color: var(--bad); }
+
+        /* Score bar */
+        .score-bar-track {
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 2px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        .score-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 300ms ease;
+        }
+        .score-bar-fill.high { background: var(--good); }
+        .score-bar-fill.medium { background: var(--warn); }
+        .score-bar-fill.low { background: var(--bad); }
+
+        /* Recommendation badge */
+        .rec-badge {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            letter-spacing: 0.04em;
+            margin-bottom: 10px;
+        }
+        .rec-badge.STRONG_BUY, .rec-badge.BUY { background: rgba(74,222,128,0.1); color: var(--good); }
+        .rec-badge.HOLD { background: rgba(245,158,11,0.1); color: var(--warn); }
+        .rec-badge.AVOID, .rec-badge.STRONG_AVOID { background: rgba(248,113,113,0.1); color: var(--bad); }
+
+        /* Token meta stats */
+        .token-stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px 12px;
+            margin-bottom: 10px;
+        }
+        .token-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+        .token-stat-label { color: var(--text-meta, #666); }
+        .token-stat-value { color: rgba(255,255,255,0.8); font-weight: 500; }
+
+        /* AI Summary */
+        .token-ai-summary {
+            font-size: 11px;
+            color: var(--text-meta, #888);
+            line-height: 1.5;
+            padding: 8px 10px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.04);
+            margin-top: 8px;
+        }
+
+        /* Flags */
+        .token-flags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 8px;
+        }
+        .flag-tag {
+            font-size: 9px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 3px;
+            letter-spacing: 0.03em;
+        }
+        .flag-tag.green { background: rgba(74,222,128,0.08); color: var(--good); border: 1px solid rgba(74,222,128,0.15); }
+        .flag-tag.red { background: rgba(248,113,113,0.08); color: var(--bad); border: 1px solid rgba(248,113,113,0.15); }
+
+        /* ── Recent Scans ── */
+        .scan-list {
+            max-height: 700px;
+            overflow-y: auto;
+        }
+        .scan-item {
+            display: grid;
+            grid-template-columns: 80px 1fr 60px 80px;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 18px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            transition: background 150ms ease;
+        }
+        .scan-item:hover { background: rgba(255,255,255,0.02); }
+        .scan-item:last-child { border-bottom: none; }
+        .scan-time { color: var(--text-meta, #666); font-size: 10px; }
+        .scan-token { color: rgba(255,255,255,0.85); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .scan-score { font-weight: 700; text-align: center; }
+        .scan-score.high { color: var(--good); }
+        .scan-score.medium { color: var(--warn); }
+        .scan-score.low { color: var(--bad); }
+        .scan-action {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-align: center;
+            letter-spacing: 0.03em;
+        }
+        .scan-action.analyzed { background: rgba(59,130,246,0.08); color: var(--accent); }
+        .scan-action.flagged { background: rgba(74,222,128,0.08); color: var(--good); }
+        .scan-action.skipped { background: rgba(255,255,255,0.03); color: var(--text-meta, #666); }
+        .scan-action.blocked { background: rgba(248,113,113,0.08); color: var(--bad); }
+
+        /* ── Empty State ── */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-meta, #555);
+            text-align: center;
+        }
+        .empty-state-icon {
+            font-family: var(--font-mono);
+            font-size: 48px;
+            color: rgba(255,255,255,0.1);
+            margin-bottom: 16px;
+        }
+        .empty-state-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.3);
+            margin-bottom: 8px;
+        }
+        .empty-state-desc {
+            font-size: 12px;
+            color: var(--text-meta, #444);
+            max-width: 400px;
+            line-height: 1.6;
+        }
+
+        /* ── Loading ── */
+        .loading-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text-meta, #555);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            gap: 10px;
+        }
+        .loading-spinner {
+            width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Responsive ── */
+        @media (max-width: 1100px) {
+            .stats-strip { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .stats-strip { grid-template-columns: repeat(2, 1fr); }
+            .token-cards-grid { grid-template-columns: 1fr; }
+            .scan-item { grid-template-columns: 60px 1fr 50px 70px; gap: 8px; padding: 8px 12px; }
+        }
     </style>
     <link rel="stylesheet" href="/css/terminal-unified.css">
 </head>
 
 <body class="unified-theme page-pumpfun">
-    <!-- Swipe Navigation Hint -->
-    <div class="swipe-hint show-mobile">
-        <span class="swipe-hint-icon left">‹</span>
-        <span style="font-size: 0.7em; color: #444;">SWIPE</span>
-        <span class="swipe-hint-icon right">›</span>
-    </div>
-
     <div class="container">
-        <div class="top-bar">
-            <div class="system-title">
-
-                <span>pump.fun_analyzer</span>
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <div class="left">
+                <div class="system-id">[ PF_SCAN.001 ]</div>
+                <div class="system-title"><span>PUMPFUN</span>_SCANNER</div>
             </div>
-            <div class="nav-links">
-                <a href="/">Home</a>
-                <a href="/news">News</a>
-                <a href="/predictions">Predictions</a>
-                <a href="/pumpfun">pump.fun</a>
+            <div class="right">
+                <div class="status-indicator">
+                    <span class="status-dot" id="agent-status-dot"></span>
+                    <span class="status-label" id="agent-status-label">INITIALIZING</span>
+                </div>
+                <span class="last-scan-time" id="last-scan-time">--:--:--</span>
+            </div>
+        </header>
+
+        <!-- Stats Strip -->
+        <div class="stats-strip">
+            <div class="stats-module">
+                <span class="stats-module-label">Tokens Scanned</span>
+                <span class="stats-module-value cyan" id="stat-tokens-scanned">--</span>
+                <span class="stats-module-sub" id="stat-tokens-sub">total analyzed</span>
+            </div>
+            <div class="stats-module">
+                <span class="stats-module-label">Average Score</span>
+                <span class="stats-module-value" id="stat-avg-score">--</span>
+                <span class="stats-module-sub">across all tokens</span>
+            </div>
+            <div class="stats-module">
+                <span class="stats-module-label">High-Score Count</span>
+                <span class="stats-module-value green" id="stat-high-score">--</span>
+                <span class="stats-module-sub" id="stat-high-sub">score &ge; 0.70</span>
+            </div>
+            <div class="stats-module">
+                <span class="stats-module-label">Strong Buy</span>
+                <span class="stats-module-value green" id="stat-strong-buy">--</span>
+                <span class="stats-module-sub">highest conviction</span>
+            </div>
+            <div class="stats-module">
+                <span class="stats-module-label">Scan Interval</span>
+                <span class="stats-module-value" id="stat-scan-interval">--</span>
+                <span class="stats-module-sub" id="stat-next-scan">next scan in --</span>
             </div>
         </div>
 
-        <div class="stats-panel" id="stats">
-            <div class="stat-box">
-                <div class="stat-label">Total Analyzed</div>
-                <div class="stat-value" id="stat-total">0</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-label">Average Score</div>
-                <div class="stat-value" id="stat-avg">0.00</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-label">High Confidence</div>
-                <div class="stat-value" id="stat-high" style="color: var(--good, #4ade80)">0</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-label">STRONG BUY</div>
-                <div class="stat-value" id="stat-strong-buy">0</div>
-            </div>
-            <div class="stat-box" style="display:flex; align-items:center; gap:10px;">
-                <div class="stat-label">Agent Status</div>
-                <div class="status-dot" id="status-dot"></div>
-            </div>
-        </div>
-
-        <div class="filters">
+        <!-- Filter Bar -->
+        <div class="filter-bar">
             <div class="filter-group">
                 <span class="filter-label">Min Score:</span>
-                <select id="minScore">
-                    <option value="0">All</option>
-                    <option value="0.3">0.3+</option>
-                    <option value="0.5">0.5+</option>
-                    <option value="0.7" selected>0.7+ (High Confidence)</option>
-                    <option value="0.85">0.85+</option>
+                <input type="range" id="min-score-slider" min="0" max="100" value="0" step="5">
+                <span id="min-score-display" style="font-family:var(--font-mono);font-size:12px;color:var(--accent);min-width:35px;">0.00</span>
+            </div>
+            <div class="filter-group">
+                <span class="filter-label">Sort By:</span>
+                <select id="sort-by">
+                    <option value="score">Score (desc)</option>
+                    <option value="mcap">Market Cap (desc)</option>
+                    <option value="liquidity">Liquidity (desc)</option>
+                    <option value="social">Social Score (desc)</option>
+                    <option value="newest">Newest First</option>
                 </select>
             </div>
             <div class="filter-group">
-                <span class="filter-label">Recommendation:</span>
-                <select id="recommendation">
+                <span class="filter-label">Rec:</span>
+                <select id="filter-rec">
                     <option value="">All</option>
                     <option value="STRONG_BUY">STRONG BUY</option>
                     <option value="BUY">BUY</option>
@@ -111,154 +497,380 @@
             </div>
             <div class="filter-group">
                 <span class="filter-label">Limit:</span>
-                <select id="limit">
+                <select id="filter-limit">
                     <option value="25">25</option>
                     <option value="50" selected>50</option>
                     <option value="100">100</option>
                 </select>
             </div>
-            <button id="refreshBtn" style="font-family:var(--font-mono);background:#6d28d9;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">
-                Refresh
-            </button>
+            <button class="filter-btn" id="refresh-btn">REFRESH</button>
         </div>
 
-        <div class="section-title">Analyzed Tokens</div>
-        <div class="tokens-grid" id="tokensGrid">
-            <div class="loading">Loading tokens...</div>
+        <!-- Main Content: Token Grid + Recent Scans -->
+        <div class="content-grid main-layout">
+            <!-- Token Cards -->
+            <div class="panel">
+                <div class="panel-title">// ANALYZED_TOKENS <span class="count" id="tokens-count">(0)</span></div>
+                <div class="token-cards-grid" id="tokens-grid">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <span>Loading tokens...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Scans -->
+            <div class="panel">
+                <div class="panel-title">// RECENT_SCANS</div>
+                <div class="scan-list" id="scan-list">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <span>Loading scans...</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
-        const tokensGrid = document.getElementById('tokensGrid');
+        (function() {
+            'use strict';
 
-        // Load tokens
-        async function loadTokens() {
-            const minScore = document.getElementById('minScore').value;
-            const limit = document.getElementById('limit').value;
-            const rec = document.getElementById('recommendation').value;
+            // ── State ──
+            let allTokens = [];
+            let allScans = [];
+            let statsCache = {};
 
-            let url = `/api/pumpfun/tokens?limit=${limit}&minScore=${minScore}`;
-            if (rec) url = `/api/pumpfun/recommendation/${rec}?limit=${limit}`;
+            // ── DOM Refs ──
+            const tokensGrid = document.getElementById('tokens-grid');
+            const scanList = document.getElementById('scan-list');
+            const tokensCount = document.getElementById('tokens-count');
+            const minScoreSlider = document.getElementById('min-score-slider');
+            const minScoreDisplay = document.getElementById('min-score-display');
+            const sortBy = document.getElementById('sort-by');
+            const filterRec = document.getElementById('filter-rec');
+            const filterLimit = document.getElementById('filter-limit');
+            const refreshBtn = document.getElementById('refresh-btn');
 
+            // ── API Endpoints ──
+            const API = {
+                tokens: (params = '') => `/api/pumpfun/tokens${params}`,
+                stats: () => '/api/pumpfun/stats',
+                token: (mint) => `/api/pumpfun/token/${mint}`,
+                agent: () => '/api/agent/pumpfun',
+            };
+
+            // ── Utility ──
+            function formatMoney(val) {
+                if (!val || !isFinite(val)) return 'N/A';
+                if (val >= 1e9) return '$' + (val / 1e9).toFixed(2) + 'B';
+                if (val >= 1e6) return '$' + (val / 1e6).toFixed(2) + 'M';
+                if (val >= 1e3) return '$' + (val / 1e3).toFixed(1) + 'K';
+                return '$' + val.toFixed(2);
+            }
+
+            function formatTime(date) {
+                if (!date) return '--:--:--';
+                const d = new Date(date);
+                return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            }
+
+            function scoreClass(score) {
+                if (score >= 0.7) return 'high';
+                if (score >= 0.4) return 'medium';
+                return 'low';
+            }
+
+            function maskSecret(val) {
+                if (!val || typeof val !== 'string') return 'N/A';
+                if (val.length <= 8) return '***';
+                return val.slice(0, 3) + '-****-' + val.slice(-4);
+            }
+
+            // ── Fetch Stats ──
+            async function loadStats() {
+                try {
+                    const res = await fetch(API.stats());
+                    const data = await res.json();
+                    statsCache = data.stats || data || {};
+                    renderStats();
+                } catch (e) {
+                    console.error('Stats fetch failed:', e);
+                }
+            }
+
+            function renderStats() {
+                const s = statsCache;
+                document.getElementById('stat-tokens-scanned').textContent = s.totalTokens ?? '--';
+                document.getElementById('stat-tokens-sub').textContent = s.totalTokens ? 'total analyzed' : 'total analyzed';
+                document.getElementById('stat-avg-score').textContent = (s.averageScore ?? 0).toFixed(2);
+                const avgEl = document.getElementById('stat-avg-score');
+                avgEl.classList.remove('green', 'amber', 'red');
+                if (s.averageScore >= 0.6) avgEl.classList.add('green');
+                else if (s.averageScore >= 0.4) avgEl.classList.add('amber');
+                else avgEl.classList.add('red');
+
+                document.getElementById('stat-high-score').textContent = s.highConfidenceCount ?? '--';
+                document.getElementById('stat-strong-buy').textContent = s.byRecommendation?.STRONG_BUY ?? 0;
+
+                const interval = s.scanInterval ?? s.interval ?? null;
+                const intervalEl = document.getElementById('stat-scan-interval');
+                intervalEl.textContent = interval ? interval + 's' : 'AUTO';
+                intervalEl.classList.toggle('cyan', !!interval);
+
+                // Agent status
+                const dot = document.getElementById('agent-status-dot');
+                const label = document.getElementById('agent-status-label');
+                const status = (s.agentStatus || s.status || 'unknown').toUpperCase();
+                dot.className = 'status-dot';
+                if (status === 'RUNNING' || status === 'ACTIVE') { dot.classList.add('active'); label.textContent = 'SCANNING'; }
+                else if (status === 'IDLE') { dot.classList.add('idle'); label.textContent = 'IDLE'; }
+                else if (status === 'ERROR') { dot.classList.add('error'); label.textContent = 'ERROR'; }
+                else { label.textContent = status; }
+
+                const lastScan = s.lastScanTime || s.lastScan;
+                document.getElementById('last-scan-time').textContent = formatTime(lastScan);
+            }
+
+            // ── Fetch Tokens ──
+            async function loadTokens() {
+                const minScore = (minScoreSlider.value / 100).toFixed(2);
+                const limit = filterLimit.value;
+                const rec = filterRec.value;
+
+                let url = `${API.tokens()}?limit=${limit}&minScore=${minScore}`;
+                if (rec) url = `${API.tokens(`recommendation/${rec}`)}?limit=${limit}`;
+
+                // Try main endpoint, fallback to agent endpoint
+                try {
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    allTokens = data.tokens || data || [];
+                } catch (e) {
+                    try {
+                        const res2 = await fetch(API.agent());
+                        const data2 = await res2.json();
+                        allTokens = data2.tokens || data2 || [];
+                    } catch (e2) {
+                        allTokens = [];
+                    }
+                }
+
+                applyFiltersAndRender();
+            }
+
+            // ── Fetch Scans ──
+            async function loadScans() {
+                try {
+                    const res = await fetch('/api/pumpfun/scans?limit=40');
+                    const data = await res.json();
+                    allScans = data.scans || data || [];
+                } catch (e) {
+                    // Derive scan log from token timestamps if no dedicated endpoint
+                    allScans = allTokens.slice(0, 30).map(t => ({
+                        timestamp: t.scannedAt || t.timestamp || t.createdAt,
+                        token: (t.token?.name || t.name || 'Unknown'),
+                        symbol: (t.token?.symbol || t.symbol || ''),
+                        score: t.overallScore || t.score || 0,
+                        action: t.recommendation || 'ANALYZED',
+                    }));
+                }
+                renderScans();
+            }
+
+            // ── Filter & Sort ──
+            function applyFiltersAndRender() {
+                const minScore = minScoreSlider.value / 100;
+                const sort = sortBy.value;
+                const rec = filterRec.value;
+                const limit = parseInt(filterLimit.value);
+
+                let filtered = allTokens.filter(t => {
+                    const score = t.overallScore ?? t.score ?? 0;
+                    if (score < minScore) return false;
+                    if (rec && t.recommendation !== rec) return false;
+                    return true;
+                });
+
+                // Sort
+                filtered.sort((a, b) => {
+                    switch (sort) {
+                        case 'score': return (b.overallScore ?? b.score ?? 0) - (a.overallScore ?? a.score ?? 0);
+                        case 'mcap': return (b.marketCap || 0) - (a.marketCap || 0);
+                        case 'liquidity': return (b.liquidity || 0) - (a.liquidity || 0);
+                        case 'social': return (b.socialScore || 0) - (a.socialScore || 0);
+                        case 'newest': return new Date(b.scannedAt || b.timestamp || 0) - new Date(a.scannedAt || a.timestamp || 0);
+                        default: return 0;
+                    }
+                });
+
+                filtered = filtered.slice(0, limit);
+                renderTokens(filtered);
+            }
+
+            // ── Render Token Cards ──
+            function renderTokens(tokens) {
+                tokensCount.textContent = `(${tokens.length} of ${allTokens.length})`;
+
+                if (tokens.length === 0) {
+                    tokensGrid.innerHTML = `
+                        <div class="empty-state" style="grid-column: 1 / -1;">
+                            <div class="empty-state-icon">[ 0 ]</div>
+                            <div class="empty-state-title">NO TOKENS FOUND</div>
+                            <div class="empty-state-desc">
+                                No tokens match the current filters. Try lowering the minimum score threshold
+                                or wait for the next scan cycle to complete.
+                            </div>
+                        </div>`;
+                    return;
+                }
+
+                tokensGrid.innerHTML = tokens.map(t => {
+                    const score = t.overallScore ?? t.score ?? 0;
+                    const cls = scoreClass(score);
+                    const name = t.token?.name || t.name || 'Unknown';
+                    const symbol = t.token?.symbol || t.symbol || 'N/A';
+                    const rec = t.recommendation || 'N/A';
+                    const mcap = t.marketCap || t.token?.marketCap || 0;
+                    const liq = t.liquidity || t.token?.liquidity || 0;
+                    const social = t.socialScore || t.social?.score || 0;
+                    const rationale = t.rationale || t.analysis || 'No AI analysis available.';
+                    const flags = [];
+
+                    (t.greenFlags || []).slice(0, 2).forEach(f => flags.push(`<span class="flag-tag green">\u2713 ${f}</span>`));
+                    (t.redFlags || []).slice(0, 2).forEach(f => flags.push(`<span class="flag-tag red">\u2717 ${f}</span>`));
+
+                    return `
+                    <div class="token-card score-${cls}" onclick="window._showTokenDetail('${t.mintAddress || ''}', '${name.replace(/'/g, "\\'")}')">
+                        <div class="token-card-header">
+                            <div>
+                                <div class="token-card-name">${escapeHtml(name)}</div>
+                                <div class="token-card-symbol">$${escapeHtml(symbol)}</div>
+                            </div>
+                            <div class="token-card-score ${cls}">${score.toFixed(2)}</div>
+                        </div>
+                        <div class="score-bar-track">
+                            <div class="score-bar-fill ${cls}" style="width:${(score * 100).toFixed(0)}%"></div>
+                        </div>
+                        <div class="rec-badge ${rec}">${rec.replace(/_/g, ' ')}</div>
+                        <div class="token-stats-row">
+                            <div class="token-stat">
+                                <span class="token-stat-label">MCap</span>
+                                <span class="token-stat-value">${formatMoney(mcap)}</span>
+                            </div>
+                            <div class="token-stat">
+                                <span class="token-stat-label">Liquidity</span>
+                                <span class="token-stat-value">${formatMoney(liq)}</span>
+                            </div>
+                            <div class="token-stat">
+                                <span class="token-stat-label">Social</span>
+                                <span class="token-stat-value" style="color:${social >= 0.5 ? 'var(--good)' : social >= 0.3 ? 'var(--warn)' : 'var(--bad)'}">${social.toFixed(2)}</span>
+                            </div>
+                            <div class="token-stat">
+                                <span class="token-stat-label">Web</span>
+                                <span class="token-stat-value">${t.metadata?.website ? '\u2713' : t.website ? '\u2713' : '\u00b7'}</span>
+                            </div>
+                        </div>
+                        ${flags.length ? `<div class="token-flags">${flags.join('')}</div>` : ''}
+                        <div class="token-ai-summary">${escapeHtml(rationale)}</div>
+                    </div>`;
+                }).join('');
+            }
+
+            function escapeHtml(str) {
+                if (!str) return '';
+                return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+
+            // ── Render Recent Scans ──
+            function renderScans() {
+                if (allScans.length === 0) {
+                    scanList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">--</div>
+                            <div class="empty-state-title">NO SCANS YET</div>
+                            <div class="empty-state-desc">Waiting for scan cycle to complete.</div>
+                        </div>`;
+                    return;
+                }
+
+                scanList.innerHTML = allScans.map(s => {
+                    const score = s.score ?? s.overallScore ?? 0;
+                    const cls = scoreClass(score);
+                    const action = (s.action || s.recommendation || 'ANALYZED').toUpperCase();
+                    let actionClass = 'analyzed';
+                    if (action.includes('BUY') || action === 'FLAGGED') actionClass = 'flagged';
+                    else if (action === 'SKIPPED' || action === 'IGNORED') actionClass = 'skipped';
+                    else if (action.includes('AVOID') || action === 'BLOCKED') actionClass = 'blocked';
+
+                    return `
+                    <div class="scan-item">
+                        <span class="scan-time">${formatTime(s.timestamp)}</span>
+                        <span class="scan-token">${escapeHtml(s.token || s.name || 'Unknown')} ${s.symbol ? '(' + escapeHtml(s.symbol) + ')' : ''}</span>
+                        <span class="scan-score ${cls}">${score.toFixed(2)}</span>
+                        <span class="scan-action ${actionClass}">${action.replace(/_/g, ' ')}</span>
+                    </div>`;
+                }).join('');
+            }
+
+            // ── Token Detail Modal (simple) ──
+            window._showTokenDetail = async function(mint, name) {
+                if (!mint) return;
+                try {
+                    const res = await fetch(API.token(mint));
+                    const data = await res.json();
+                    const t = data.token || data;
+                    if (!t) return;
+
+                    const score = t.overallScore ?? t.score ?? 0;
+                    const rec = t.recommendation || 'N/A';
+                    const green = (t.greenFlags || []).join(', ') || 'None';
+                    const red = (t.redFlags || []).join(', ') || 'None';
+                    const rationale = t.rationale || t.analysis || 'No analysis available';
+
+                    alert(
+                        `${t.token?.name || t.name || name} ($${t.token?.symbol || t.symbol || ''})\n\n` +
+                        `Score: ${(score * 100).toFixed(0)}%\n` +
+                        `Recommendation: ${rec.replace(/_/g, ' ')}\n\n` +
+                        `Rationale: ${rationale}\n\n` +
+                        `Green Flags: ${green}\n` +
+                        `Red Flags: ${red}`
+                    );
+                } catch (e) {
+                    console.error('Token detail failed:', e);
+                }
+            };
+
+            // ── Event Listeners ──
+            minScoreSlider.addEventListener('input', () => {
+                minScoreDisplay.textContent = (minScoreSlider.value / 100).toFixed(2);
+                applyFiltersAndRender();
+            });
+            sortBy.addEventListener('change', applyFiltersAndRender);
+            filterRec.addEventListener('change', applyFiltersAndRender);
+            filterLimit.addEventListener('change', () => { loadTokens(); });
+            refreshBtn.addEventListener('click', () => { loadTokens(); loadStats(); loadScans(); });
+
+            window.addEventListener('nav-refresh-data', () => { loadTokens(); loadStats(); loadScans(); });
+
+            // ── Socket Events ──
             try {
-                const res = await fetch(url);
-                const data = await res.json();
-                renderTokens(data.tokens || []);
-            } catch (error) {
-                tokensGrid.innerHTML = '<div class="empty-state"><i>!</i>Failed to load tokens</div>';
-            }
-        }
+                const socket = io();
+                socket.on('pumpfun_high_confidence', () => { loadTokens(); loadStats(); });
+                socket.on('pumpfun_cycle_complete', () => { loadTokens(); loadStats(); loadScans(); });
+                socket.on('pumpfun_scan', (data) => { loadScans(); });
+            } catch (e) { /* no socket */ }
 
-        // Load stats
-        async function loadStats() {
-            try {
-                const res = await fetch('/api/pumpfun/stats');
-                const data = await res.json();
-                updateStats(data.stats || {});
-            } catch (error) {
-                console.error('Failed to load stats:', error);
-            }
-        }
-
-        function renderTokens(tokens) {
-            if (tokens.length === 0) {
-                tokensGrid.innerHTML = '<div class="empty-state"><i>--</i>No tokens found<br><small>Adjust filters or wait for analysis cycle</small></div>';
-                return;
-            }
-
-            tokensGrid.innerHTML = tokens.map(t => {
-                const scoreClass = t.overallScore >= 0.7 ? 'high' : t.overallScore >= 0.4 ? 'medium' : 'low';
-                const confidenceClass = t.overallScore >= 0.7 ? 'high-confidence' : t.overallScore >= 0.4 ? 'medium-confidence' : 'low-confidence';
-
-                const flags = [];
-                (t.greenFlags || []).slice(0, 2).forEach(f => flags.push(`<span class="flag green">&#10003; ${f}</span>`));
-                (t.redFlags || []).slice(0, 2).forEach(f => flags.push(`<span class="flag red">&#10007; ${f}</span>`));
-
-                return `
-                    <div class="token-card ${confidenceClass}" onclick="showTokenDetails('${t.mintAddress}')">
-                        <div class="token-header">
-                            <div class="token-name">${t.token.name || 'Unknown'}</div>
-                            <div class="token-symbol">${t.token.symbol || 'N/A'}</div>
-                        </div>
-                        <div class="token-score ${scoreClass}">${t.overallScore.toFixed(2)}</div>
-                        <div class="score-bar">
-                            <div class="score-fill ${scoreClass}" style="width:${t.overallScore * 100}%"></div>
-                        </div>
-                        <div class="token-recommendation rec-${t.recommendation}">${t.recommendation.replace('_', ' ')}</div>
-                        <div class="token-meta">
-                            <div class="token-meta-item ${t.websiteScore >= 0.5 ? 'active' : 'inactive'}">
-                                ${t.websiteScore >= 0.5 ? '&#10003; Website Quality' : '⚠ Weak Website'}
-                            </div>
-                            <div class="token-meta-item ${t.website?.hasWhitepaper ? 'active' : 'inactive'}">
-                                ${t.website?.hasWhitepaper ? '&#10003; Whitepaper' : '&middot; No Whitepaper'}
-                            </div>
-                        </div>
-                        <div class="token-meta">
-                            <div class="token-meta-item ${t.metadata.website ? 'active' : 'inactive'}">
-                                ${t.metadata.website ? 'Website' : '&middot; No Website'}
-                            </div>
-                            <div class="token-meta-item ${t.metadata.twitter ? 'active' : 'inactive'}">
-                                ${t.metadata.twitter ? 'Twitter' : '&middot; No Twitter'}
-                            </div>
-                        </div>
-                        ${flags.length ? `<div class="flags">${flags.join('')}</div>` : ''}
-                        <div class="token-rationale">${t.rationale || 'No analysis available'}</div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function updateStats(stats) {
-            document.getElementById('stat-total').textContent = stats.totalTokens || 0;
-            document.getElementById('stat-avg').textContent = (stats.averageScore || 0).toFixed(2);
-            document.getElementById('stat-high').textContent = stats.highConfidenceCount || 0;
-            document.getElementById('stat-strong-buy').textContent = stats.byRecommendation?.STRONG_BUY || 0;
-        }
-
-        async function showTokenDetails(mintAddress) {
-            try {
-                const res = await fetch(`/api/pumpfun/token/${mintAddress}`);
-                const data = await res.json();
-                const token = data.token;
-                if (!token) return;
-
-                alert(`${token.token.name} ($${token.token.symbol})\n\nScore: ${(token.overallScore * 100).toFixed(0)}%\nRecommendation: ${token.recommendation}\n\nRationale: ${token.rationale}\n\nRed Flags: ${(token.redFlags || []).join(', ') || 'None'}\nGreen Flags: ${(token.greenFlags || []).join(', ') || 'None'}`);
-            } catch (error) {
-                console.error('Failed to fetch token details:', error);
-            }
-        }
-
-        // Event listeners
-        document.getElementById('minScore').addEventListener('change', loadTokens);
-        document.getElementById('limit').addEventListener('change', loadTokens);
-        document.getElementById('recommendation').addEventListener('change', loadTokens);
-        document.getElementById('refreshBtn').addEventListener('click', () => {
+            // ── Init ──
             loadTokens();
             loadStats();
-        });
+            loadScans();
 
-        // Socket events
-        socket.on('pumpfun_high_confidence', (data) => {
-            loadTokens();
-            loadStats();
-        });
-
-        socket.on('pumpfun_cycle_complete', (data) => {
-            loadTokens();
-            loadStats();
-        });
-
-        // Initial load
-        loadTokens();
-        loadStats();
-
-        // Auto-refresh every 30 seconds
-        setInterval(() => {
-            loadTokens();
-            loadStats();
-        }, 30000);
+            // Auto-refresh every 30s
+            setInterval(() => { loadTokens(); loadStats(); }, 30000);
+            setInterval(() => { loadScans(); }, 60000);
+        })();
     </script>
 </body>
 </html>

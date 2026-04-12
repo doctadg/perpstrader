@@ -148,6 +148,8 @@ function FooterBar({ activeView, refreshInterval, loading }) {
         { key: '4', short: 'Risk' },
         { key: '5', short: 'Strat' },
         { key: '6', short: 'Pred' },
+        { key: '7', short: 'Ordr' },
+        { key: '8', short: 'Btst' },
     ];
     return (react_1.default.createElement(ink_1.Box, { flexDirection: "column" },
         react_1.default.createElement(ink_1.Text, { color: T.colors.surface0 }, '\u2500'.repeat(w)),
@@ -256,3 +258,4 @@ function ViewWrapper({ title, icon, loading, children, }) {
     }
     return react_1.default.createElement(ink_1.Box, { flexDirection: "column" }, children);
 }
+//# sourceMappingURL=components.js.map

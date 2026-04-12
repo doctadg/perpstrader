@@ -7,10 +7,10 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const GLM_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const GLM_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-const LABELING_MODEL = process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash';
-const MAIN_MODEL = process.env.OPENROUTER_LABELING_MODEL || 'z-ai/glm-4.7-flash';
+const GLM_API_KEY=process.env.GLM_API_KEY || '';
+const GLM_BASE_URL = process.env.GLM_BASE_URL || 'https://api.glm.ai/v1';
+const LABELING_MODEL = process.env.GLM_LABELING_MODEL || 'z-ai/glm-4.7-flash';
+const MAIN_MODEL = process.env.GLM_MODEL || 'z-ai/glm-4.7-flash';
 
 const TEST_HEADLINES = [
     'US seizes two tankers linked to Venezuela and Russia',

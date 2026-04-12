@@ -45,6 +45,8 @@ exports.NewsView = NewsView;
 exports.RiskView = RiskView;
 exports.StrategiesView = StrategiesView;
 exports.PredictionsView = PredictionsView;
+exports.OrdersView = OrdersView;
+exports.BacktestView = BacktestView;
 const react_1 = __importDefault(require("react"));
 const ink_1 = require("ink");
 const T = __importStar(require("./theme"));
@@ -178,15 +180,20 @@ function DashboardView({ data, loading }) {
             }))))));
 }
 // =============================================================================
-// 2. POSITIONS VIEW — Detailed position cards
+// 2. POSITIONS VIEW — Detailed position cards with scrolling
 // =============================================================================
-function PositionsView({ data, loading }) {
+const POSITION_CARD_HEIGHT = 8; // approximate lines per position card
+function PositionsView({ data, loading, scrollOffset, selectedIndex = 0, onAction }) {
     const positions = data.positions?.positions || [];
     const totalPnL = data.positions?.totalUnrealizedPnL || 0;
     if (loading && positions.length === 0) {
         return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", alignItems: "center", flexGrow: 1, paddingTop: 2 },
             react_1.default.createElement(components_1.Spinner, { text: "Loading positions..." })));
     }
+    // Calculate visible window
+    const maxVisible = Math.max(1, Math.floor(20 / POSITION_CARD_HEIGHT)); // ~20 rows available
+    const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, positions.length - maxVisible)));
+    const visiblePositions = positions.slice(clampedOffset, clampedOffset + maxVisible);
     return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", flexGrow: 1 },
         react_1.default.createElement(ink_1.Box, { marginBottom: 1 },
             react_1.default.createElement(ink_1.Text, { color: T.colors.subtext1, bold: true },
@@ -202,9 +209,28 @@ function PositionsView({ data, loading }) {
                 ' ',
                 T.pnlIcon(totalPnL),
                 " Total PnL: ",
-                T.formatUSD(totalPnL))),
+                T.formatUSD(totalPnL)),
+            positions.length > maxVisible && (react_1.default.createElement(react_1.default.Fragment, null,
+                react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                    " ",
+                    '\u2502'),
+                react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                    ' ',
+                    clampedOffset + selectedIndex + 1,
+                    "/",
+                    positions.length))),
+            positions.length > 0 && onAction && (react_1.default.createElement(react_1.default.Fragment, null,
+                react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                    " ",
+                    '\u2502'),
+                react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                    " ",
+                    ' ',
+                    "[c] close selected")))),
         positions.length === 0 ? (react_1.default.createElement(components_1.Panel, { title: "No Positions", icon: T.icons.bullet },
-            react_1.default.createElement(components_1.EmptyState, { message: "No open positions found" }))) : (positions.map((pos, i) => {
+            react_1.default.createElement(components_1.EmptyState, { message: "No open positions found" }))) : (visiblePositions.map((pos, i) => {
+            const realIndex = clampedOffset + i;
+            const isSelected = realIndex === selectedIndex;
             const pnl = pos.unrealizedPnL || 0;
             const entryPx = pos.entryPrice || pos.averageEntryPrice || 0;
             const markPx = pos.markPrice || pos.currentPrice || 0;
@@ -216,7 +242,7 @@ function PositionsView({ data, loading }) {
             const side = pos.side || 'LONG';
             const pnlPct = pos.pnlPct || (entryPx > 0 ? ((markPx - entryPx) / entryPx * 100 * (side === 'SHORT' ? -1 : 1)) : 0);
             const notional = size * (markPx || entryPx);
-            return (react_1.default.createElement(components_1.Panel, { key: i, title: `${pos.symbol || '???'} ${side.toLowerCase()} ${leverage}x`, icon: side === 'LONG' ? T.icons.up : T.icons.down, borderColor: side === 'LONG' ? '#2d4a2d' : '#4a2d2d' },
+            return (react_1.default.createElement(components_1.Panel, { key: realIndex, title: `${isSelected ? '\u25b6 ' : ''}${pos.symbol || '???'} ${side.toLowerCase()} ${leverage}x`, icon: side === 'LONG' ? T.icons.up : T.icons.down, borderColor: isSelected ? T.colors.mauve : (side === 'LONG' ? '#2d4a2d' : '#4a2d2d') },
                 react_1.default.createElement(ink_1.Box, { flexDirection: "row" },
                     react_1.default.createElement(ink_1.Box, { flexDirection: "column", flexGrow: 1 },
                         react_1.default.createElement(components_1.DataRow, { label: "Entry", value: T.formatNum(entryPx), indent: 0 }),
@@ -378,9 +404,10 @@ function RiskView({ data, loading }) {
             })))))));
 }
 // =============================================================================
-// 5. STRATEGIES VIEW — Strategy leaderboard
+// 5. STRATEGIES VIEW — Strategy leaderboard with scrolling
 // =============================================================================
-function StrategiesView({ data, loading }) {
+const STRATEGY_CARD_HEIGHT = 10;
+function StrategiesView({ data, loading, scrollOffset, selectedIndex = 0 }) {
     const strategies = data.strategies?.strategies || [];
     const activeCount = data.strategies?.activeCount || 0;
     if (loading && strategies.length === 0) {
@@ -393,6 +420,10 @@ function StrategiesView({ data, loading }) {
         const sb = b.performance?.sharpeRatio || 0;
         return sb - sa;
     });
+    // Calculate visible window
+    const maxVisible = Math.max(1, Math.floor(20 / STRATEGY_CARD_HEIGHT));
+    const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, sorted.length - maxVisible)));
+    const visible = sorted.slice(clampedOffset, clampedOffset + maxVisible);
     return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", flexGrow: 1 },
         react_1.default.createElement(ink_1.Box, { marginBottom: 1 },
             react_1.default.createElement(ink_1.Text, { color: T.colors.subtext1, bold: true },
@@ -402,9 +433,20 @@ function StrategiesView({ data, loading }) {
                 activeCount,
                 "/",
                 strategies.length,
-                " active)")),
+                " active)"),
+            sorted.length > maxVisible && (react_1.default.createElement(react_1.default.Fragment, null,
+                react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                    " ",
+                    '\u2502'),
+                react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                    ' ',
+                    clampedOffset + selectedIndex + 1,
+                    "/",
+                    sorted.length)))),
         strategies.length === 0 ? (react_1.default.createElement(components_1.Panel, { title: "No Strategies", icon: T.icons.bullet },
-            react_1.default.createElement(components_1.EmptyState, { message: "No strategies configured" }))) : (sorted.map((strat, i) => {
+            react_1.default.createElement(components_1.EmptyState, { message: "No strategies configured" }))) : (visible.map((strat, i) => {
+            const realIndex = clampedOffset + i;
+            const isSelected = realIndex === selectedIndex;
             const perf = strat.performance || {};
             const isActive = strat.isActive !== false;
             const symbols = (strat.symbols || []).join(', ');
@@ -415,7 +457,7 @@ function StrategiesView({ data, loading }) {
             const trades = perf.totalTrades || 0;
             const maxDD = perf.maxDrawdown || 0;
             const pf = perf.profitFactor || 0;
-            return (react_1.default.createElement(components_1.Panel, { key: i, title: T.truncate(strat.name || 'Unnamed Strategy', 35), icon: isActive ? T.icons.dot : T.icons.bullet, borderColor: isActive ? T.colors.surface1 : T.colors.surface0 },
+            return (react_1.default.createElement(components_1.Panel, { key: realIndex, title: `${isSelected ? '\u25b6 ' : ''}${T.truncate(strat.name || 'Unnamed Strategy', 35)}`, icon: isActive ? T.icons.dot : T.icons.bullet, borderColor: isSelected ? T.colors.mauve : (isActive ? T.colors.surface1 : T.colors.surface0) },
                 react_1.default.createElement(ink_1.Box, null,
                     react_1.default.createElement(ink_1.Text, { color: isActive ? T.colors.green : T.colors.overlay1, bold: true }, isActive ? 'ACTIVE' : 'INACTIVE'),
                     react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
@@ -534,3 +576,174 @@ function PredictionsView({ data, loading }) {
                             react_1.default.createElement(components_1.DataRow, { label: "PnL", value: T.formatUSD(pnl), valueColor: T.pnlColor(pnl), indent: 0 })))));
             })))));
 }
+// =============================================================================
+// 7. ORDERS VIEW — Open orders with cancel action
+// =============================================================================
+function OrdersView({ data, loading, scrollOffset, selectedIndex = 0, onAction }) {
+    const orders = data.orders?.orders || [];
+    if (loading && orders.length === 0) {
+        return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", alignItems: "center", flexGrow: 1, paddingTop: 2 },
+            react_1.default.createElement(components_1.Spinner, { text: "Loading orders..." })));
+    }
+    // Calculate visible window
+    const maxVisible = 15;
+    const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, orders.length - maxVisible)));
+    const visible = orders.slice(clampedOffset, clampedOffset + maxVisible);
+    const statusColor = (status) => {
+        switch ((status || '').toUpperCase()) {
+            case 'FILLED':
+                return T.colors.green;
+            case 'OPEN':
+            case 'PENDING':
+                return T.colors.yellow;
+            case 'CANCELLED':
+            case 'CANCELED':
+                return T.colors.red;
+            case 'PARTIALLY_FILLED':
+                return T.colors.peach;
+            default:
+                return T.colors.overlay0;
+        }
+    };
+    return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", flexGrow: 1 },
+        react_1.default.createElement(ink_1.Box, { marginBottom: 1 },
+            react_1.default.createElement(ink_1.Text, { color: T.colors.subtext1, bold: true },
+                '  ',
+                T.icons.chart,
+                " Orders (",
+                orders.length,
+                " open)"),
+            orders.length > maxVisible && (react_1.default.createElement(react_1.default.Fragment, null,
+                react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                    " ",
+                    '\u2502'),
+                react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                    ' ',
+                    clampedOffset + selectedIndex + 1,
+                    "/",
+                    orders.length))),
+            orders.length > 0 && onAction && (react_1.default.createElement(react_1.default.Fragment, null,
+                react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                    " ",
+                    '\u2502'),
+                react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                    " ",
+                    ' ',
+                    "[x] cancel selected")))),
+        orders.length > 0 && (react_1.default.createElement(ink_1.Box, { paddingLeft: 2, marginBottom: 1 },
+            react_1.default.createElement(ink_1.Text, { color: T.colors.overlay1, bold: true },
+                '  ',
+                'ID'.padEnd(12),
+                'Symbol'.padEnd(10),
+                'Side'.padEnd(6),
+                'Type'.padEnd(8),
+                'Price'.padEnd(12),
+                'Size'.padEnd(10),
+                'Status'.padEnd(12)),
+            react_1.default.createElement(ink_1.Text, { color: T.colors.surface0 }, ' '.repeat(80)))),
+        orders.length === 0 ? (react_1.default.createElement(components_1.Panel, { title: "No Orders", icon: T.icons.bullet },
+            react_1.default.createElement(components_1.EmptyState, { message: "No open orders found" }))) : (visible.map((order, i) => {
+            const realIndex = clampedOffset + i;
+            const isSelected = realIndex === selectedIndex;
+            const id = T.truncate(order.id || order.orderId || '???', 12);
+            const symbol = (order.symbol || '???').padEnd(10);
+            const side = order.side === 'BUY' ? 'BUY ' : 'SELL';
+            const type = (order.type || 'LIMIT').padEnd(8);
+            const price = (order.price != null ? T.formatNum(order.price) : 'MARKET').padEnd(12);
+            const size = T.formatNum(order.size || 0, 4).padEnd(10);
+            const status = (order.status || 'OPEN').padEnd(12);
+            const created = order.createdAt ? T.timeAgo(order.createdAt) : '';
+            return (react_1.default.createElement(ink_1.Box, { key: realIndex, paddingLeft: 2 },
+                react_1.default.createElement(ink_1.Text, { color: isSelected ? T.colors.mauve : T.colors.text, bold: isSelected },
+                    isSelected ? '\u25b6 ' : '  ',
+                    react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 }, id),
+                    ' ',
+                    react_1.default.createElement(ink_1.Text, { bold: true }, symbol),
+                    ' ',
+                    react_1.default.createElement(ink_1.Text, { color: order.side === 'BUY' ? T.colors.green : T.colors.red }, side),
+                    ' ',
+                    react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 }, type),
+                    ' ',
+                    react_1.default.createElement(ink_1.Text, null, price),
+                    ' ',
+                    react_1.default.createElement(ink_1.Text, null, size),
+                    ' ',
+                    react_1.default.createElement(ink_1.Text, { color: statusColor(order.status) }, status),
+                    created && (react_1.default.createElement(ink_1.Text, { color: T.colors.overlay1 },
+                        " ",
+                        created)))));
+        }))));
+}
+// =============================================================================
+// 8. BACKTEST VIEW — Backtest history and results
+// =============================================================================
+function BacktestView({ data, loading, scrollOffset, selectedIndex = 0 }) {
+    const runs = data.backtest?.runs || [];
+    if (loading && runs.length === 0) {
+        return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", alignItems: "center", flexGrow: 1, paddingTop: 2 },
+            react_1.default.createElement(components_1.Spinner, { text: "Loading backtests..." })));
+    }
+    // Calculate visible window
+    const maxVisible = 10;
+    const clampedOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, runs.length - maxVisible)));
+    const visible = runs.slice(clampedOffset, clampedOffset + maxVisible);
+    return (react_1.default.createElement(ink_1.Box, { flexDirection: "column", flexGrow: 1 },
+        react_1.default.createElement(ink_1.Box, { marginBottom: 1 },
+            react_1.default.createElement(ink_1.Text, { color: T.colors.subtext1, bold: true },
+                '  ',
+                T.icons.strategy,
+                " Backtest History (",
+                runs.length,
+                " runs)"),
+            runs.length > maxVisible && (react_1.default.createElement(react_1.default.Fragment, null,
+                react_1.default.createElement(ink_1.Text, { color: T.colors.surface2 },
+                    " ",
+                    '\u2502'),
+                react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                    ' ',
+                    clampedOffset + selectedIndex + 1,
+                    "/",
+                    runs.length)))),
+        runs.length === 0 ? (react_1.default.createElement(components_1.Panel, { title: "No Backtests", icon: T.icons.bullet },
+            react_1.default.createElement(components_1.EmptyState, { message: "No backtest results found" }))) : (visible.map((run, i) => {
+            const realIndex = clampedOffset + i;
+            const isSelected = realIndex === selectedIndex;
+            const runStatusColor = run.status === 'COMPLETED'
+                ? T.colors.green
+                : run.status === 'RUNNING'
+                    ? T.colors.yellow
+                    : run.status === 'FAILED'
+                        ? T.colors.red
+                        : T.colors.overlay0;
+            return (react_1.default.createElement(components_1.Panel, { key: realIndex, title: `${isSelected ? '\u25b6 ' : ''}${run.strategyName || 'Unnamed Strategy'}`, icon: T.icons.strategy, borderColor: isSelected ? T.colors.mauve : T.colors.surface1, compact: true },
+                react_1.default.createElement(ink_1.Box, null,
+                    react_1.default.createElement(ink_1.Text, { color: runStatusColor, bold: true }, run.status || 'UNKNOWN'),
+                    react_1.default.createElement(ink_1.Text, { color: T.colors.overlay0 },
+                        ' ',
+                        "ID: ",
+                        T.truncate(String(run.id || ''), 12)),
+                    run.completedAt && (react_1.default.createElement(ink_1.Text, { color: T.colors.overlay1 },
+                        ' ',
+                        "completed ",
+                        T.timeAgo(run.completedAt)))),
+                react_1.default.createElement(ink_1.Box, { flexDirection: "row", marginTop: 1 },
+                    react_1.default.createElement(ink_1.Box, { flexDirection: "column", flexGrow: 1 },
+                        react_1.default.createElement(components_1.DataRow, { label: "Return", value: T.formatPct((run.totalReturn || 0) * 100), valueColor: T.pnlColor(run.totalReturn || 0), indent: 0 }),
+                        react_1.default.createElement(components_1.DataRow, { label: "Win Rate", value: `${((run.winRate || 0) * 100).toFixed(1)}%`, valueColor: (run.winRate || 0) > 0.5 ? T.colors.green : T.colors.red, indent: 0 }),
+                        react_1.default.createElement(components_1.DataRow, { label: "Trades", value: `${run.totalTrades || 0}`, indent: 0 })),
+                    react_1.default.createElement(ink_1.Box, { flexDirection: "column", flexGrow: 1 },
+                        react_1.default.createElement(components_1.DataRow, { label: "Sharpe", value: (run.sharpeRatio || 0).toFixed(2), valueColor: (run.sharpeRatio || 0) > 1 ? T.colors.green : T.colors.text, indent: 0 }),
+                        react_1.default.createElement(components_1.DataRow, { label: "Max DD", value: `${(run.maxDrawdown || 0).toFixed(1)}%`, valueColor: (run.maxDrawdown || 0) > 15 ? T.colors.red : T.colors.yellow, indent: 0 }))),
+                run.error && (react_1.default.createElement(ink_1.Box, { marginTop: 1 },
+                    react_1.default.createElement(ink_1.Text, { color: T.colors.red },
+                        '  ',
+                        T.icons.cross,
+                        " Error: ",
+                        run.error))),
+                run.instruments && run.instruments.length > 0 && (react_1.default.createElement(ink_1.Text, { color: T.colors.overlay1 },
+                    '  ',
+                    "Instruments: ",
+                    run.instruments.slice(0, 5).join(', ')))));
+        }))));
+}
+//# sourceMappingURL=views.js.map

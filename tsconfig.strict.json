@@ -1,0 +1,15 @@
+{
+  // Strict TS config — tracks progress toward full type safety.
+  // Run: npx tsc --noEmit -p tsconfig.strict.json  to see remaining errors.
+  // Once clean, replace strict:false in tsconfig.json and remove this file.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "bin"]
+}

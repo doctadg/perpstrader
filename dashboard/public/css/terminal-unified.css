@@ -25,6 +25,13 @@ body.unified-theme {
   --terminal-amber: #f59e0b;
   --terminal-red: #f87171;
   --terminal-purple: #a78bfa;
+  /* Fallback mappings for renamed variables */
+  --border-subtle: var(--border-low);
+  --border-medium: var(--border-med);
+  --mono: var(--font-mono);
+  --sans: var(--font-sans);
+  --text-meta: #666666;
+  --text-primary: rgba(255,255,255,0.9);
   font-family: var(--font-sans);
   color: rgba(255,255,255,0.5);
   background: #000000;
