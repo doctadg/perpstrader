@@ -2,7 +2,7 @@
 // Production-grade HTTP client for external API calls
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
-import logger from '../../shared/logger';
+import logger from '../shared/logger';
 
 export interface ResilientClientConfig {
   name: string;

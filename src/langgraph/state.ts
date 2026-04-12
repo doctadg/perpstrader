@@ -1,7 +1,7 @@
 // LangGraph Agent State Definition
 // This defines the shared state that flows through all nodes in the graph
 
-import { MarketData, TechnicalIndicators, Strategy, TradingSignal, RiskAssessment, Trade, BacktestResult, Portfolio } from '../shared/types';
+import { MarketData, TechnicalIndicators, Strategy, TradingSignal, RiskAssessment, Trade, BacktestResult, Portfolio } from '../../shared/types';
 
 /**
  * Represents a pattern match from the vector store

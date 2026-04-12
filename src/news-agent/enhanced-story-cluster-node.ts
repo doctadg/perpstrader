@@ -22,19 +22,19 @@ import newsVectorStore from '../data/news-vector-store';
 import storyClusterStoreEnhanced from '../data/story-cluster-store-enhanced';
 import storyClusterStore from '../data/story-cluster-store';
 import crypto from 'crypto';
-import glmService from '../../shared/glm-service';
-import llmService from '../../shared/llm-service';
-import { getTitleFingerprint, isNonMarketMoving, formatTitle as validateAndFormatTopic } from '../../shared/title-cleaner';
-import { validateAndFormatTopic as formatTopic } from '../../shared/human-title-formatter';
-import { messageBus, Channel } from '../../shared/message-bus';
+import glmService from '../shared/glm-service';
+import llmService from '../shared/llm-service';
+import { getTitleFingerprint, isNonMarketMoving, formatTitle as validateAndFormatTopic } from '../shared/title-cleaner';
+import { validateAndFormatTopic as formatTopic } from '../shared/human-title-formatter';
+import { messageBus, Channel } from '../shared/message-bus';
 import EntityExtractor, { ExtractedEntity } from './entity-extraction';
 import AnomalyDetector, { HeatAnomaly } from './anomaly-detector';
 import HeatPredictor, { HeatPrediction } from './heat-predictor';
-import { NewsItem } from '../../shared/types';
-import { ClusterHeatAnalysis, ClusterSimilarityResult, EntityHeat } from '../../shared/types-enhanced';
+import { NewsItem } from '../shared/types';
+import { ClusterHeatAnalysis, ClusterSimilarityResult, EntityHeat } from '../shared/types-enhanced';
 
 // NEW: Import improved clustering services
-import titleSemanticClustering from '../../shared/title-semantic-clustering';
+import titleSemanticClustering from '../shared/title-semantic-clustering';
 import semanticSimilarityService from './semantic-similarity';
 import enhancedEntityExtractor from './enhanced-entity-extraction';
 

@@ -16754,9 +16754,9 @@ var require_modern = __commonJS({
       if (options.log) this.log = options.log;
       if (options.logv) this.logv = options.logv;
       if (options.close) this.close = options.close;
-      this.once("pipe", (logger6) => {
-        this.levels = logger6.levels;
-        this.parent = logger6;
+      this.once("pipe", (logger2) => {
+        this.levels = logger2.levels;
+        this.parent = logger2;
       });
       this.once("unpipe", (src) => {
         if (src === this.parent) {
@@ -17795,7 +17795,7 @@ var require_diagnostics = __commonJS({
   "node_modules/@dabh/diagnostics/diagnostics.js"(exports2, module2) {
     var adapters = [];
     var modifiers = [];
-    var logger6 = function devnull() {
+    var logger2 = function devnull() {
     };
     function use(adapter2) {
       if (~adapters.indexOf(adapter2)) return false;
@@ -17803,7 +17803,7 @@ var require_diagnostics = __commonJS({
       return true;
     }
     function set(custom) {
-      logger6 = custom;
+      logger2 = custom;
     }
     function enabled(namespace) {
       var async = [];
@@ -17831,7 +17831,7 @@ var require_diagnostics = __commonJS({
       return true;
     }
     function write() {
-      logger6.apply(logger6, arguments);
+      logger2.apply(logger2, arguments);
     }
     function process2(message) {
       for (var i = 0; i < modifiers.length; i++) {
@@ -20994,11 +20994,11 @@ var require_exception_handler = __commonJS({
        * TODO: add contructor description
        * @param {!Logger} logger - TODO: add param description
        */
-      constructor(logger6) {
-        if (!logger6) {
+      constructor(logger2) {
+        if (!logger2) {
           throw new Error("Logger is required to handle exceptions");
         }
-        this.logger = logger6;
+        this.logger = logger2;
         this.handlers = /* @__PURE__ */ new Map();
       }
       /**
@@ -21232,11 +21232,11 @@ var require_rejection_handler = __commonJS({
        * TODO: add contructor description
        * @param {!Logger} logger - TODO: add param description
        */
-      constructor(logger6) {
-        if (!logger6) {
+      constructor(logger2) {
+        if (!logger2) {
           throw new Error("Logger is required to handle rejections");
         }
-        this.logger = logger6;
+        this.logger = logger2;
         this.handlers = /* @__PURE__ */ new Map();
       }
       /**
@@ -21433,12 +21433,12 @@ var require_profiler = __commonJS({
        * @param {!Logger} logger - TODO: add param description.
        * @private
        */
-      constructor(logger6) {
+      constructor(logger2) {
         const Logger = require_logger();
-        if (typeof logger6 !== "object" || Array.isArray(logger6) || !(logger6 instanceof Logger)) {
+        if (typeof logger2 !== "object" || Array.isArray(logger2) || !(logger2 instanceof Logger)) {
           throw new Error("Logger is required for profiling");
         } else {
-          this.logger = logger6;
+          this.logger = logger2;
           this.start = Date.now();
         }
       }
@@ -21489,8 +21489,8 @@ var require_logger = __commonJS({
         this.configure(options);
       }
       child(defaultRequestMetadata) {
-        const logger6 = this;
-        return Object.create(logger6, {
+        const logger2 = this;
+        return Object.create(logger2, {
           write: {
             value: function(info) {
               const infoClone = Object.assign(
@@ -21503,7 +21503,7 @@ var require_logger = __commonJS({
                 infoClone.message = info.message;
                 infoClone.cause = info.cause;
               }
-              logger6.write(infoClone);
+              logger2.write(infoClone);
             }
           }
         });
@@ -22025,7 +22025,7 @@ var require_create_logger = __commonJS({
           super(options);
         }
       }
-      const logger6 = new DerivedLogger(opts);
+      const logger2 = new DerivedLogger(opts);
       Object.keys(opts.levels).forEach(function(level) {
         debug('Define prototype method for "%s"', level);
         if (level === "log") {
@@ -22033,14 +22033,14 @@ var require_create_logger = __commonJS({
           return;
         }
         DerivedLogger.prototype[level] = function(...args) {
-          const self2 = this || logger6;
+          const self2 = this || logger2;
           if (args.length === 1) {
             const [msg] = args;
             const info = msg && msg.message && msg || { message: msg };
             info.level = info[LEVEL] = level;
             self2._addDefaultMeta(info);
             self2.write(info);
-            return this || logger6;
+            return this || logger2;
           }
           if (args.length === 0) {
             self2.log(level, "");
@@ -22049,10 +22049,10 @@ var require_create_logger = __commonJS({
           return self2.log(level, ...args);
         };
         DerivedLogger.prototype[isLevelEnabledFunctionName(level)] = function() {
-          return (this || logger6).isLevelEnabled(level);
+          return (this || logger2).isLevelEnabled(level);
         };
       });
-      return logger6;
+      return logger2;
     };
   }
 });
@@ -22088,9 +22088,9 @@ var require_container = __commonJS({
           } else {
             options.transports = [];
           }
-          const logger6 = createLogger(options);
-          logger6.on("close", () => this._delete(id));
-          this.loggers.set(id, logger6);
+          const logger2 = createLogger(options);
+          logger2.on("close", () => this._delete(id));
+          this.loggers.set(id, logger2);
         }
         return this.loggers.get(id);
       }
@@ -22135,8 +22135,8 @@ var require_container = __commonJS({
         if (!this.loggers.has(id)) {
           return;
         }
-        const logger6 = this.loggers.get(id);
-        logger6.close();
+        const logger2 = this.loggers.get(id);
+        logger2.close();
         this._delete(id);
       }
       /**
@@ -22237,33 +22237,6 @@ var require_winston = __commonJS({
       "extend"
     ]);
     warn.forProperties(exports2, "deprecated", ["emitErrs", "levelLength"]);
-  }
-});
-
-// bin/shared/logger.js
-var require_logger2 = __commonJS({
-  "bin/shared/logger.js"(exports2) {
-    "use strict";
-    var __importDefault = exports2 && exports2.__importDefault || function(mod) {
-      return mod && mod.__esModule ? mod : { "default": mod };
-    };
-    Object.defineProperty(exports2, "__esModule", { value: true });
-    var winston_1 = __importDefault(require_winston());
-    var path_1 = __importDefault(require("path"));
-    var logDir2 = path_1.default.join(__dirname, "../../logs");
-    var logger6 = winston_1.default.createLogger({
-      level: process.env.LOG_LEVEL || "info",
-      format: winston_1.default.format.combine(winston_1.default.format.timestamp(), winston_1.default.format.errors({ stack: true }), winston_1.default.format.json()),
-      defaultMeta: { service: "perps-trader" },
-      transports: [
-        // File transports removed - they were filling the disk (50+ GB)
-        // Traces are stored in SQLite database instead
-        new winston_1.default.transports.Console({
-          format: winston_1.default.format.combine(winston_1.default.format.colorize(), winston_1.default.format.simple())
-        })
-      ]
-    });
-    exports2.default = logger6;
   }
 });
 
@@ -31269,7 +31242,6 @@ function v4(options, buf, offset) {
 var v4_default = v4;
 
 // src/prediction-markets/risk-manager.ts
-var import_logger3 = __toESM(require_logger2());
 var RiskManager = class {
   config;
   dailyState;
@@ -31346,7 +31318,7 @@ var RiskManager = class {
     setTimeout(() => {
       this.dailyState = this.initializeDailyState();
       this.scheduleDailyReset();
-      import_logger3.default.info("[RiskManager] Daily risk state reset");
+      logger_default.info("[RiskManager] Daily risk state reset");
     }, msUntilMidnight);
   }
   // ========================================================================
@@ -31429,7 +31401,7 @@ var RiskManager = class {
     if (this.dailyState.dailyPnL < -maxDailyLossUsd) {
       if (Math.abs(this.dailyState.dailyPnL) > portfolioValue * this.config.emergencyStopDailyLoss) {
         this.dailyState.emergencyStopTriggered = true;
-        import_logger3.default.error(`[RiskManager] EMERGENCY STOP triggered. Daily PnL: $${this.dailyState.dailyPnL.toFixed(2)}`);
+        logger_default.error(`[RiskManager] EMERGENCY STOP triggered. Daily PnL: $${this.dailyState.dailyPnL.toFixed(2)}`);
       }
       return {
         allowed: false,
@@ -31551,7 +31523,7 @@ var RiskManager = class {
     } else if (tradePnL < 0) {
       this.dailyState.losingTrades++;
       this.dailyState.cooldownUntil = Date.now() + this.config.cooldownAfterLossMinutes * 6e4;
-      import_logger3.default.warn(
+      logger_default.warn(
         `[RiskManager] Losing trade recorded: $${tradePnL.toFixed(2)}. Cooldown for ${this.config.cooldownAfterLossMinutes} minutes.`
       );
     }
@@ -31559,7 +31531,7 @@ var RiskManager = class {
     const portfolioValue = this.getPortfolioValue();
     if (Math.abs(this.dailyState.dailyPnL) > portfolioValue * this.config.emergencyStopDailyLoss) {
       this.dailyState.emergencyStopTriggered = true;
-      import_logger3.default.error(
+      logger_default.error(
         `[RiskManager] \u{1F6A8} EMERGENCY STOP TRIGGERED \u{1F6A8}
 Daily PnL: $${this.dailyState.dailyPnL.toFixed(2)}
 Portfolio: $${portfolioValue.toFixed(2)}
@@ -31575,14 +31547,14 @@ Loss %: ${(Math.abs(this.dailyState.dailyPnL) / portfolioValue * 100).toFixed(2)
    */
   triggerEmergencyStop(reason) {
     this.dailyState.emergencyStopTriggered = true;
-    import_logger3.default.error(`[RiskManager] \u{1F6A8} EMERGENCY STOP TRIGGERED: ${reason} \u{1F6A8}`);
+    logger_default.error(`[RiskManager] \u{1F6A8} EMERGENCY STOP TRIGGERED: ${reason} \u{1F6A8}`);
   }
   /**
    * Reset emergency stop - use with caution!
    */
   resetEmergencyStop() {
     this.dailyState.emergencyStopTriggered = false;
-    import_logger3.default.warn("[RiskManager] Emergency stop reset manually");
+    logger_default.warn("[RiskManager] Emergency stop reset manually");
   }
   /**
    * Check if emergency stop is active
@@ -31595,7 +31567,7 @@ Loss %: ${(Math.abs(this.dailyState.dailyPnL) / portfolioValue * 100).toFixed(2)
    */
   forceCooldown(minutes) {
     this.dailyState.cooldownUntil = Date.now() + minutes * 6e4;
-    import_logger3.default.info(`[RiskManager] Cooldown forced for ${minutes} minutes`);
+    logger_default.info(`[RiskManager] Cooldown forced for ${minutes} minutes`);
   }
   // ========================================================================
   // REPORTING
@@ -31625,7 +31597,6 @@ var riskManager = new RiskManager();
 var risk_manager_default = riskManager;
 
 // src/prediction-markets/alerting-service.ts
-var import_logger4 = __toESM(require_logger2());
 var AlertingService = class {
   config;
   alertHistory = [];
@@ -31793,7 +31764,7 @@ ${trade.pnl !== void 0 ? `**P&L:** ${pnlEmoji} $${trade.pnl.toFixed(2)}` : ""}
     if (this.alertHistory.length > this.MAX_HISTORY) {
       this.alertHistory.shift();
     }
-    import_logger4.default.info(`[Alert] ${message.title}: ${message.message.substring(0, 100)}...`);
+    logger_default.info(`[Alert] ${message.title}: ${message.message.substring(0, 100)}...`);
     const promises = [];
     if (this.config.telegram) {
       promises.push(this.sendTelegram(message));
@@ -31807,7 +31778,7 @@ ${trade.pnl !== void 0 ? `**P&L:** ${pnlEmoji} $${trade.pnl.toFixed(2)}` : ""}
     try {
       await Promise.all(promises);
     } catch (error) {
-      import_logger4.default.error("[AlertingService] Failed to send alert:", error);
+      logger_default.error("[AlertingService] Failed to send alert:", error);
     }
   }
   async sendTelegram(message) {
@@ -31828,7 +31799,7 @@ ${message.message}`;
         { timeout: 1e4 }
       );
     } catch (error) {
-      import_logger4.default.error("[AlertingService] Telegram send failed:", error);
+      logger_default.error("[AlertingService] Telegram send failed:", error);
     }
   }
   async sendDiscord(message) {
@@ -31851,7 +31822,7 @@ ${message.message}`;
         { timeout: 1e4 }
       );
     } catch (error) {
-      import_logger4.default.error("[AlertingService] Discord send failed:", error);
+      logger_default.error("[AlertingService] Discord send failed:", error);
     }
   }
   async sendWebhook(message) {
@@ -31869,7 +31840,7 @@ ${message.message}`;
         }
       );
     } catch (error) {
-      import_logger4.default.error("[AlertingService] Webhook send failed:", error);
+      logger_default.error("[AlertingService] Webhook send failed:", error);
     }
   }
   async sendDailyPnLReport() {
@@ -35076,11 +35047,7 @@ async function learnerNode(state) {
   };
 }
 
-// src/prediction-markets/position-reconciler.ts
-var import_logger19 = __toESM(require_logger2());
-
 // src/prediction-markets/resilient-api-client.ts
-var import_logger18 = __toESM(require_logger2());
 var CircuitBreakerOpenError = class extends Error {
   constructor(service) {
     super(`Circuit breaker open for ${service}`);
@@ -35151,7 +35118,7 @@ var ResilientApiClient = class {
     if (this.circuit.state === "HALF_OPEN") {
       this.circuit.state = "CLOSED";
       this.circuit.failures = 0;
-      import_logger18.default.info(`[ResilientClient:${this.config.name}] Circuit breaker closed`);
+      logger_default.info(`[ResilientClient:${this.config.name}] Circuit breaker closed`);
     }
   }
   onError(error) {
@@ -35166,7 +35133,7 @@ var ResilientApiClient = class {
     this.circuit.lastFailure = Date.now();
     if (this.circuit.failures >= this.config.circuitBreakerThreshold) {
       this.circuit.state = "OPEN";
-      import_logger18.default.error(`[ResilientClient:${this.config.name}] Circuit breaker opened after ${this.circuit.failures} failures`);
+      logger_default.error(`[ResilientClient:${this.config.name}] Circuit breaker opened after ${this.circuit.failures} failures`);
     }
   }
   checkCircuitBreaker() {
@@ -35174,7 +35141,7 @@ var ResilientApiClient = class {
       const timeSinceLastFailure = Date.now() - this.circuit.lastFailure;
       if (timeSinceLastFailure >= this.config.circuitBreakerResetMs) {
         this.circuit.state = "HALF_OPEN";
-        import_logger18.default.info(`[ResilientClient:${this.config.name}] Circuit breaker half-open, testing...`);
+        logger_default.info(`[ResilientClient:${this.config.name}] Circuit breaker half-open, testing...`);
       } else {
         throw new CircuitBreakerOpenError(this.config.name);
       }
@@ -35244,12 +35211,12 @@ var ResilientApiClient = class {
         }
         if (axiosError.response?.status === this.config.rateLimitStatus) {
           const retryAfter = this.getRetryAfter(axiosError);
-          import_logger18.default.warn(`[ResilientClient:${this.config.name}] Rate limited, waiting ${retryAfter}ms`);
+          logger_default.warn(`[ResilientClient:${this.config.name}] Rate limited, waiting ${retryAfter}ms`);
           await this.sleep(retryAfter);
           continue;
         }
         const delay = this.calculateBackoff(attempt);
-        import_logger18.default.warn(
+        logger_default.warn(
           `[ResilientClient:${this.config.name}] Request failed (attempt ${attempt + 1}/${this.config.maxRetries + 1}), retrying in ${delay.toFixed(0)}ms: ${axiosError.message}`
         );
         await this.sleep(delay);
@@ -35271,7 +35238,7 @@ var ResilientApiClient = class {
     this.circuit.state = "CLOSED";
     this.circuit.failures = 0;
     this.circuit.lastFailure = 0;
-    import_logger18.default.info(`[ResilientClient:${this.config.name}] Circuit breaker manually reset`);
+    logger_default.info(`[ResilientClient:${this.config.name}] Circuit breaker manually reset`);
   }
 };
 var polymarketGammaClient = new ResilientApiClient({
@@ -35323,13 +35290,13 @@ var PositionReconciler = class {
    */
   async reconcile() {
     if (this.isRunning) {
-      import_logger19.default.warn("[PositionReconciler] Reconciliation already in progress");
+      logger_default.warn("[PositionReconciler] Reconciliation already in progress");
       return this.getLastResult();
     }
     this.isRunning = true;
     const startTime = Date.now();
     try {
-      import_logger19.default.info("[PositionReconciler] Starting position reconciliation...");
+      logger_default.info("[PositionReconciler] Starting position reconciliation...");
       const localPositions = prediction_store_default.getPositions();
       const onChainPositions = await this.fetchOnChainPositions();
       const discrepancies = this.findDiscrepancies(localPositions, onChainPositions);
@@ -35353,7 +35320,7 @@ var PositionReconciler = class {
       this.discrepanciesFound += discrepancies.length;
       return result;
     } catch (error) {
-      import_logger19.default.error("[PositionReconciler] Reconciliation failed:", error);
+      logger_default.error("[PositionReconciler] Reconciliation failed:", error);
       throw error;
     } finally {
       this.isRunning = false;
@@ -35367,7 +35334,7 @@ var PositionReconciler = class {
     if (process.env.PREDICTION_PAPER_TRADING !== "false") {
       return [];
     }
-    import_logger19.default.warn("[PositionReconciler] Real on-chain position fetching not yet implemented");
+    logger_default.warn("[PositionReconciler] Real on-chain position fetching not yet implemented");
     return [];
   }
   findDiscrepancies(local, onChain) {
@@ -35413,7 +35380,7 @@ var PositionReconciler = class {
           stale.push(position);
         }
       } catch (error) {
-        import_logger19.default.warn(
+        logger_default.warn(
           `[PositionReconciler] Failed to fetch market status for ${position.marketId}:`,
           error
         );
@@ -35431,9 +35398,9 @@ var PositionReconciler = class {
   // CLEANUP AND CORRECTION
   // ========================================================================
   async cleanupOrphanedPositions(positions) {
-    import_logger19.default.warn(`[PositionReconciler] Cleaning up ${positions.length} orphaned positions`);
+    logger_default.warn(`[PositionReconciler] Cleaning up ${positions.length} orphaned positions`);
     for (const position of positions) {
-      import_logger19.default.info(
+      logger_default.info(
         `[PositionReconciler] Removing orphaned position: ${position.marketTitle} ${position.outcome}`
       );
       prediction_store_default.removePosition(position.marketId, position.outcome);
@@ -35441,7 +35408,7 @@ var PositionReconciler = class {
   }
   async handleCriticalDiscrepancy(discrepancies) {
     const critical = discrepancies.filter((d) => d.severity === "CRITICAL");
-    import_logger19.default.error(
+    logger_default.error(
       `[PositionReconciler] \u{1F6A8} CRITICAL DISCREPANCIES FOUND: ${critical.length}
 ` + critical.map(
         (d) => `  - ${d.position.marketTitle}: expected ${d.expectedShares.toFixed(4)}, actual ${d.actualShares.toFixed(4)}`
@@ -35453,7 +35420,7 @@ var PositionReconciler = class {
   // ========================================================================
   logReconciliation(result, totalLocalPositions) {
     const duration = Date.now() - result.timestamp;
-    import_logger19.default.info(
+    logger_default.info(
       `[PositionReconciler] Reconciliation complete in ${duration}ms:
   Local positions: ${totalLocalPositions}
   Discrepancies: ${result.discrepancies.length}
@@ -35463,7 +35430,7 @@ var PositionReconciler = class {
     );
     if (result.discrepancies.length > 0) {
       for (const d of result.discrepancies) {
-        import_logger19.default.warn(
+        logger_default.warn(
           `[PositionReconciler] ${d.severity} discrepancy: ${d.position.marketTitle} diff=${d.difference.toFixed(4)} shares`
         );
       }
@@ -35485,14 +35452,14 @@ var PositionReconciler = class {
    * Start automatic reconciliation loop
    */
   startAutoReconciliation() {
-    import_logger19.default.info(
+    logger_default.info(
       `[PositionReconciler] Auto-reconciliation started (interval: ${this.reconciliationInterval}ms)`
     );
     const run = async () => {
       try {
         await this.reconcile();
       } catch (error) {
-        import_logger19.default.error("[PositionReconciler] Auto-reconciliation error:", error);
+        logger_default.error("[PositionReconciler] Auto-reconciliation error:", error);
       }
       setTimeout(run, this.reconciliationInterval);
     };
@@ -35512,26 +35479,26 @@ var PositionReconciler = class {
    * Used when risk limits are hit or system shutdown
    */
   async emergencyCloseAll() {
-    import_logger19.default.error("[PositionReconciler] \u{1F6A8} EMERGENCY CLOSE ALL POSITIONS \u{1F6A8}");
+    logger_default.error("[PositionReconciler] \u{1F6A8} EMERGENCY CLOSE ALL POSITIONS \u{1F6A8}");
     const positions = prediction_store_default.getPositions();
     let closed = 0;
     let failed = 0;
     for (const position of positions) {
       try {
-        import_logger19.default.info(
+        logger_default.info(
           `[PositionReconciler] Emergency closing: ${position.marketTitle} ${position.outcome}`
         );
         prediction_store_default.removePosition(position.marketId, position.outcome);
         closed++;
       } catch (error) {
-        import_logger19.default.error(
+        logger_default.error(
           `[PositionReconciler] Failed to close position ${position.marketId}:`,
           error
         );
         failed++;
       }
     }
-    import_logger19.default.info(
+    logger_default.info(
       `[PositionReconciler] Emergency close complete: ${closed} closed, ${failed} failed`
     );
     return { closed, failed, positions };

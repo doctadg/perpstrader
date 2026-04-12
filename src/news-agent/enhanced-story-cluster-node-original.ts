@@ -6,16 +6,16 @@ import logger from '../shared/logger';
 import newsVectorStore from '../data/news-vector-store';
 import storyClusterStoreEnhanced from '../data/story-cluster-store-enhanced';
 import crypto from 'crypto';
-import glmService from '../../shared/glm-service';
-import llmService from '../../shared/llm-service';
-import { getTitleFingerprint, isNonMarketMoving } from '../../shared/title-cleaner';
-import { validateAndFormatTopic } from '../../shared/human-title-formatter';
-import { messageBus, Channel } from '../../shared/message-bus';
+import glmService from '../shared/glm-service';
+import llmService from '../shared/llm-service';
+import { getTitleFingerprint, isNonMarketMoving } from '../shared/title-cleaner';
+import { validateAndFormatTopic } from '../shared/human-title-formatter';
+import { messageBus, Channel } from '../shared/message-bus';
 import EntityExtractor, { ExtractedEntity } from './entity-extraction';
 import AnomalyDetector, { HeatAnomaly } from './anomaly-detector';
 import HeatPredictor, { HeatPrediction } from './heat-predictor';
-import { NewsItem } from '../../shared/types';
-import { ClusterHeatAnalysis, ClusterSimilarityResult, EntityHeat } from '../../shared/types-enhanced';
+import { NewsItem } from '../shared/types';
+import { ClusterHeatAnalysis, ClusterSimilarityResult, EntityHeat } from '../shared/types-enhanced';
 
 // Configuration
 const VECTOR_SIMILARITY_THRESHOLD = Number.parseFloat(process.env.NEWS_VECTOR_DISTANCE_THRESHOLD || '0.70');

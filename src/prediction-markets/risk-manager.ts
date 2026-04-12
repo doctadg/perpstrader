@@ -1,14 +1,14 @@
 // Comprehensive Risk Manager for Prediction Markets
 // Enforces daily loss limits, portfolio heat, correlation checks, and cooldowns
 
-import logger from '../../shared/logger';
+import logger from '../shared/logger';
 import predictionStore from '../data/prediction-store';
 import { 
   PredictionPosition, 
   PredictionTrade, 
   PredictionIdea,
   PredictionRiskAssessment 
-} from '../../shared/types';
+} from '../shared/types';
 
 // Risk Configuration
 interface RiskConfig {

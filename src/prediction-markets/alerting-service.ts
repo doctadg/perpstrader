@@ -2,8 +2,8 @@
 // Sends notifications via Telegram, Discord, or webhooks
 
 import axios from 'axios';
-import logger from '../../shared/logger';
-import { PredictionTrade, PredictionPosition, PredictionPortfolio } from '../../shared/types';
+import logger from '../shared/logger';
+import { PredictionTrade, PredictionPosition, PredictionPortfolio } from '../shared/types';
 
 interface AlertConfig {
   telegram?: {
